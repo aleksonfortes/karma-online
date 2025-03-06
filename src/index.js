@@ -45,83 +45,186 @@ class Game {
     }
 
     init() {
-        // Setup renderer
+        // Setup renderer with a background color matching the ocean
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
+        this.renderer.setClearColor(0x0066aa); // Match ocean color
         document.body.appendChild(this.renderer.domElement);
 
         // Setup camera for isometric view
         this.camera.position.set(0, 15, 15);
         this.camera.lookAt(0, 0, 0);
-        this.camera.rotation.x = -Math.PI / 4; // Angle camera down 45 degrees
+        this.camera.rotation.x = -Math.PI / 4;
 
         // Add ambient light
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         this.scene.add(ambientLight);
 
-        // Add directional light from above and slightly behind
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
-        directionalLight.position.set(0, 10, 5);
+        // Add directional light from above
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        directionalLight.position.set(5, 15, 8);
         directionalLight.castShadow = true;
         this.scene.add(directionalLight);
 
-        // Create ground
-        this.createGround();
+        // Add hemisphere light for better environment lighting
+        const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x0066aa, 0.6);
+        this.scene.add(hemisphereLight);
 
-        // Create environment
-        this.createEnvironment();
+        // Create terrain first (it should be above the ocean)
+        this.createTerrain();
+
+        // Create ocean border (it should be below the terrain)
+        this.createOcean();
     }
 
-    createGround() {
-        const groundGeometry = new THREE.PlaneGeometry(100, 100);
-        const groundMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0x3a7e3a,
+    createTerrain() {
+        // Terrain size (more like LoL)
+        const size = 120; // Increased arena size to match LoL proportions
+        const segments = 128;
+        
+        // Create plane geometry
+        const geometry = new THREE.PlaneGeometry(size, size, segments, segments);
+        
+        // Create terrain material with grass texture
+        const grassTexture = new THREE.TextureLoader().load('/textures/grass.jpg');
+        grassTexture.wrapS = THREE.RepeatWrapping;
+        grassTexture.wrapT = THREE.RepeatWrapping;
+        grassTexture.repeat.set(15, 15); // Adjusted for larger terrain
+        
+        const material = new THREE.MeshPhongMaterial({
+            map: grassTexture,
+            shininess: 0,
+            side: THREE.DoubleSide
+        });
+        
+        // Create terrain mesh
+        const terrain = new THREE.Mesh(geometry, material);
+        terrain.rotation.x = -Math.PI / 2;
+        terrain.position.y = 0;
+        terrain.receiveShadow = true;
+        this.scene.add(terrain);
+        
+        // Store terrain data for collision detection
+        this.terrain = {
+            geometry,
+            size,
+            segments
+        };
+    }
+
+    createOcean() {
+        // Ocean size (much larger than terrain to prevent black space)
+        const oceanSize = 1000;
+        const arenaRadius = this.terrain.size / 2;
+        
+        // Load water textures
+        const waterNormals = new THREE.TextureLoader().load('/textures/waternormals.jpg');
+        waterNormals.wrapS = waterNormals.wrapT = THREE.RepeatWrapping;
+        waterNormals.repeat.set(12, 12);
+        
+        // Create water materials
+        const waterMaterial = new THREE.MeshPhongMaterial({
+            color: 0x0066aa,
+            transparent: true,
+            opacity: 0.9,
             side: THREE.DoubleSide,
-            shininess: 0
+            normalMap: waterNormals,
+            normalScale: new THREE.Vector2(2.5, 2.5),
+            shininess: 100,
+            specular: 0x666666,
+            reflectivity: 1
         });
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.position.y = -1;
-        ground.receiveShadow = true;
-        this.scene.add(ground);
 
-        // Add grid helper for better depth perception
-        const gridHelper = new THREE.GridHelper(100, 100, 0x444444, 0x444444);
-        gridHelper.position.y = 0;
-        this.scene.add(gridHelper);
+        // Create main ocean (large plane underneath everything)
+        const mainOceanGeometry = new THREE.PlaneGeometry(oceanSize, oceanSize);
+        const mainOcean = new THREE.Mesh(mainOceanGeometry, waterMaterial);
+        mainOcean.rotation.x = -Math.PI / 2;
+        mainOcean.position.y = -2;
+        this.scene.add(mainOcean);
+
+        // Create transition ring around the arena
+        const transitionSegments = 64;
+        const transitionWidth = 20;
+        const innerRadius = arenaRadius;
+        const outerRadius = arenaRadius + transitionWidth;
+
+        const transitionGeometry = new THREE.RingGeometry(
+            innerRadius,
+            outerRadius,
+            transitionSegments * 2,
+            8
+        );
+        
+        const transitionMaterial = waterMaterial.clone();
+        transitionMaterial.opacity = 0.7;
+        
+        const transitionRing = new THREE.Mesh(transitionGeometry, transitionMaterial);
+        transitionRing.rotation.x = -Math.PI / 2;
+        transitionRing.position.y = -0.5;
+        this.scene.add(transitionRing);
+
+        // Create subtle waves using multiple rings
+        const waveCount = 8;
+        this.waveRings = [];
+        
+        for (let i = 0; i < waveCount; i++) {
+            const radius = innerRadius + (i * (transitionWidth / waveCount));
+            const waveGeometry = new THREE.RingGeometry(
+                radius,
+                radius + (transitionWidth / waveCount),
+                transitionSegments,
+                1
+            );
+            
+            const waveMaterial = waterMaterial.clone();
+            waveMaterial.opacity = 0.3 - (i * 0.03);
+            
+            const waveRing = new THREE.Mesh(waveGeometry, waveMaterial);
+            waveRing.rotation.x = -Math.PI / 2;
+            waveRing.position.y = -0.5 - (i * 0.2);
+            this.scene.add(waveRing);
+            
+            this.waveRings.push({
+                mesh: waveRing,
+                baseY: -0.5 - (i * 0.2),
+                phase: i * (Math.PI / waveCount)
+            });
+        }
+
+        // Store ocean data
+        this.ocean = {
+            mainMesh: mainOcean,
+            transitionRing: transitionRing,
+            material: waterMaterial,
+            size: this.terrain.size / 2
+        };
+
+        // Initialize animation properties
+        this.waterTime = 0;
+        this.waveSpeed = 0.3;
+        this.waveHeight = 0.15;
     }
 
-    createEnvironment() {
-        // Add some basic environment elements
-        const boxGeometry = new THREE.BoxGeometry(2, 2, 2);
-        const boxMaterial = new THREE.MeshPhongMaterial({ 
-            color: 0x808080,
-            shininess: 0 // Make boxes less shiny
-        });
+    noise(x, z) {
+        // Simple Perlin-like noise function
+        return (Math.sin(x * 2.3 + z * 1.7) * Math.sin(x * 1.5 - z * 2.1) * 
+                Math.cos(x * 0.8 + z * 1.3) * Math.cos(x * 1.2 - z * 0.9)) * 0.5 + 0.5;
+    }
+
+    checkCollision(position) {
+        // Check arena boundaries (using terrain size)
+        const arenaRadius = this.terrain.size / 2 - 2; // Slightly smaller than actual size to prevent edge cases
+        const distanceFromCenter = Math.sqrt(position.x * position.x + position.z * position.z);
         
-        // Use a fixed seed for consistent environment
-        const seed = 12345; // Fixed seed for consistent environment
-        const boxes = [
-            { x: -15, z: -15 },
-            { x: 15, z: -15 },
-            { x: -15, z: 15 },
-            { x: 15, z: 15 },
-            { x: 0, z: -10 },
-            { x: 0, z: 10 },
-            { x: -10, z: 0 },
-            { x: 10, z: 0 },
-            { x: -5, z: -5 },
-            { x: 5, z: 5 }
-        ];
+        if (distanceFromCenter > arenaRadius) {
+            // Player is outside the arena, push them back
+            const angle = Math.atan2(position.z, position.x);
+            position.x = Math.cos(angle) * arenaRadius;
+            position.z = Math.sin(angle) * arenaRadius;
+            return true;
+        }
         
-        // Add boxes in fixed positions
-        boxes.forEach(({ x, z }) => {
-            const box = new THREE.Mesh(boxGeometry, boxMaterial);
-            box.position.set(x, 0, z);
-            box.castShadow = true;
-            box.receiveShadow = true;
-            this.scene.add(box);
-        });
+        return false;
     }
 
     createPlayer(id, position = { x: 0, y: 0, z: 0 }, rotation = { y: 0 }) {
@@ -326,6 +429,9 @@ class Game {
         const rotationSpeed = 0.02;
         let hasMoved = false;
 
+        // Store previous position for collision resolution
+        const previousPosition = this.localPlayer.position.clone();
+
         if (this.controls.forward) {
             this.localPlayer.translateZ(speed);
             hasMoved = true;
@@ -348,6 +454,11 @@ class Game {
             hasMoved = true;
         } else if (this.localPlayer.position.y !== 0) {
             this.localPlayer.position.y = 0;
+            hasMoved = true;
+        }
+
+        // Check for collisions
+        if (this.checkCollision(this.localPlayer.position)) {
             hasMoved = true;
         }
 
@@ -387,6 +498,27 @@ class Game {
     animate() {
         if (!this.isRunning) return;
         requestAnimationFrame(() => this.animate());
+        
+        // Animate water
+        if (this.ocean && this.ocean.material) {
+            this.waterTime += 0.003;
+            
+            // Animate normal map for wave effect
+            if (this.ocean.material.normalMap) {
+                this.ocean.material.normalMap.offset.x = this.waterTime * 0.1;
+                this.ocean.material.normalMap.offset.y = this.waterTime * 0.1;
+            }
+            
+            // Animate wave rings
+            if (this.waveRings) {
+                this.waveRings.forEach((wave, index) => {
+                    const y = wave.baseY + Math.sin(this.waterTime * 2 + wave.phase) * 0.1;
+                    wave.mesh.position.y = y;
+                    wave.mesh.rotation.z = Math.sin(this.waterTime + index) * 0.02;
+                });
+            }
+        }
+        
         this.updatePlayer();
         this.updateCamera();
         this.renderer.render(this.scene, this.camera);
