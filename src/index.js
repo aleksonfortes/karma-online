@@ -211,16 +211,18 @@ class Game {
                 Math.cos(x * 0.8 + z * 1.3) * Math.cos(x * 1.2 - z * 0.9)) * 0.5 + 0.5;
     }
 
-    checkCollision(position) {
-        // Check arena boundaries (using terrain size)
-        const arenaRadius = this.terrain.size / 2 - 2; // Slightly smaller than actual size to prevent edge cases
-        const distanceFromCenter = Math.sqrt(position.x * position.x + position.z * position.z);
+    checkCollision(position, previousPosition) {
+        // Get the terrain size and add a small buffer zone
+        const terrainSize = this.terrain.size;
+        const halfTerrainSize = (terrainSize / 2) - 1; // Buffer of 1 unit from the edge
         
-        if (distanceFromCenter > arenaRadius) {
-            // Player is outside the arena, push them back
-            const angle = Math.atan2(position.z, position.x);
-            position.x = Math.cos(angle) * arenaRadius;
-            position.z = Math.sin(angle) * arenaRadius;
+        // Check if player is trying to go beyond the grass terrain
+        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
+            // Reset to previous safe position instead of clamping
+            if (previousPosition) {
+                position.x = previousPosition.x;
+                position.z = previousPosition.z;
+            }
             return true;
         }
         
@@ -449,26 +451,31 @@ class Game {
                 moveX = (moveX / magnitude) * speed;
                 moveZ = (moveZ / magnitude) * speed;
                 
-                // Apply movement
-                this.localPlayer.position.x += moveX;
-                this.localPlayer.position.z += moveZ;
-                hasMoved = true;
+                // Create a temporary position to check collision
+                const nextPosition = this.localPlayer.position.clone();
+                nextPosition.x += moveX;
+                nextPosition.z += moveZ;
 
-                // Update rotation to face movement direction
-                if (moveX !== 0 || moveZ !== 0) {
-                    const targetRotation = Math.atan2(moveX, -moveZ); // Negative Z for correct rotation
-                    // Smoothly rotate to face movement direction
-                    let currentRotation = this.localPlayer.rotation.y;
-                    const rotationDiff = targetRotation - currentRotation;
-                    
-                    // Normalize rotation difference to [-π, π]
-                    let normalizedDiff = rotationDiff;
-                    while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
-                    while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
-                    
-                    // Apply smooth rotation
-                    this.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
-                        Math.min(Math.abs(normalizedDiff), rotationSpeed);
+                // Only move if the next position is valid
+                if (!this.checkCollision(nextPosition, previousPosition)) {
+                    this.localPlayer.position.copy(nextPosition);
+                    hasMoved = true;
+
+                    // Update rotation to face movement direction
+                    if (moveX !== 0 || moveZ !== 0) {
+                        const targetRotation = Math.atan2(moveX, -moveZ);
+                        let currentRotation = this.localPlayer.rotation.y;
+                        const rotationDiff = targetRotation - currentRotation;
+                        
+                        // Normalize rotation difference to [-π, π]
+                        let normalizedDiff = rotationDiff;
+                        while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
+                        while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
+                        
+                        // Apply smooth rotation
+                        this.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
+                            Math.min(Math.abs(normalizedDiff), rotationSpeed);
+                    }
                 }
             }
         }
@@ -480,11 +487,6 @@ class Game {
             hasMoved = true;
         } else if (this.localPlayer.position.y !== 0) {
             this.localPlayer.position.y = 0;
-            hasMoved = true;
-        }
-
-        // Check for collisions
-        if (this.checkCollision(this.localPlayer.position)) {
             hasMoved = true;
         }
 
