@@ -48,13 +48,16 @@ class Game {
         // Setup renderer with a background color matching the ocean
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
-        this.renderer.setClearColor(0x0066aa); // Match ocean color
+        this.renderer.setClearColor(0x004488); // Match the ocean color exactly
         document.body.appendChild(this.renderer.domElement);
 
         // Setup camera for isometric view
         this.camera.position.set(0, 15, 15);
         this.camera.lookAt(0, 0, 0);
         this.camera.rotation.x = -Math.PI / 4;
+
+        // Add fog to blend with the background
+        this.scene.fog = new THREE.Fog(0x004488, 150, 400);
 
         // Add ambient light
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -79,7 +82,7 @@ class Game {
 
     createTerrain() {
         // Terrain size (more like LoL)
-        const size = 120; // Increased arena size to match LoL proportions
+        const size = 200; // Increased from 120 to 200 for a larger arena
         const segments = 128;
         
         // Create plane geometry
@@ -89,7 +92,7 @@ class Game {
         const grassTexture = new THREE.TextureLoader().load('/textures/grass.jpg');
         grassTexture.wrapS = THREE.RepeatWrapping;
         grassTexture.wrapT = THREE.RepeatWrapping;
-        grassTexture.repeat.set(15, 15); // Adjusted for larger terrain
+        grassTexture.repeat.set(25, 25); // Increased texture repeat to match larger size
         
         const material = new THREE.MeshPhongMaterial({
             map: grassTexture,
@@ -114,95 +117,86 @@ class Game {
 
     createOcean() {
         // Ocean size (much larger than terrain to prevent black space)
-        const oceanSize = 1000;
+        const oceanSize = 4000;
         const arenaRadius = this.terrain.size / 2;
         
-        // Load water textures
+        // Load water textures with improved settings
         const waterNormals = new THREE.TextureLoader().load('/textures/waternormals.jpg');
         waterNormals.wrapS = waterNormals.wrapT = THREE.RepeatWrapping;
-        waterNormals.repeat.set(12, 12);
+        waterNormals.repeat.set(8, 8); // Reduced repeat for less obvious tiling
         
-        // Create water materials
+        // Create water materials with improved settings
         const waterMaterial = new THREE.MeshPhongMaterial({
-            color: 0x0066aa,
+            color: 0x004488,
             transparent: true,
-            opacity: 0.9,
+            opacity: 0.85,
             side: THREE.DoubleSide,
             normalMap: waterNormals,
-            normalScale: new THREE.Vector2(2.5, 2.5),
-            shininess: 100,
-            specular: 0x666666,
-            reflectivity: 1
+            normalScale: new THREE.Vector2(1.5, 1.5), // Reduced normal intensity
+            shininess: 80,
+            specular: 0x444444,
+            reflectivity: 0.8
         });
 
         // Create main ocean (large plane underneath everything)
-        const mainOceanGeometry = new THREE.PlaneGeometry(oceanSize, oceanSize);
+        const mainOceanGeometry = new THREE.PlaneGeometry(oceanSize, oceanSize, 50, 50); // Added segments for wave deformation
         const mainOcean = new THREE.Mesh(mainOceanGeometry, waterMaterial);
         mainOcean.rotation.x = -Math.PI / 2;
-        mainOcean.position.y = -2;
+        mainOcean.position.y = -2.5;
         this.scene.add(mainOcean);
 
-        // Create transition ring around the arena
-        const transitionSegments = 64;
-        const transitionWidth = 20;
-        const innerRadius = arenaRadius;
-        const outerRadius = arenaRadius + transitionWidth;
+        // Create gradient transition rings
+        const transitionSegments = 128;
+        const transitionWidth = 40;
+        const ringCount = 20;
+        const startOpacity = 0.9;
+        const startY = -0.5;
 
-        const transitionGeometry = new THREE.RingGeometry(
-            innerRadius,
-            outerRadius,
-            transitionSegments * 2,
-            8
-        );
-        
-        const transitionMaterial = waterMaterial.clone();
-        transitionMaterial.opacity = 0.7;
-        
-        const transitionRing = new THREE.Mesh(transitionGeometry, transitionMaterial);
-        transitionRing.rotation.x = -Math.PI / 2;
-        transitionRing.position.y = -0.5;
-        this.scene.add(transitionRing);
-
-        // Create subtle waves using multiple rings
-        const waveCount = 8;
         this.waveRings = [];
         
-        for (let i = 0; i < waveCount; i++) {
-            const radius = innerRadius + (i * (transitionWidth / waveCount));
-            const waveGeometry = new THREE.RingGeometry(
+        // Create transition rings from grass to water
+        for (let i = 0; i < ringCount; i++) {
+            const t = i / (ringCount - 1);
+            const radius = arenaRadius + (t * transitionWidth);
+            
+            const ringGeometry = new THREE.RingGeometry(
                 radius,
-                radius + (transitionWidth / waveCount),
+                radius + (transitionWidth / ringCount),
                 transitionSegments,
                 1
             );
             
-            const waveMaterial = waterMaterial.clone();
-            waveMaterial.opacity = 0.3 - (i * 0.03);
+            const ringMaterial = waterMaterial.clone();
+            // More gradual opacity transition
+            ringMaterial.opacity = startOpacity * Math.pow(1 - t, 2);
             
-            const waveRing = new THREE.Mesh(waveGeometry, waveMaterial);
-            waveRing.rotation.x = -Math.PI / 2;
-            waveRing.position.y = -0.5 - (i * 0.2);
-            this.scene.add(waveRing);
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.rotation.x = -Math.PI / 2;
+            
+            const yOffset = -t * 2;
+            ring.position.y = startY + yOffset;
+            
+            this.scene.add(ring);
             
             this.waveRings.push({
-                mesh: waveRing,
-                baseY: -0.5 - (i * 0.2),
-                phase: i * (Math.PI / waveCount)
+                mesh: ring,
+                baseY: startY + yOffset,
+                phase: i * (Math.PI * 2 / ringCount), // Better phase distribution
+                amplitude: 0.05 * (1 - t) // Reduced wave amplitude
             });
         }
 
         // Store ocean data
         this.ocean = {
             mainMesh: mainOcean,
-            transitionRing: transitionRing,
             material: waterMaterial,
             size: this.terrain.size / 2
         };
 
         // Initialize animation properties
         this.waterTime = 0;
-        this.waveSpeed = 0.3;
-        this.waveHeight = 0.15;
+        this.waveSpeed = 0.1; // Slower wave movement
+        this.waveHeight = 0.1;
     }
 
     noise(x, z) {
@@ -527,22 +521,30 @@ class Game {
         if (!this.isRunning) return;
         requestAnimationFrame(() => this.animate());
         
-        // Animate water
+        // Animate water with improved wave patterns
         if (this.ocean && this.ocean.material) {
-            this.waterTime += 0.003;
+            this.waterTime += 0.001; // Even slower water animation
             
-            // Animate normal map for wave effect
+            // Animate normal map for wave effect with more subtle movement
             if (this.ocean.material.normalMap) {
-                this.ocean.material.normalMap.offset.x = this.waterTime * 0.1;
-                this.ocean.material.normalMap.offset.y = this.waterTime * 0.1;
+                const timeX = Math.sin(this.waterTime * 0.5) * 0.2;
+                const timeY = Math.cos(this.waterTime * 0.3) * 0.2;
+                this.ocean.material.normalMap.offset.x = timeX;
+                this.ocean.material.normalMap.offset.y = timeY;
             }
             
-            // Animate wave rings
+            // Animate wave rings with more natural movement
             if (this.waveRings) {
                 this.waveRings.forEach((wave, index) => {
-                    const y = wave.baseY + Math.sin(this.waterTime * 2 + wave.phase) * 0.1;
+                    const waveTime = this.waterTime * 1.2 + wave.phase;
+                    const y = wave.baseY + 
+                        Math.sin(waveTime) * wave.amplitude * 0.7 +
+                        Math.sin(waveTime * 1.3) * wave.amplitude * 0.3;
                     wave.mesh.position.y = y;
-                    wave.mesh.rotation.z = Math.sin(this.waterTime + index) * 0.02;
+                    
+                    // Subtle rotation animation
+                    const rotationAmount = Math.sin(this.waterTime * 0.8 + index * 0.2) * 0.005;
+                    wave.mesh.rotation.z = rotationAmount;
                 });
             }
         }
