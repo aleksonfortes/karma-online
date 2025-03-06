@@ -60,9 +60,9 @@ io.on('connection', (socket) => {
         const player = {
             id: socket.id,
             position: {
-                x: Math.random() * 20 - 10,  // Random position between -10 and 10
+                x: Math.random() * 80 - 40,  // Random position between -40 and 40 (inside grass arena)
                 y: 0,
-                z: Math.random() * 20 - 10
+                z: Math.random() * 80 - 40   // Random position between -40 and 40 (inside grass arena)
             },
             rotation: {
                 y: 0
