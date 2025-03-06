@@ -593,7 +593,7 @@ class Game {
     }
 
     createUI() {
-        // Create UI container
+        // Create UI container for XP ring
         const uiContainer = document.createElement('div');
         uiContainer.style.position = 'fixed';
         uiContainer.style.bottom = '20px';
@@ -603,7 +603,56 @@ class Game {
         uiContainer.style.gap = '10px';
         uiContainer.style.zIndex = '1000';
 
-        // Create circular icon with XP ring
+        // Create and add the skill bar container with Life and Mana rings
+        const skillBarWrapper = document.createElement('div');
+        skillBarWrapper.style.position = 'fixed';
+        skillBarWrapper.style.bottom = '20px';
+        skillBarWrapper.style.left = '50%';
+        skillBarWrapper.style.transform = 'translateX(-50%)';
+        skillBarWrapper.style.display = 'flex';
+        skillBarWrapper.style.flexDirection = 'column';
+        skillBarWrapper.style.alignItems = 'center';
+        skillBarWrapper.style.gap = '2px';  // Reduced from 5px to make elements almost touching
+        document.body.appendChild(skillBarWrapper);
+
+        // Create Karma bar container
+        const karmaContainer = document.createElement('div');
+        karmaContainer.style.width = '300px'; // Match skills bar width
+        const karmaBar = this.createModernStatusBar('Karma', '#ffcc00', '#665200');
+        this.karmaBarFill = karmaBar.querySelector('.fill');
+        this.karmaText = karmaBar.querySelector('.text');
+        this.karmaTooltip = karmaBar.querySelector('.tooltip');
+        karmaContainer.appendChild(karmaBar);
+
+        // Create container for Life ring, skills, and Mana ring
+        const gameplayContainer = document.createElement('div');
+        gameplayContainer.style.display = 'flex';
+        gameplayContainer.style.alignItems = 'center';
+        gameplayContainer.style.gap = '30px';  // Increased from 20px for better spacing with larger rings
+
+        // Create Life ring
+        const lifeRing = this.createStatRing('#ff3333', '#660000', 'Life');
+        this.lifeRingFill = lifeRing.querySelector('.fill');
+        this.lifeTooltip = lifeRing.querySelector('.tooltip');
+
+        // Create Mana ring
+        const manaRing = this.createStatRing('#3333ff', '#000066', 'Mana');
+        this.manaRingFill = manaRing.querySelector('.fill');
+        this.manaTooltip = manaRing.querySelector('.tooltip');
+
+        // Create skill bar
+        const skillBarContainer = this.createSkillBar();
+
+        // Assemble the gameplay container
+        gameplayContainer.appendChild(lifeRing);
+        gameplayContainer.appendChild(skillBarContainer);
+        gameplayContainer.appendChild(manaRing);
+
+        // Add to skill bar wrapper
+        skillBarWrapper.appendChild(karmaContainer);
+        skillBarWrapper.appendChild(gameplayContainer);
+
+        // Create circular icon with XP ring (keep existing code)
         const iconContainer = document.createElement('div');
         iconContainer.style.width = '96px';  // Increased from 80px
         iconContainer.style.height = '96px';  // Increased from 80px
@@ -689,16 +738,16 @@ class Game {
         xpTooltip.style.bottom = '120%';
         xpTooltip.style.left = '50%';
         xpTooltip.style.transform = 'translateX(-50%)';
-        xpTooltip.style.backgroundColor = 'rgba(20, 20, 20, 0.95)';
-        xpTooltip.style.color = '#20D9C7';
+        xpTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+        xpTooltip.style.color = '#ffffff';
         xpTooltip.style.padding = '8px 12px';
         xpTooltip.style.borderRadius = '6px';
         xpTooltip.style.fontSize = '12px';
         xpTooltip.style.fontWeight = '500';
         xpTooltip.style.whiteSpace = 'nowrap';
         xpTooltip.style.display = 'none';
-        xpTooltip.style.border = '1px solid rgba(32, 217, 199, 0.2)';
-        xpTooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3), 0 0 10px rgba(32, 217, 199, 0.1)';
+        xpTooltip.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        xpTooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
         xpTooltip.style.backdropFilter = 'blur(4px)';
         this.xpTooltip = xpTooltip;
 
@@ -714,54 +763,65 @@ class Game {
         iconContainer.addEventListener('mouseenter', () => {
             this.updateXPTooltip();
             xpTooltip.style.display = 'block';
-            iconContainer.style.transform = 'scale(1.02)';
-            iconContainer.style.transition = 'transform 0.2s ease';
         });
         
         iconContainer.addEventListener('mouseleave', () => {
             xpTooltip.style.display = 'none';
-            iconContainer.style.transform = 'scale(1)';
         });
 
-        // Create bars container with adjusted positioning
-        const barsContainer = document.createElement('div');
-        barsContainer.style.display = 'flex';
-        barsContainer.style.flexDirection = 'column';
-        barsContainer.style.gap = '4px';  // Increased from 3px
-        barsContainer.style.width = '150px';
-        barsContainer.style.alignSelf = 'center';
-
-        // Create status bars with new style
-        const lifeBar = this.createModernStatusBar('Life', '#ff3333', '#660000');
-        this.lifeBarFill = lifeBar.querySelector('.fill');
-        this.lifeText = lifeBar.querySelector('.text');
-
-        const manaBar = this.createModernStatusBar('Mana', '#3333ff', '#000066');
-        this.manaBarFill = manaBar.querySelector('.fill');
-        this.manaText = manaBar.querySelector('.text');
-
-        const karmaBar = this.createModernStatusBar('Karma', '#ffcc00', '#665200');
-        this.karmaBarFill = karmaBar.querySelector('.fill');
-        this.karmaText = karmaBar.querySelector('.text');
-
-        // Add elements to containers
-        barsContainer.appendChild(lifeBar);
-        barsContainer.appendChild(manaBar);
-        barsContainer.appendChild(karmaBar);
-
         uiContainer.appendChild(iconContainer);
-        uiContainer.appendChild(barsContainer);
 
         // Add to document
         document.body.appendChild(uiContainer);
         this.updateStatusBars();
     }
 
+    createSkillBar() {
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.gap = '4px';
+        container.style.padding = '4px';
+        container.style.background = 'linear-gradient(to bottom, #2a2a2a, #1a1a1a)';
+        container.style.border = '2px solid #3a3a3a';
+        container.style.borderRadius = '6px';
+        container.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
+        container.style.zIndex = '1000';
+
+        // Create 5 skill slots
+        for (let i = 1; i <= 5; i++) {
+            const slot = document.createElement('div');
+            slot.style.width = '50px';
+            slot.style.height = '50px';
+            slot.style.background = 'linear-gradient(135deg, #252525 0%, #1a1a1a 100%)';
+            slot.style.border = '1px solid #333';
+            slot.style.borderRadius = '4px';
+            slot.style.position = 'relative';
+            slot.style.boxShadow = 'inset 0 0 10px rgba(0, 0, 0, 0.5)';
+
+            // Add key number
+            const keyNumber = document.createElement('div');
+            keyNumber.textContent = i;
+            keyNumber.style.position = 'absolute';
+            keyNumber.style.bottom = '2px';
+            keyNumber.style.right = '2px';
+            keyNumber.style.color = '#666';
+            keyNumber.style.fontSize = '12px';
+            keyNumber.style.fontWeight = 'bold';
+            keyNumber.style.textShadow = '1px 1px 1px rgba(0, 0, 0, 0.5)';
+            keyNumber.style.userSelect = 'none';
+
+            slot.appendChild(keyNumber);
+            container.appendChild(slot);
+        }
+
+        return container;
+    }
+
     createModernStatusBar(label, color, shadowColor) {
         const container = document.createElement('div');
         container.style.width = '100%';
         container.style.position = 'relative';
-        container.style.height = '26px';  // Increased from 22px
+        container.style.height = '26px';
 
         // Bar background
         const barContainer = document.createElement('div');
@@ -771,9 +831,29 @@ class Game {
         barContainer.style.top = '0';
         barContainer.style.bottom = '0';
         barContainer.style.background = 'linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0.4))';
-        barContainer.style.borderRadius = '5px';  // Increased from 4px
+        barContainer.style.borderRadius = '5px';
         barContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
         barContainer.style.overflow = 'hidden';
+
+        // Create tooltip
+        const tooltip = document.createElement('div');
+        tooltip.className = 'tooltip';
+        tooltip.style.position = 'absolute';
+        tooltip.style.bottom = '120%';
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translateX(-50%)';
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+        tooltip.style.color = '#ffffff';
+        tooltip.style.padding = '8px 12px';
+        tooltip.style.borderRadius = '6px';
+        tooltip.style.fontSize = '12px';
+        tooltip.style.fontWeight = '500';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.display = 'none';
+        tooltip.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+        tooltip.style.backdropFilter = 'blur(4px)';
+        tooltip.style.zIndex = '1000';
 
         // Fill bar with gradient and glow
         const fill = document.createElement('div');
@@ -781,7 +861,7 @@ class Game {
         fill.style.width = '100%';
         fill.style.height = '100%';
         fill.style.background = `linear-gradient(to bottom, ${color}, ${shadowColor})`;
-        fill.style.boxShadow = `0 0 10px ${color}, inset 0 0 5px rgba(255,255,255,0.5)`;  // Increased glow
+        fill.style.boxShadow = `0 0 10px ${color}, inset 0 0 5px rgba(255,255,255,0.5)`;
         fill.style.transition = 'width 0.3s ease';
 
         // Text container
@@ -791,50 +871,55 @@ class Game {
         textContainer.style.right = '0';
         textContainer.style.top = '0';
         textContainer.style.bottom = '0';
-        textContainer.style.padding = '0 10px';  // Increased from 8px
+        textContainer.style.padding = '0 10px';
         textContainer.style.display = 'flex';
         textContainer.style.alignItems = 'center';
-        textContainer.style.justifyContent = 'space-between';
+        textContainer.style.justifyContent = 'center';
         textContainer.style.color = 'white';
         textContainer.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
-        textContainer.style.fontSize = '12px';  // Increased from 11px
+        textContainer.style.fontSize = '12px';
         textContainer.style.fontWeight = 'bold';
 
         // Label
         const labelElement = document.createElement('span');
         labelElement.textContent = label;
 
-        // Value text
-        const text = document.createElement('span');
-        text.className = 'text';
-
         textContainer.appendChild(labelElement);
-        textContainer.appendChild(text);
         barContainer.appendChild(fill);
         container.appendChild(barContainer);
         container.appendChild(textContainer);
+        container.appendChild(tooltip);
+
+        // Add hover effects for tooltip
+        container.addEventListener('mouseenter', () => {
+            tooltip.style.display = 'block';
+        });
+        
+        container.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
 
         return container;
     }
 
     updateStatusBars() {
-        // Update life bar with glow intensity based on percentage
+        // Update life ring
         const lifePercent = (this.playerStats.currentLife / this.playerStats.maxLife) * 100;
-        this.lifeBarFill.style.width = `${lifePercent}%`;
-        this.lifeText.textContent = `${Math.round(this.playerStats.currentLife)} / ${this.playerStats.maxLife}`;
-        this.lifeBarFill.style.boxShadow = `0 0 ${10 + (lifePercent/10)}px #ff3333`;
+        this.lifeRingFill.style.height = `${lifePercent}%`;
+        this.lifeTooltip.textContent = `Life: ${Math.round(this.playerStats.currentLife)} / ${this.playerStats.maxLife}`;
 
-        // Update mana bar with glow intensity based on percentage
+        // Update mana ring
         const manaPercent = (this.playerStats.currentMana / this.playerStats.maxMana) * 100;
-        this.manaBarFill.style.width = `${manaPercent}%`;
-        this.manaText.textContent = `${Math.round(this.playerStats.currentMana)} / ${this.playerStats.maxMana}`;
-        this.manaBarFill.style.boxShadow = `0 0 ${10 + (manaPercent/10)}px #3333ff`;
+        this.manaRingFill.style.height = `${manaPercent}%`;
+        this.manaTooltip.textContent = `Mana: ${Math.round(this.playerStats.currentMana)} / ${this.playerStats.maxMana}`;
 
-        // Update karma bar with glow intensity based on percentage
+        // Update karma bar
         const karmaPercent = (this.playerStats.currentKarma / this.playerStats.maxKarma) * 100;
         this.karmaBarFill.style.width = `${karmaPercent}%`;
-        this.karmaText.textContent = `${Math.round(this.playerStats.currentKarma)} / ${this.playerStats.maxKarma}`;
         this.karmaBarFill.style.boxShadow = `0 0 ${10 + (karmaPercent/10)}px #ffcc00`;
+        if (this.karmaTooltip) {
+            this.karmaTooltip.textContent = `Karma: ${Math.round(this.playerStats.currentKarma)} / ${this.playerStats.maxKarma}`;
+        }
     }
 
     // Add damage and healing methods
@@ -933,6 +1018,71 @@ class Game {
         if (this.xpTooltip.style.display === 'block') {
             this.updateXPTooltip();
         }
+    }
+
+    createStatRing(color, shadowColor, statName) {
+        const ringContainer = document.createElement('div');
+        ringContainer.style.width = '96px';  // Increased from 60px to match XP ring
+        ringContainer.style.height = '96px';  // Increased from 60px to match XP ring
+        ringContainer.style.position = 'relative';
+        ringContainer.style.borderRadius = '50%';
+        ringContainer.style.background = 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)';
+        ringContainer.style.border = '2px solid rgba(255, 255, 255, 0.15)';
+        ringContainer.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+
+        // Create fill element
+        const fill = document.createElement('div');
+        fill.className = 'fill';
+        fill.style.position = 'absolute';
+        fill.style.bottom = '0';
+        fill.style.left = '0';
+        fill.style.width = '100%';
+        fill.style.height = '100%';
+        fill.style.background = color;
+        fill.style.transition = 'height 0.3s ease-out';
+        fill.style.borderRadius = '50%';
+        fill.style.opacity = '0.8';
+
+        // Create ring container with mask
+        const maskContainer = document.createElement('div');
+        maskContainer.style.position = 'absolute';
+        maskContainer.style.inset = '2px';
+        maskContainer.style.borderRadius = '50%';
+        maskContainer.style.overflow = 'hidden';
+        maskContainer.appendChild(fill);
+
+        // Create tooltip
+        const tooltip = document.createElement('div');
+        tooltip.className = 'tooltip';
+        tooltip.style.position = 'absolute';
+        tooltip.style.bottom = '120%';
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translateX(-50%)';
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+        tooltip.style.color = '#ffffff';
+        tooltip.style.padding = '8px 12px';
+        tooltip.style.borderRadius = '6px';
+        tooltip.style.fontSize = '12px';
+        tooltip.style.fontWeight = '500';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.display = 'none';
+        tooltip.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        tooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+        tooltip.style.backdropFilter = 'blur(4px)';
+        tooltip.style.zIndex = '1000';
+
+        // Add hover effects
+        ringContainer.addEventListener('mouseenter', () => {
+            tooltip.style.display = 'block';
+        });
+        
+        ringContainer.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+
+        ringContainer.appendChild(maskContainer);
+        ringContainer.appendChild(tooltip);
+        return ringContainer;
     }
 }
 
