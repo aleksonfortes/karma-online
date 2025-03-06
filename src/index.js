@@ -38,6 +38,22 @@ class Game {
         this.cameraAngle = Math.PI / 4; // 45-degree angle
         this.cameraSmoothness = 0.1; // Lower = smoother camera movement
         
+        // Add player stats
+        this.playerStats = {
+            maxLife: 100,
+            currentLife: 100,
+            maxMana: 100,
+            currentMana: 100,
+            maxKarma: 100,
+            currentKarma: 50,
+            lifeRegen: 0.1,
+            manaRegen: 0.2,
+            level: 1,
+            experience: 0,
+            experienceToNextLevel: 100
+        };
+
+        this.createUI();
         this.init();
         this.setupEventListeners();
         this.setupMultiplayer();
@@ -364,6 +380,8 @@ class Game {
         this.localPlayer = null;
         // Stop the animation loop
         this.isRunning = false;
+        const uiElements = document.querySelectorAll('div[style*="position: fixed"]');
+        uiElements.forEach(element => element.remove());
     }
 
     updatePlayerPosition(player) {
@@ -549,9 +567,390 @@ class Game {
             }
         }
         
+        // Update player stats
+        if (this.playerStats.currentLife < this.playerStats.maxLife) {
+            this.playerStats.currentLife = Math.min(
+                this.playerStats.maxLife,
+                this.playerStats.currentLife + this.playerStats.lifeRegen
+            );
+        }
+        if (this.playerStats.currentMana < this.playerStats.maxMana) {
+            this.playerStats.currentMana = Math.min(
+                this.playerStats.maxMana,
+                this.playerStats.currentMana + this.playerStats.manaRegen
+            );
+        }
+        this.updateStatusBars();
+        
+        // Add small amount of XP over time (for testing)
+        if (Math.random() < 0.01) { // 1% chance each frame
+            this.gainExperience(1);
+        }
+        
         this.updatePlayer();
         this.updateCamera();
         this.renderer.render(this.scene, this.camera);
+    }
+
+    createUI() {
+        // Create UI container
+        const uiContainer = document.createElement('div');
+        uiContainer.style.position = 'fixed';
+        uiContainer.style.bottom = '20px';
+        uiContainer.style.left = '20px';
+        uiContainer.style.display = 'flex';
+        uiContainer.style.alignItems = 'center';
+        uiContainer.style.gap = '10px';
+        uiContainer.style.zIndex = '1000';
+
+        // Create circular icon with XP ring
+        const iconContainer = document.createElement('div');
+        iconContainer.style.width = '64px';
+        iconContainer.style.height = '64px';
+        iconContainer.style.position = 'relative';
+        iconContainer.style.borderRadius = '50%';
+        iconContainer.style.background = 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)';
+        iconContainer.style.border = '2px solid rgba(147, 255, 223, 0.15)';
+        iconContainer.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+
+        // Create XP fill element with gradient and masking
+        const xpFill = document.createElement('div');
+        xpFill.style.position = 'absolute';
+        xpFill.style.bottom = '0';
+        xpFill.style.left = '0';
+        xpFill.style.right = '0';
+        xpFill.style.width = '100%';
+        xpFill.style.height = '0%';
+        xpFill.style.background = '#FFFFFF';
+        xpFill.style.transition = 'height 0.3s ease-out';
+        xpFill.style.transformOrigin = 'bottom';
+        xpFill.style.zIndex = '0';  // Ensure it's behind the level display
+        this.xpFill = xpFill;
+
+        // Create XP ring container with mask
+        const xpRingContainer = document.createElement('div');
+        xpRingContainer.style.position = 'absolute';
+        xpRingContainer.style.top = '2px';  // Add small margin
+        xpRingContainer.style.left = '2px';  // Add small margin
+        xpRingContainer.style.right = '2px';  // Add small margin
+        xpRingContainer.style.bottom = '2px';  // Add small margin
+        xpRingContainer.style.borderRadius = '50%';
+        xpRingContainer.style.background = '#000000';
+        xpRingContainer.style.overflow = 'hidden';
+        xpRingContainer.style.transform = 'rotate(0deg)';
+        this.xpRing = xpRingContainer;
+
+        // Remove inner glow effect as it's not needed for black/white design
+        const innerGlow = document.createElement('div');
+        innerGlow.style.position = 'absolute';
+        innerGlow.style.top = '0';
+        innerGlow.style.left = '0';
+        innerGlow.style.width = '100%';
+        innerGlow.style.height = '100%';
+        innerGlow.style.borderRadius = '50%';
+        innerGlow.style.pointerEvents = 'none';
+        innerGlow.style.transform = 'rotate(0deg)';
+
+        // Create level display container with improved background
+        const levelContainer = document.createElement('div');
+        levelContainer.style.position = 'absolute';
+        levelContainer.style.top = '0';
+        levelContainer.style.left = '0';
+        levelContainer.style.width = '100%';
+        levelContainer.style.height = '100%';
+        levelContainer.style.display = 'flex';
+        levelContainer.style.alignItems = 'center';
+        levelContainer.style.justifyContent = 'center';
+        levelContainer.style.background = 'radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 30%, rgba(0, 0, 0, 0.85) 100%)';
+        levelContainer.style.transform = 'rotate(0deg)';
+        levelContainer.style.backdropFilter = 'blur(2px)';
+        levelContainer.style.borderRadius = '50%';
+        levelContainer.style.zIndex = '1';
+
+        // Add player level with improved styling
+        const levelText = document.createElement('div');
+        levelText.textContent = this.playerStats.level;
+        levelText.style.color = '#FFD700';  // Golden color
+        levelText.style.fontSize = '24px';
+        levelText.style.fontWeight = 'bold';
+        levelText.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.7)';  // Golden glow
+        levelText.style.transform = 'translateY(-1px)';
+        levelText.style.letterSpacing = '0.5px';
+        levelText.style.userSelect = 'none';
+        this.levelText = levelText;
+
+        // Add pulsing animation for the level text
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes levelPulse {
+                0% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+                50% { text-shadow: 0 0 15px rgba(255, 215, 0, 0.7); }
+                100% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+            }
+        `;
+        document.head.appendChild(style);
+        levelText.style.animation = 'levelPulse 2s ease-in-out infinite';
+
+        // Add shine effect overlay
+        const shineEffect = document.createElement('div');
+        shineEffect.style.position = 'absolute';
+        shineEffect.style.top = '0';
+        shineEffect.style.left = '0';
+        shineEffect.style.width = '100%';
+        shineEffect.style.height = '100%';
+        shineEffect.style.borderRadius = '50%';
+        shineEffect.style.background = 'linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 50%)';
+        shineEffect.style.pointerEvents = 'none';
+
+        // Update XP tooltip style with modern design
+        const xpTooltip = document.createElement('div');
+        xpTooltip.style.position = 'absolute';
+        xpTooltip.style.bottom = '120%';
+        xpTooltip.style.left = '50%';
+        xpTooltip.style.transform = 'translateX(-50%)';
+        xpTooltip.style.backgroundColor = 'rgba(20, 20, 20, 0.95)';
+        xpTooltip.style.color = '#20D9C7';
+        xpTooltip.style.padding = '8px 12px';
+        xpTooltip.style.borderRadius = '6px';
+        xpTooltip.style.fontSize = '12px';
+        xpTooltip.style.fontWeight = '500';
+        xpTooltip.style.whiteSpace = 'nowrap';
+        xpTooltip.style.display = 'none';
+        xpTooltip.style.border = '1px solid rgba(32, 217, 199, 0.2)';
+        xpTooltip.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3), 0 0 10px rgba(32, 217, 199, 0.1)';
+        xpTooltip.style.backdropFilter = 'blur(4px)';
+        this.xpTooltip = xpTooltip;
+
+        // Assemble the icon with all effects
+        xpRingContainer.appendChild(xpFill);
+        xpRingContainer.appendChild(innerGlow);
+        levelContainer.appendChild(levelText);
+        iconContainer.appendChild(xpRingContainer);
+        iconContainer.appendChild(levelContainer);
+        iconContainer.appendChild(shineEffect);
+        iconContainer.appendChild(xpTooltip);
+
+        // Add hover effects
+        iconContainer.addEventListener('mouseenter', () => {
+            this.updateXPTooltip();
+            xpTooltip.style.display = 'block';
+            iconContainer.style.transform = 'scale(1.02)';
+            iconContainer.style.transition = 'transform 0.2s ease';
+        });
+        
+        iconContainer.addEventListener('mouseleave', () => {
+            xpTooltip.style.display = 'none';
+            iconContainer.style.transform = 'scale(1)';
+        });
+
+        // Create bars container
+        const barsContainer = document.createElement('div');
+        barsContainer.style.display = 'flex';
+        barsContainer.style.flexDirection = 'column';
+        barsContainer.style.gap = '4px';
+        barsContainer.style.width = '300px';
+
+        // Create status bars with new style
+        const lifeBar = this.createModernStatusBar('Life', '#ff3333', '#660000');
+        this.lifeBarFill = lifeBar.querySelector('.fill');
+        this.lifeText = lifeBar.querySelector('.text');
+
+        const manaBar = this.createModernStatusBar('Mana', '#3333ff', '#000066');
+        this.manaBarFill = manaBar.querySelector('.fill');
+        this.manaText = manaBar.querySelector('.text');
+
+        const karmaBar = this.createModernStatusBar('Karma', '#ffcc00', '#665200');
+        this.karmaBarFill = karmaBar.querySelector('.fill');
+        this.karmaText = karmaBar.querySelector('.text');
+
+        // Add elements to containers
+        barsContainer.appendChild(lifeBar);
+        barsContainer.appendChild(manaBar);
+        barsContainer.appendChild(karmaBar);
+
+        uiContainer.appendChild(iconContainer);
+        uiContainer.appendChild(barsContainer);
+
+        // Add to document
+        document.body.appendChild(uiContainer);
+        this.updateStatusBars();
+    }
+
+    createModernStatusBar(label, color, shadowColor) {
+        const container = document.createElement('div');
+        container.style.width = '100%';
+        container.style.position = 'relative';
+        container.style.height = '24px';
+
+        // Bar background
+        const barContainer = document.createElement('div');
+        barContainer.style.position = 'absolute';
+        barContainer.style.left = '0';
+        barContainer.style.right = '0';
+        barContainer.style.top = '0';
+        barContainer.style.bottom = '0';
+        barContainer.style.background = 'linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0.4))';
+        barContainer.style.borderRadius = '4px';
+        barContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        barContainer.style.overflow = 'hidden';
+
+        // Fill bar with gradient and glow
+        const fill = document.createElement('div');
+        fill.className = 'fill';
+        fill.style.width = '100%';
+        fill.style.height = '100%';
+        fill.style.background = `linear-gradient(to bottom, ${color}, ${shadowColor})`;
+        fill.style.boxShadow = `0 0 10px ${color}, inset 0 0 5px rgba(255,255,255,0.5)`;
+        fill.style.transition = 'width 0.3s ease';
+
+        // Text container
+        const textContainer = document.createElement('div');
+        textContainer.style.position = 'absolute';
+        textContainer.style.left = '0';
+        textContainer.style.right = '0';
+        textContainer.style.top = '0';
+        textContainer.style.bottom = '0';
+        textContainer.style.padding = '0 10px';
+        textContainer.style.display = 'flex';
+        textContainer.style.alignItems = 'center';
+        textContainer.style.justifyContent = 'space-between';
+        textContainer.style.color = 'white';
+        textContainer.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
+        textContainer.style.fontSize = '12px';
+        textContainer.style.fontWeight = 'bold';
+
+        // Label
+        const labelElement = document.createElement('span');
+        labelElement.textContent = label;
+
+        // Value text
+        const text = document.createElement('span');
+        text.className = 'text';
+
+        textContainer.appendChild(labelElement);
+        textContainer.appendChild(text);
+        barContainer.appendChild(fill);
+        container.appendChild(barContainer);
+        container.appendChild(textContainer);
+
+        return container;
+    }
+
+    updateStatusBars() {
+        // Update life bar with glow intensity based on percentage
+        const lifePercent = (this.playerStats.currentLife / this.playerStats.maxLife) * 100;
+        this.lifeBarFill.style.width = `${lifePercent}%`;
+        this.lifeText.textContent = `${Math.round(this.playerStats.currentLife)} / ${this.playerStats.maxLife}`;
+        this.lifeBarFill.style.boxShadow = `0 0 ${10 + (lifePercent/10)}px #ff3333`;
+
+        // Update mana bar with glow intensity based on percentage
+        const manaPercent = (this.playerStats.currentMana / this.playerStats.maxMana) * 100;
+        this.manaBarFill.style.width = `${manaPercent}%`;
+        this.manaText.textContent = `${Math.round(this.playerStats.currentMana)} / ${this.playerStats.maxMana}`;
+        this.manaBarFill.style.boxShadow = `0 0 ${10 + (manaPercent/10)}px #3333ff`;
+
+        // Update karma bar with glow intensity based on percentage
+        const karmaPercent = (this.playerStats.currentKarma / this.playerStats.maxKarma) * 100;
+        this.karmaBarFill.style.width = `${karmaPercent}%`;
+        this.karmaText.textContent = `${Math.round(this.playerStats.currentKarma)} / ${this.playerStats.maxKarma}`;
+        this.karmaBarFill.style.boxShadow = `0 0 ${10 + (karmaPercent/10)}px #ffcc00`;
+    }
+
+    // Add damage and healing methods
+    damagePlayer(amount) {
+        this.playerStats.currentLife = Math.max(0, this.playerStats.currentLife - amount);
+        this.updateStatusBars();
+    }
+
+    healPlayer(amount) {
+        this.playerStats.currentLife = Math.min(this.playerStats.maxLife, this.playerStats.currentLife + amount);
+        this.updateStatusBars();
+    }
+
+    useMana(amount) {
+        if (this.playerStats.currentMana >= amount) {
+            this.playerStats.currentMana -= amount;
+            this.updateStatusBars();
+            return true;
+        }
+        return false;
+    }
+
+    adjustKarma(amount) {
+        this.playerStats.currentKarma = Math.max(0, Math.min(this.playerStats.maxKarma, this.playerStats.currentKarma + amount));
+        this.updateStatusBars();
+    }
+
+    updateXPTooltip() {
+        const xpCurrent = Math.round(this.playerStats.experience);
+        const xpNeeded = this.playerStats.experienceToNextLevel;
+        this.xpTooltip.textContent = `XP: ${xpCurrent} / ${xpNeeded}`;
+    }
+
+    gainExperience(amount) {
+        this.playerStats.experience += amount;
+        while (this.playerStats.experience >= this.playerStats.experienceToNextLevel) {
+            this.playerStats.experience -= this.playerStats.experienceToNextLevel;
+            this.levelUp();
+        }
+        this.updateLevelDisplay();
+    }
+
+    levelUp() {
+        this.playerStats.level++;
+        this.playerStats.experienceToNextLevel = Math.floor(this.playerStats.experienceToNextLevel * 1.5);
+        
+        // Increase stats on level up
+        this.playerStats.maxLife += 10;
+        this.playerStats.maxMana += 10;
+        this.playerStats.currentLife = this.playerStats.maxLife;
+        this.playerStats.currentMana = this.playerStats.maxMana;
+        
+        // Update displays
+        this.updateStatusBars();
+        
+        // Create level up effect
+        this.createLevelUpEffect();
+    }
+
+    createLevelUpEffect() {
+        const levelUpFlash = document.createElement('div');
+        levelUpFlash.style.position = 'absolute';
+        levelUpFlash.style.top = '0';
+        levelUpFlash.style.left = '0';
+        levelUpFlash.style.width = '100%';
+        levelUpFlash.style.height = '100%';
+        levelUpFlash.style.borderRadius = '50%';
+        levelUpFlash.style.background = 'radial-gradient(circle, rgba(255, 215, 0, 0.8) 0%, rgba(255, 215, 0, 0) 100%)';
+        levelUpFlash.style.animation = 'levelUpFlash 0.5s ease-out';
+        levelUpFlash.style.pointerEvents = 'none';
+
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes levelUpFlash {
+                0% { transform: scale(1); opacity: 0.8; }
+                100% { transform: scale(1.5); opacity: 0; }
+            }
+        `;
+        document.head.appendChild(style);
+
+        this.xpRing.parentElement.appendChild(levelUpFlash);
+        setTimeout(() => levelUpFlash.remove(), 500);
+    }
+
+    updateLevelDisplay() {
+        // Update level number
+        this.levelText.textContent = this.playerStats.level;
+        
+        // Update XP fill height
+        const progress = (this.playerStats.experience / this.playerStats.experienceToNextLevel) * 100;
+        this.xpFill.style.height = `${progress}%`;
+        this.xpFill.style.opacity = '1';  // Ensure full opacity
+        
+        // Update tooltip if visible
+        if (this.xpTooltip.style.display === 'block') {
+            this.updateXPTooltip();
+        }
     }
 }
 
