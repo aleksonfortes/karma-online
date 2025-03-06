@@ -1,8 +1,13 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const execAsync = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function findProcessByPort(port) {
     try {
@@ -50,6 +55,13 @@ async function cleanup() {
                     await killProcess(pid);
                 }
             }
+        }
+
+        // Remove the .port file if it exists
+        const portFile = path.join(__dirname, '../server/.port');
+        if (fs.existsSync(portFile)) {
+            fs.unlinkSync(portFile);
+            console.log('Removed .port file');
         }
 
         console.log('Cleanup complete!');
