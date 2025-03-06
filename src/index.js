@@ -605,78 +605,60 @@ class Game {
 
         // Create circular icon with XP ring
         const iconContainer = document.createElement('div');
-        iconContainer.style.width = '64px';
-        iconContainer.style.height = '64px';
+        iconContainer.style.width = '96px';  // Increased from 80px
+        iconContainer.style.height = '96px';  // Increased from 80px
         iconContainer.style.position = 'relative';
         iconContainer.style.borderRadius = '50%';
         iconContainer.style.background = 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)';
         iconContainer.style.border = '2px solid rgba(147, 255, 223, 0.15)';
         iconContainer.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+        iconContainer.style.marginRight = '12px';  // Reduced from 20px to bring bars closer
 
         // Create XP fill element with gradient and masking
         const xpFill = document.createElement('div');
         xpFill.style.position = 'absolute';
         xpFill.style.bottom = '0';
         xpFill.style.left = '0';
-        xpFill.style.right = '0';
         xpFill.style.width = '100%';
         xpFill.style.height = '0%';
         xpFill.style.background = '#FFFFFF';
         xpFill.style.transition = 'height 0.3s ease-out';
         xpFill.style.transformOrigin = 'bottom';
-        xpFill.style.zIndex = '0';  // Ensure it's behind the level display
+        xpFill.style.zIndex = '1';  // Ensure it's above the background
+        xpFill.style.opacity = '1';  // Force full opacity
         this.xpFill = xpFill;
 
         // Create XP ring container with mask
         const xpRingContainer = document.createElement('div');
         xpRingContainer.style.position = 'absolute';
-        xpRingContainer.style.top = '2px';  // Add small margin
-        xpRingContainer.style.left = '2px';  // Add small margin
-        xpRingContainer.style.right = '2px';  // Add small margin
-        xpRingContainer.style.bottom = '2px';  // Add small margin
+        xpRingContainer.style.inset = '2px';  // Use inset for consistent margins
         xpRingContainer.style.borderRadius = '50%';
         xpRingContainer.style.background = '#000000';
         xpRingContainer.style.overflow = 'hidden';
-        xpRingContainer.style.transform = 'rotate(0deg)';
+        xpRingContainer.style.zIndex = '0';  // Ensure proper stacking
         this.xpRing = xpRingContainer;
 
-        // Remove inner glow effect as it's not needed for black/white design
-        const innerGlow = document.createElement('div');
-        innerGlow.style.position = 'absolute';
-        innerGlow.style.top = '0';
-        innerGlow.style.left = '0';
-        innerGlow.style.width = '100%';
-        innerGlow.style.height = '100%';
-        innerGlow.style.borderRadius = '50%';
-        innerGlow.style.pointerEvents = 'none';
-        innerGlow.style.transform = 'rotate(0deg)';
-
-        // Create level display container with improved background
+        // Create level display container
         const levelContainer = document.createElement('div');
         levelContainer.style.position = 'absolute';
-        levelContainer.style.top = '0';
-        levelContainer.style.left = '0';
-        levelContainer.style.width = '100%';
-        levelContainer.style.height = '100%';
+        levelContainer.style.inset = '0';  // Cover entire container
         levelContainer.style.display = 'flex';
         levelContainer.style.alignItems = 'center';
         levelContainer.style.justifyContent = 'center';
-        levelContainer.style.background = 'radial-gradient(circle at center, rgba(0, 0, 0, 0.98) 30%, rgba(0, 0, 0, 0.85) 100%)';
-        levelContainer.style.transform = 'rotate(0deg)';
-        levelContainer.style.backdropFilter = 'blur(2px)';
-        levelContainer.style.borderRadius = '50%';
-        levelContainer.style.zIndex = '1';
+        levelContainer.style.background = 'radial-gradient(circle at center, rgba(0, 0, 0, 0.7) 30%, transparent 70%)';
+        levelContainer.style.zIndex = '2';  // Ensure it's above the fill
 
         // Add player level with improved styling
         const levelText = document.createElement('div');
         levelText.textContent = this.playerStats.level;
         levelText.style.color = '#FFD700';  // Golden color
-        levelText.style.fontSize = '24px';
+        levelText.style.fontSize = '38px';  // Increased from 32px
         levelText.style.fontWeight = 'bold';
         levelText.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.7)';  // Golden glow
-        levelText.style.transform = 'translateY(-1px)';
+        levelText.style.transform = 'translateY(-2px)';
         levelText.style.letterSpacing = '0.5px';
         levelText.style.userSelect = 'none';
+        levelText.style.zIndex = '3';
         this.levelText = levelText;
 
         // Add pulsing animation for the level text
@@ -684,7 +666,7 @@ class Game {
         style.textContent = `
             @keyframes levelPulse {
                 0% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
-                50% { text-shadow: 0 0 15px rgba(255, 215, 0, 0.7); }
+                50% { text-shadow: 0 0 15px rgba(255, 215, 0, 0.8); }
                 100% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
             }
         `;
@@ -723,8 +705,7 @@ class Game {
 
         // Assemble the icon with all effects
         xpRingContainer.appendChild(xpFill);
-        xpRingContainer.appendChild(innerGlow);
-        levelContainer.appendChild(levelText);
+        levelContainer.appendChild(levelText);  // Add level text to level container
         iconContainer.appendChild(xpRingContainer);
         iconContainer.appendChild(levelContainer);
         iconContainer.appendChild(shineEffect);
@@ -743,12 +724,13 @@ class Game {
             iconContainer.style.transform = 'scale(1)';
         });
 
-        // Create bars container
+        // Create bars container with adjusted positioning
         const barsContainer = document.createElement('div');
         barsContainer.style.display = 'flex';
         barsContainer.style.flexDirection = 'column';
-        barsContainer.style.gap = '4px';
-        barsContainer.style.width = '300px';
+        barsContainer.style.gap = '4px';  // Increased from 3px
+        barsContainer.style.width = '150px';
+        barsContainer.style.alignSelf = 'center';
 
         // Create status bars with new style
         const lifeBar = this.createModernStatusBar('Life', '#ff3333', '#660000');
@@ -780,7 +762,7 @@ class Game {
         const container = document.createElement('div');
         container.style.width = '100%';
         container.style.position = 'relative';
-        container.style.height = '24px';
+        container.style.height = '26px';  // Increased from 22px
 
         // Bar background
         const barContainer = document.createElement('div');
@@ -790,7 +772,7 @@ class Game {
         barContainer.style.top = '0';
         barContainer.style.bottom = '0';
         barContainer.style.background = 'linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0.4))';
-        barContainer.style.borderRadius = '4px';
+        barContainer.style.borderRadius = '5px';  // Increased from 4px
         barContainer.style.border = '1px solid rgba(255, 255, 255, 0.1)';
         barContainer.style.overflow = 'hidden';
 
@@ -800,7 +782,7 @@ class Game {
         fill.style.width = '100%';
         fill.style.height = '100%';
         fill.style.background = `linear-gradient(to bottom, ${color}, ${shadowColor})`;
-        fill.style.boxShadow = `0 0 10px ${color}, inset 0 0 5px rgba(255,255,255,0.5)`;
+        fill.style.boxShadow = `0 0 10px ${color}, inset 0 0 5px rgba(255,255,255,0.5)`;  // Increased glow
         fill.style.transition = 'width 0.3s ease';
 
         // Text container
@@ -810,13 +792,13 @@ class Game {
         textContainer.style.right = '0';
         textContainer.style.top = '0';
         textContainer.style.bottom = '0';
-        textContainer.style.padding = '0 10px';
+        textContainer.style.padding = '0 10px';  // Increased from 8px
         textContainer.style.display = 'flex';
         textContainer.style.alignItems = 'center';
         textContainer.style.justifyContent = 'space-between';
         textContainer.style.color = 'white';
         textContainer.style.textShadow = '1px 1px 2px rgba(0, 0, 0, 0.8)';
-        textContainer.style.fontSize = '12px';
+        textContainer.style.fontSize = '12px';  // Increased from 11px
         textContainer.style.fontWeight = 'bold';
 
         // Label
@@ -942,10 +924,11 @@ class Game {
         // Update level number
         this.levelText.textContent = this.playerStats.level;
         
-        // Update XP fill height
+        // Update XP fill height with forced visibility
         const progress = (this.playerStats.experience / this.playerStats.experienceToNextLevel) * 100;
         this.xpFill.style.height = `${progress}%`;
-        this.xpFill.style.opacity = '1';  // Ensure full opacity
+        this.xpFill.style.opacity = '1';
+        this.xpFill.style.background = '#FFFFFF';
         
         // Update tooltip if visible
         if (this.xpTooltip.style.display === 'block') {
