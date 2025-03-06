@@ -626,6 +626,7 @@ class Game {
         xpFill.style.transformOrigin = 'bottom';
         xpFill.style.zIndex = '1';  // Ensure it's above the background
         xpFill.style.opacity = '1';  // Force full opacity
+        xpFill.style.mixBlendMode = 'normal';  // Ensure normal blending
         this.xpFill = xpFill;
 
         // Create XP ring container with mask
@@ -633,7 +634,6 @@ class Game {
         xpRingContainer.style.position = 'absolute';
         xpRingContainer.style.inset = '2px';  // Use inset for consistent margins
         xpRingContainer.style.borderRadius = '50%';
-        xpRingContainer.style.background = '#000000';
         xpRingContainer.style.overflow = 'hidden';
         xpRingContainer.style.zIndex = '0';  // Ensure proper stacking
         this.xpRing = xpRingContainer;
@@ -645,7 +645,6 @@ class Game {
         levelContainer.style.display = 'flex';
         levelContainer.style.alignItems = 'center';
         levelContainer.style.justifyContent = 'center';
-        levelContainer.style.background = 'radial-gradient(circle at center, rgba(0, 0, 0, 0.7) 30%, transparent 70%)';
         levelContainer.style.zIndex = '2';  // Ensure it's above the fill
 
         // Add player level with improved styling
