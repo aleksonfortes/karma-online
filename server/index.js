@@ -54,15 +54,8 @@ const players = new Map();
 const lastUpdateTime = new Map();
 
 io.on('connection', (socket) => {
-    console.log('\n=== New Connection ===');
-    console.log('Socket ID:', socket.id);
-    console.log('User Agent:', socket.handshake.headers['user-agent']);
-    console.log('Transport:', socket.conn.transport.name);
-
     // Only create players for browser clients
     if (socket.handshake.headers['user-agent']?.includes('Mozilla')) {
-        console.log('Browser client connected:', socket.id);
-        
         // Initialize player data
         const player = {
             id: socket.id,
@@ -80,25 +73,14 @@ io.on('connection', (socket) => {
 
         // Add player to the game state
         players.set(socket.id, player);
-        console.log('Player joined:', player.displayName);
-        console.log('Player position:', player.position);
+        console.log(`Player joined: ${player.displayName} (Total Players: ${players.size})`);
 
         // Send current game state to the new player
         const currentPlayers = Array.from(players.values());
-        console.log('Sending current players to new player:', currentPlayers);
         socket.emit('currentPlayers', currentPlayers);
 
         // Notify other players about the new player
-        console.log('Broadcasting new player to others:', player);
         socket.broadcast.emit('newPlayer', player);
-
-        // Log current players for debugging
-        console.log('Current players on server:', currentPlayers);
-        console.log('Total players:', players.size);
-
-        // Log all connected sockets
-        const connectedSockets = Array.from(io.sockets.sockets.values()).map(s => s.id);
-        console.log('All connected socket IDs:', connectedSockets);
     }
 
     // Handle player movement with rate limiting
@@ -135,27 +117,13 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const player = players.get(socket.id);
         if (player) {
-            console.log('Player disconnected:', player.displayName);
             players.delete(socket.id);
             lastUpdateTime.delete(socket.id);
             io.emit('playerLeft', socket.id);
-            console.log('Remaining players:', Array.from(players.values()));
-            console.log('Total players:', players.size);
-            
-            // Log remaining connected sockets
-            const remainingSockets = Array.from(io.sockets.sockets.values()).map(s => s.id);
-            console.log('Remaining connected socket IDs:', remainingSockets);
+            console.log(`Player left: ${player.displayName} (Total Players: ${players.size})`);
         }
     });
 });
-
-// Add a periodic check of connected players
-setInterval(() => {
-    console.log('\n=== Periodic Player Check ===');
-    console.log('Total connected sockets:', io.sockets.sockets.size);
-    console.log('Total players in game:', players.size);
-    console.log('Current players:', Array.from(players.values()));
-}, 5000);
 
 const startServer = async () => {
     const { port, isNew } = await findOrCreateServer();
