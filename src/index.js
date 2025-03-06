@@ -428,26 +428,52 @@ class Game {
         const speed = 0.1;
         const rotationSpeed = 0.02;
         let hasMoved = false;
+        let moveX = 0;
+        let moveZ = 0;
 
         // Store previous position for collision resolution
         const previousPosition = this.localPlayer.position.clone();
 
-        if (this.controls.forward) {
-            this.localPlayer.translateZ(speed);
-            hasMoved = true;
+        // Calculate movement direction based on key combinations
+        if (this.controls.forward) moveZ -= 1;  // W - Forward/Up (negative Z)
+        if (this.controls.backward) moveZ += 1; // S - Backward/Down (positive Z)
+        if (this.controls.left) moveX -= 1;     // A - Left (negative X)
+        if (this.controls.right) moveX += 1;    // D - Right (positive X)
+
+        // Normalize diagonal movement to maintain consistent speed
+        if (moveX !== 0 || moveZ !== 0) {
+            // Calculate the magnitude of the movement vector
+            const magnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+            if (magnitude > 0) {
+                // Normalize and apply speed
+                moveX = (moveX / magnitude) * speed;
+                moveZ = (moveZ / magnitude) * speed;
+                
+                // Apply movement
+                this.localPlayer.position.x += moveX;
+                this.localPlayer.position.z += moveZ;
+                hasMoved = true;
+
+                // Update rotation to face movement direction
+                if (moveX !== 0 || moveZ !== 0) {
+                    const targetRotation = Math.atan2(moveX, -moveZ); // Negative Z for correct rotation
+                    // Smoothly rotate to face movement direction
+                    let currentRotation = this.localPlayer.rotation.y;
+                    const rotationDiff = targetRotation - currentRotation;
+                    
+                    // Normalize rotation difference to [-π, π]
+                    let normalizedDiff = rotationDiff;
+                    while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
+                    while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
+                    
+                    // Apply smooth rotation
+                    this.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
+                        Math.min(Math.abs(normalizedDiff), rotationSpeed);
+                }
+            }
         }
-        if (this.controls.backward) {
-            this.localPlayer.translateZ(-speed);
-            hasMoved = true;
-        }
-        if (this.controls.left) {
-            this.localPlayer.rotation.y += rotationSpeed;
-            hasMoved = true;
-        }
-        if (this.controls.right) {
-            this.localPlayer.rotation.y -= rotationSpeed;
-            hasMoved = true;
-        }
+
+        // Handle jumping
         if (this.controls.jump) {
             // Simple jump animation
             this.localPlayer.position.y = Math.sin(Date.now() * 0.01) * 2 + 1;
