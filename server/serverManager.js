@@ -1,30 +1,51 @@
-import { io } from 'socket.io-client';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const SERVER_PORT = 3000;
-const SERVER_CHECK_TIMEOUT = 1000; // 1 second timeout
+const execAsync = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-export async function findOrCreateServer() {
+const PORT_FILE = path.join(__dirname, '.port');
+
+async function findOrCreateServer() {
     try {
-        // Try to connect to existing server
-        const socket = io(`http://localhost:${SERVER_PORT}`, {
-            timeout: SERVER_CHECK_TIMEOUT,
-            reconnection: false
-        });
+        // First, try to kill any existing server processes
+        try {
+            await execAsync('pkill -f "node server/index.js"');
+            console.log('Killed existing server processes');
+        } catch (e) {
+            // Ignore errors if no process was found
+        }
 
-        return new Promise((resolve, reject) => {
-            socket.on('connect', () => {
-                console.log('Found existing server');
-                socket.disconnect();
-                resolve({ port: SERVER_PORT, isNew: false });
-            });
+        // Wait a moment for processes to fully terminate
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
-            socket.on('connect_error', () => {
-                console.log('No existing server found, creating new one');
-                resolve({ port: SERVER_PORT, isNew: true });
-            });
-        });
+        // Check if port file exists
+        if (fs.existsSync(PORT_FILE)) {
+            const port = parseInt(fs.readFileSync(PORT_FILE, 'utf8'));
+            
+            // Check if the port is actually in use
+            try {
+                await execAsync(`lsof -i :${port}`);
+                console.log(`Port ${port} is in use, creating new server`);
+                return { port: 3000, isNew: true };
+            } catch (e) {
+                // Port is not in use, we can use it
+                return { port, isNew: false };
+            }
+        }
+
+        // No port file exists, create new server
+        const port = 3000;
+        fs.writeFileSync(PORT_FILE, port.toString());
+        return { port, isNew: true };
     } catch (error) {
-        console.error('Error checking server:', error);
-        return { port: SERVER_PORT, isNew: true };
+        console.error('Error in findOrCreateServer:', error);
+        throw error;
     }
-} 
+}
+
+export { findOrCreateServer }; 
