@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { io } from 'socket.io-client';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
 // Determine the server URL based on the environment
 const SERVER_URL = window.location.hostname === 'localhost' && window.location.port === '5173'
@@ -29,14 +31,13 @@ class Game {
             forward: false,
             backward: false,
             left: false,
-            right: false,
-            jump: false
+            right: false
         };
         
         // Camera settings for LoL-style view
-        this.cameraOffset = new THREE.Vector3(0, 15, 15); // Height and distance from player
-        this.cameraAngle = Math.PI / 4; // 45-degree angle
-        this.cameraSmoothness = 0.1; // Lower = smoother camera movement
+        this.cameraOffset = new THREE.Vector3(0, 15, 15);
+        this.cameraAngle = Math.PI / 4;
+        this.cameraSmoothness = 0.05;
         
         // Add player stats
         this.playerStats = {
@@ -68,7 +69,7 @@ class Game {
         document.body.appendChild(this.renderer.domElement);
 
         // Setup camera for isometric view
-        this.camera.position.set(0, 15, 15);
+        this.camera.position.set(0, 15, 15);  // Changed back to positive 15 for Z
         this.camera.lookAt(0, 0, 0);
         this.camera.rotation.x = -Math.PI / 4;
 
@@ -239,18 +240,35 @@ class Game {
         return false;
     }
 
-    createPlayer(id, position = { x: 0, y: 0, z: 0 }, rotation = { y: 0 }) {
+    async createPlayer(id, position = { x: 0, y: 0, z: 0 }, rotation = { y: 0 }) {
         console.log('Creating player mesh for ID:', id);
         console.log('Position:', position);
         console.log('Rotation:', rotation);
         console.log('Is local player:', id === this.socket?.id);
         
+        let playerModel;
+        if (id === this.socket?.id) {
+            // Load detailed model for local player
+            playerModel = await this.loadCharacterModel();
+        } else {
+            // Use simple model for other players
+            playerModel = this.createBasicCharacter();
+        }
+
+        // Set position and rotation
+        playerModel.position.set(position.x, position.y, position.z);
+        playerModel.rotation.y = rotation.y || 0;
+        console.log('Player mesh created and positioned');
+        return playerModel;
+    }
+
+    createBasicCharacter() {
         const playerGroup = new THREE.Group();
         
         // Create character body
         const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1.5, 32);
         const bodyMaterial = new THREE.MeshPhongMaterial({ 
-            color: id === this.socket?.id ? 0x00ff00 : 0xff0000,
+            color: 0xff0000,
             shininess: 0
         });
         const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
@@ -261,7 +279,7 @@ class Game {
         // Create character head
         const headGeometry = new THREE.SphereGeometry(0.3, 32, 32);
         const headMaterial = new THREE.MeshPhongMaterial({ 
-            color: id === this.socket?.id ? 0x00ff00 : 0xff0000,
+            color: 0xff0000,
             shininess: 0
         });
         const head = new THREE.Mesh(headGeometry, headMaterial);
@@ -270,17 +288,12 @@ class Game {
         head.receiveShadow = true;
         playerGroup.add(head);
 
-        // Set position and rotation
-        playerGroup.position.set(position.x, position.y, position.z);
-        playerGroup.rotation.y = rotation.y || 0;
-        console.log('Player mesh created and positioned');
         return playerGroup;
     }
 
     setupMultiplayer() {
         console.log('Connecting to server...');
         
-        // Create socket with initial configuration
         this.socket = io(SERVER_URL, {
             transports: ['websocket', 'polling'],
             reconnection: true,
@@ -290,7 +303,6 @@ class Game {
             forceNew: true
         });
 
-        // Set up connection event handlers
         this.socket.on('connect', () => {
             console.log('Connected to server with ID:', this.socket.id);
         });
@@ -304,7 +316,7 @@ class Game {
             this.cleanup();
         });
 
-        this.socket.on('currentPlayers', (players) => {
+        this.socket.on('currentPlayers', async (players) => {
             console.log('\n=== Received Current Players ===');
             console.log('Players:', players);
             console.log('My socket ID:', this.socket.id);
@@ -318,10 +330,10 @@ class Game {
             
             // Add all players including our own
             console.log('Creating players...');
-            players.forEach((player) => {
+            for (const player of players) {
                 console.log('Creating player:', player);
                 console.log('Is this player me?', player.id === this.socket.id);
-                const playerMesh = this.createPlayer(
+                const playerMesh = await this.createPlayer(
                     player.id,
                     player.position,
                     { y: player.rotation._y || player.rotation.y || 0 }
@@ -334,19 +346,19 @@ class Game {
                     this.players.set(player.id, playerMesh);
                 }
                 this.scene.add(playerMesh);
-            });
+            }
             console.log('Total players created:', players.length);
             console.log('Local player:', this.localPlayer ? 'exists' : 'missing');
             console.log('Remote players:', this.players.size);
         });
 
-        this.socket.on('newPlayer', (player) => {
+        this.socket.on('newPlayer', async (player) => {
             console.log('\n=== New Player Joined ===');
             console.log('Player:', player);
             console.log('Is this player me?', player.id === this.socket.id);
             if (player.id !== this.socket.id) {
                 console.log('Creating new player mesh');
-                const playerMesh = this.createPlayer(
+                const playerMesh = await this.createPlayer(
                     player.id,
                     player.position,
                     { y: player.rotation._y || player.rotation.y || 0 }
@@ -421,7 +433,6 @@ class Game {
                 case 's': this.controls.backward = true; break;
                 case 'a': this.controls.left = true; break;
                 case 'd': this.controls.right = true; break;
-                case ' ': this.controls.jump = true; break;
             }
         });
 
@@ -431,78 +442,95 @@ class Game {
                 case 's': this.controls.backward = false; break;
                 case 'a': this.controls.left = false; break;
                 case 'd': this.controls.right = false; break;
-                case ' ': this.controls.jump = false; break;
             }
         });
+    }
+
+    async loadCharacterModel() {
+        try {
+            console.log('Starting to load character model...');
+            
+            // Load the GLB model
+            const loader = new GLTFLoader();
+            const gltf = await new Promise((resolve, reject) => {
+                loader.load(
+                    '/models/scene.glb',
+                    (gltf) => {
+                        console.log('Model loaded successfully:', gltf);
+                        resolve(gltf);
+                    },
+                    (progress) => console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%'),
+                    (error) => {
+                        console.error('Error loading model:', error);
+                        reject(error);
+                    }
+                );
+            });
+
+            // Create a group to hold the model
+            const modelGroup = new THREE.Group();
+            modelGroup.add(gltf.scene);
+            
+            // Set up the model with larger scale
+            gltf.scene.scale.set(5, 5, 5);
+            gltf.scene.position.y = 0;
+            gltf.scene.rotation.y = 0;
+            
+            console.log('Model setup complete');
+            return modelGroup;
+            
+        } catch (error) {
+            console.error('Error in loadCharacterModel:', error);
+            // Fallback to basic character if loading fails
+            return this.createBasicCharacter();
+        }
     }
 
     updatePlayer() {
         if (!this.localPlayer) return;
 
         const speed = 0.1;
-        const rotationSpeed = 0.02;
+        const rotationSpeed = 0.1;
         let hasMoved = false;
         let moveX = 0;
         let moveZ = 0;
 
-        // Store previous position for collision resolution
-        const previousPosition = this.localPlayer.position.clone();
-
         // Calculate movement direction based on key combinations
-        if (this.controls.forward) moveZ -= 1;  // W - Forward/Up (negative Z)
-        if (this.controls.backward) moveZ += 1; // S - Backward/Down (positive Z)
-        if (this.controls.left) moveX -= 1;     // A - Left (negative X)
-        if (this.controls.right) moveX += 1;    // D - Right (positive X)
+        if (this.controls.forward) moveZ -= 1;  // Move away from camera
+        if (this.controls.backward) moveZ += 1;  // Move toward camera
+        if (this.controls.left) moveX -= 1;
+        if (this.controls.right) moveX += 1;
 
         // Normalize diagonal movement to maintain consistent speed
         if (moveX !== 0 || moveZ !== 0) {
-            // Calculate the magnitude of the movement vector
             const magnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
             if (magnitude > 0) {
-                // Normalize and apply speed
                 moveX = (moveX / magnitude) * speed;
                 moveZ = (moveZ / magnitude) * speed;
                 
-                // Create a temporary position to check collision
                 const nextPosition = this.localPlayer.position.clone();
                 nextPosition.x += moveX;
                 nextPosition.z += moveZ;
 
-                // Only move if the next position is valid
-                if (!this.checkCollision(nextPosition, previousPosition)) {
+                if (!this.checkCollision(nextPosition, this.localPlayer.position.clone())) {
                     this.localPlayer.position.copy(nextPosition);
                     hasMoved = true;
 
                     // Update rotation to face movement direction
-                    if (moveX !== 0 || moveZ !== 0) {
-                        const targetRotation = Math.atan2(moveX, -moveZ);
-                        let currentRotation = this.localPlayer.rotation.y;
-                        const rotationDiff = targetRotation - currentRotation;
-                        
-                        // Normalize rotation difference to [-π, π]
-                        let normalizedDiff = rotationDiff;
-                        while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
-                        while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
-                        
-                        // Apply smooth rotation
-                        this.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
-                            Math.min(Math.abs(normalizedDiff), rotationSpeed);
-                    }
+                    const targetRotation = Math.atan2(moveX, moveZ);
+                    let currentRotation = this.localPlayer.rotation.y;
+                    const rotationDiff = targetRotation - currentRotation;
+                    
+                    let normalizedDiff = rotationDiff;
+                    while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
+                    while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
+                    
+                    this.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
+                        Math.min(Math.abs(normalizedDiff), rotationSpeed);
                 }
             }
         }
 
-        // Handle jumping
-        if (this.controls.jump) {
-            // Simple jump animation
-            this.localPlayer.position.y = Math.sin(Date.now() * 0.01) * 2 + 1;
-            hasMoved = true;
-        } else if (this.localPlayer.position.y !== 0) {
-            this.localPlayer.position.y = 0;
-            hasMoved = true;
-        }
-
-        // Only emit position to server if the player has moved
         if (hasMoved) {
             this.socket.emit('playerMovement', {
                 position: this.localPlayer.position,
@@ -518,7 +546,7 @@ class Game {
         const playerPosition = this.localPlayer.position;
         
         // Calculate target camera position
-        const targetX = playerPosition.x + this.cameraOffset.x;
+        const targetX = playerPosition.x;
         const targetY = playerPosition.y + this.cameraOffset.y;
         const targetZ = playerPosition.z + this.cameraOffset.z;
         
@@ -527,12 +555,8 @@ class Game {
         this.camera.position.y += (targetY - this.camera.position.y) * this.cameraSmoothness;
         this.camera.position.z += (targetZ - this.camera.position.z) * this.cameraSmoothness;
         
-        // Look at player position
-        this.camera.lookAt(
-            playerPosition.x,
-            playerPosition.y + 1, // Look slightly above the player
-            playerPosition.z
-        );
+        // Always look at player position
+        this.camera.lookAt(playerPosition);
     }
 
     animate() {
