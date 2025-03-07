@@ -37,8 +37,12 @@ class Game {
         // Add karma recovery timer
         this.lastKarmaRecoveryTime = Date.now();
         
-        // Camera settings for LoL-style view
+        // Camera settings for LoL-style view with zoom limits
         this.cameraOffset = new THREE.Vector3(0, 15, 15);
+        this.minZoom = 12; // Increased minimum zoom to prevent getting too close
+        this.maxZoom = 20; // Reduced maximum zoom to prevent zooming out too far
+        this.zoomSpeed = 0.5; // Reduced zoom speed for smoother transitions
+        this.currentZoom = 15; // Starting zoom level (middle point between min and max)
         this.cameraAngle = Math.PI / 4;
         this.cameraSmoothness = 0.05;
         
@@ -456,6 +460,23 @@ class Game {
             this.renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
+        // Add mouse wheel event listener for zoom
+        window.addEventListener('wheel', (event) => {
+            // Determine zoom direction
+            const zoomAmount = event.deltaY * 0.01 * this.zoomSpeed;
+            
+            // Calculate new zoom level
+            this.currentZoom = Math.max(
+                this.minZoom,
+                Math.min(this.maxZoom, this.currentZoom + zoomAmount)
+            );
+            
+            // Update camera offset
+            const zoomRatio = this.currentZoom / 15; // 15 is the default zoom
+            this.cameraOffset.y = 15 * zoomRatio;
+            this.cameraOffset.z = 15 * zoomRatio;
+        });
+
         window.addEventListener('keydown', (event) => {
             switch(event.key.toLowerCase()) {
                 case 'w': this.controls.forward = true; break;
@@ -624,7 +645,7 @@ class Game {
         // Get the player's position
         const playerPosition = this.localPlayer.position;
         
-        // Calculate target camera position
+        // Calculate target camera position using current zoom level
         const targetX = playerPosition.x;
         const targetY = playerPosition.y + this.cameraOffset.y;
         const targetZ = playerPosition.z + this.cameraOffset.z;
