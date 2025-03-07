@@ -34,6 +34,9 @@ class Game {
             right: false
         };
         
+        // Add karma recovery timer
+        this.lastKarmaRecoveryTime = Date.now();
+        
         // Camera settings for LoL-style view
         this.cameraOffset = new THREE.Vector3(0, 15, 15);
         this.cameraAngle = Math.PI / 4;
@@ -54,6 +57,9 @@ class Game {
             experienceToNextLevel: 100
         };
 
+        // Add darkness overlay for karma system
+        this.createDarknessOverlay();
+        
         this.createUI();
         this.init();
         this.setupEventListeners();
@@ -69,7 +75,7 @@ class Game {
         document.body.appendChild(this.renderer.domElement);
 
         // Setup camera for isometric view
-        this.camera.position.set(0, 15, 15);  // Changed back to positive 15 for Z
+        this.camera.position.set(0, 15, 15);
         this.camera.lookAt(0, 0, 0);
         this.camera.rotation.x = -Math.PI / 4;
 
@@ -92,6 +98,9 @@ class Game {
 
         // Create terrain first (it should be above the ocean)
         this.createTerrain();
+
+        // Create temple in the center
+        this.createTemple();
 
         // Create ocean border (it should be below the terrain)
         this.createOcean();
@@ -223,13 +232,11 @@ class Game {
     }
 
     checkCollision(position, previousPosition) {
-        // Get the terrain size and add a small buffer zone
+        // Check terrain boundaries
         const terrainSize = this.terrain.size;
-        const halfTerrainSize = (terrainSize / 2) - 1; // Buffer of 1 unit from the edge
+        const halfTerrainSize = (terrainSize / 2) - 1;
         
-        // Check if player is trying to go beyond the grass terrain
         if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
-            // Reset to previous safe position instead of clamping
             if (previousPosition) {
                 position.x = previousPosition.x;
                 position.z = previousPosition.z;
@@ -237,10 +244,28 @@ class Game {
             return true;
         }
         
+        // Check statue collisions
+        if (this.statueColliders) {
+            for (const statue of this.statueColliders) {
+                const dx = position.x - statue.position.x;
+                const dz = position.z - statue.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < statue.radius) {
+                    // Collision detected, move player back
+                    if (previousPosition) {
+                        position.x = previousPosition.x;
+                        position.z = previousPosition.z;
+                    }
+                    return true;
+                }
+            }
+        }
+        
         return false;
     }
 
-    async createPlayer(id, position = { x: 0, y: 0, z: 0 }, rotation = { y: 0 }) {
+    async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }) {
         console.log('Creating player mesh for ID:', id);
         console.log('Position:', position);
         console.log('Rotation:', rotation);
@@ -255,10 +280,10 @@ class Game {
             playerModel = this.createBasicCharacter();
         }
 
-        // Set position and rotation
-        playerModel.position.set(position.x, position.y, position.z);
+        // Always spawn at temple center, slightly elevated
+        playerModel.position.set(0, 1.5, 0);
         playerModel.rotation.y = rotation.y || 0;
-        console.log('Player mesh created and positioned');
+        console.log('Player mesh created and positioned at temple center');
         return playerModel;
     }
 
@@ -387,6 +412,10 @@ class Game {
         if (this.renderer && this.renderer.domElement) {
             this.renderer.domElement.remove();
         }
+        // Remove darkness overlay
+        if (this.darknessOverlay) {
+            this.darknessOverlay.remove();
+        }
         // Clear any game state
         this.players.clear();
         this.localPlayer = null;
@@ -433,6 +462,8 @@ class Game {
                 case 's': this.controls.backward = true; break;
                 case 'a': this.controls.left = true; break;
                 case 'd': this.controls.right = true; break;
+                case 'k': this.adjustKarma(10); break; // Increase Karma by 10
+                case 'r': this.adjustKarma(-this.playerStats.currentKarma); break; // Reset Karma to 0
             }
         });
 
@@ -496,10 +527,25 @@ class Game {
         let moveZ = 0;
 
         // Calculate movement direction based on key combinations
-        if (this.controls.forward) moveZ -= 1;  // Move away from camera
-        if (this.controls.backward) moveZ += 1;  // Move toward camera
+        if (this.controls.forward) moveZ -= 1;
+        if (this.controls.backward) moveZ += 1;
         if (this.controls.left) moveX -= 1;
         if (this.controls.right) moveX += 1;
+
+        // Handle karma recovery timer
+        if (this.checkTempleProximity()) {
+            const currentTime = Date.now();
+            const timeSinceLastRecovery = currentTime - this.lastKarmaRecoveryTime;
+            
+            // Check if 60 seconds (1 minute) has passed
+            if (timeSinceLastRecovery >= 60000 && this.playerStats.currentKarma > 0) {
+                this.adjustKarma(-1); // Reduce karma by 1
+                this.lastKarmaRecoveryTime = currentTime; // Reset timer
+            }
+        } else {
+            // Reset timer when player leaves temple
+            this.lastKarmaRecoveryTime = Date.now();
+        }
 
         // Normalize diagonal movement to maintain consistent speed
         if (moveX !== 0 || moveZ !== 0) {
@@ -531,12 +577,45 @@ class Game {
             }
         }
 
+        // Check if player is on temple platform and adjust height
+        const isOnTemple = this.isOnTemplePlatform(this.localPlayer.position);
+        const targetY = isOnTemple ? 1.5 : 0;
+        
+        // Smoothly adjust height
+        this.localPlayer.position.y += (targetY - this.localPlayer.position.y) * 0.2;
+
         if (hasMoved) {
             this.socket.emit('playerMovement', {
                 position: this.localPlayer.position,
                 rotation: this.localPlayer.rotation
             });
         }
+    }
+
+    // Add new method to check if player is on temple platform
+    isOnTemplePlatform(position) {
+        if (!this.temple) return false;
+        
+        // Get temple dimensions
+        const baseHalfWidth = 15; // 30/2 for base platform
+        const crossVerticalHalfWidth = 4; // 8/2 for vertical part
+        const crossHorizontalHalfWidth = 12; // 24/2 for horizontal part
+        const crossVerticalHalfLength = 12; // 24/2 for vertical part
+        const crossHorizontalHalfLength = 4; // 8/2 for horizontal part
+
+        // Check if position is within base platform bounds
+        const isOnBase = Math.abs(position.x) <= baseHalfWidth && 
+                        Math.abs(position.z) <= baseHalfWidth;
+
+        // Check if position is within cross vertical part
+        const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && 
+                            Math.abs(position.z) <= crossVerticalHalfLength;
+
+        // Check if position is within cross horizontal part
+        const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
+                              Math.abs(position.z) <= crossHorizontalHalfLength;
+
+        return isOnBase || isOnVertical || isOnHorizontal;
     }
 
     updateCamera() {
@@ -565,9 +644,8 @@ class Game {
         
         // Animate water with improved wave patterns
         if (this.ocean && this.ocean.material) {
-            this.waterTime += 0.001; // Even slower water animation
+            this.waterTime += 0.001;
             
-            // Animate normal map for wave effect with more subtle movement
             if (this.ocean.material.normalMap) {
                 const timeX = Math.sin(this.waterTime * 0.5) * 0.2;
                 const timeY = Math.cos(this.waterTime * 0.3) * 0.2;
@@ -575,7 +653,6 @@ class Game {
                 this.ocean.material.normalMap.offset.y = timeY;
             }
             
-            // Animate wave rings with more natural movement
             if (this.waveRings) {
                 this.waveRings.forEach((wave, index) => {
                     const waveTime = this.waterTime * 1.2 + wave.phase;
@@ -584,7 +661,6 @@ class Game {
                         Math.sin(waveTime * 1.3) * wave.amplitude * 0.3;
                     wave.mesh.position.y = y;
                     
-                    // Subtle rotation animation
                     const rotationAmount = Math.sin(this.waterTime * 0.8 + index * 0.2) * 0.005;
                     wave.mesh.rotation.z = rotationAmount;
                 });
@@ -605,11 +681,7 @@ class Game {
             );
         }
         this.updateStatusBars();
-        
-        // Add small amount of XP over time (for testing)
-        if (Math.random() < 0.01) { // 1% chance each frame
-            this.gainExperience(1);
-        }
+        this.updateKarmaEffects(); // Continuously update darkness effects
         
         this.updatePlayer();
         this.updateCamera();
@@ -969,6 +1041,7 @@ class Game {
     adjustKarma(amount) {
         this.playerStats.currentKarma = Math.max(0, Math.min(this.playerStats.maxKarma, this.playerStats.currentKarma + amount));
         this.updateStatusBars();
+        this.updateKarmaEffects(); // Update darkness when karma changes
     }
 
     updateXPTooltip() {
@@ -1107,6 +1180,275 @@ class Game {
         ringContainer.appendChild(maskContainer);
         ringContainer.appendChild(tooltip);
         return ringContainer;
+    }
+
+    createDarknessOverlay() {
+        // Create a full-screen overlay for darkness and vignette effects
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.transition = 'all 0.5s ease';
+        overlay.style.zIndex = '999';
+        
+        // Add radial gradient for vignette effect
+        overlay.style.background = 'radial-gradient(circle at 50% 50%, rgba(0,0,0,0) 50%, rgba(0,0,0,0) 100%)';
+        overlay.style.mixBlendMode = 'multiply';
+        
+        document.body.appendChild(overlay);
+        this.darknessOverlay = overlay;
+    }
+
+    updateKarmaEffects() {
+        const karmaPercent = this.playerStats.currentKarma / this.playerStats.maxKarma;
+        
+        // Update fog density based on karma
+        // Less karma = better visibility (fog starts further away)
+        // More karma = worse visibility (fog starts much closer)
+        const minFogDistance = 10;  // Reduced from 20 for even more limited vision
+        const maxFogDistance = 400;
+        const fogNear = maxFogDistance - (karmaPercent * (maxFogDistance - minFogDistance));
+        const fogFar = fogNear + (200 - (karmaPercent * 180)); // Fog gets much thicker with higher karma
+        
+        if (this.scene.fog) {
+            this.scene.fog.near = fogNear;
+            this.scene.fog.far = fogFar;
+            // Change fog color to be much darker with higher karma
+            const fogColor = new THREE.Color(0x004488);
+            fogColor.multiplyScalar(1 - (karmaPercent * 0.9)); // Increased darkness multiplier
+            this.scene.fog.color = fogColor;
+            this.renderer.setClearColor(fogColor);
+        }
+
+        // Update vignette effect
+        // More karma = stronger and darker vignette
+        const innerRadius = Math.max(15, 100 - (karmaPercent * 85)); // Inner radius shrinks more dramatically
+        const outerRadius = Math.max(30, 100 - (karmaPercent * 60)); // Outer radius also shrinks more
+        const darkness = Math.min(0.95, karmaPercent * 1.2); // Increased max darkness to 0.95
+        
+        // Add a pulsing effect to the vignette for high karma
+        if (karmaPercent > 0.7) {
+            const pulseIntensity = (karmaPercent - 0.7) * 10; // Increases with karma
+            this.darknessOverlay.style.animation = `karmaPulse ${2 - karmaPercent}s infinite`;
+            // Add the pulse animation if it doesn't exist
+            if (!document.getElementById('karmaPulseStyle')) {
+                const style = document.createElement('style');
+                style.id = 'karmaPulseStyle';
+                style.textContent = `
+                    @keyframes karmaPulse {
+                        0% { opacity: 1; }
+                        50% { opacity: ${1 - pulseIntensity * 0.2}; }
+                        100% { opacity: 1; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+        } else {
+            this.darknessOverlay.style.animation = 'none';
+        }
+        
+        this.darknessOverlay.style.background = `
+            radial-gradient(
+                circle at 50% 50%, 
+                rgba(0,0,0,${karmaPercent * 0.3}) ${innerRadius}%, 
+                rgba(0,0,0,${darkness}) ${outerRadius}%
+            )
+        `;
+
+        // Update ambient light intensity
+        // More karma = much dimmer light
+        const minLightIntensity = 0.1; // Reduced from 0.2 for darker effect
+        const maxLightIntensity = 0.8;
+        const lightIntensity = maxLightIntensity - (karmaPercent * (maxLightIntensity - minLightIntensity));
+        
+        // Find and update all lights
+        this.scene.traverse((object) => {
+            if (object instanceof THREE.AmbientLight) {
+                object.intensity = lightIntensity;
+            }
+            if (object instanceof THREE.DirectionalLight) {
+                object.intensity = Math.max(0.3, 1.2 - (karmaPercent * 0.9)); // Reduce directional light with karma
+            }
+            if (object instanceof THREE.HemisphereLight) {
+                object.intensity = Math.max(0.2, 0.6 - (karmaPercent * 0.4)); // Reduce hemisphere light with karma
+            }
+        });
+    }
+
+    createTemple() {
+        const templeGroup = new THREE.Group();
+        
+        // Create a custom temple floor texture pattern
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 512;
+        canvas.height = 512;
+        
+        // Fill background
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Create tile pattern
+        const tileSize = 64;
+        const tiles = canvas.width / tileSize;
+        
+        for (let i = 0; i < tiles; i++) {
+            for (let j = 0; j < tiles; j++) {
+                // Alternate tile colors for a checkered pattern
+                const isEven = (i + j) % 2 === 0;
+                ctx.fillStyle = isEven ? '#2a2a2a' : '#222222';
+                
+                // Draw main tile
+                ctx.fillRect(
+                    i * tileSize,
+                    j * tileSize,
+                    tileSize,
+                    tileSize
+                );
+                
+                // Add detail to tiles
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    i * tileSize + 2,
+                    j * tileSize + 2,
+                    tileSize - 4,
+                    tileSize - 4
+                );
+            }
+        }
+        
+        // Create texture from canvas
+        const floorTexture = new THREE.CanvasTexture(canvas);
+        floorTexture.wrapS = THREE.RepeatWrapping;
+        floorTexture.wrapT = THREE.RepeatWrapping;
+        floorTexture.repeat.set(4, 4); // Repeat the pattern
+        
+        // Create floor material with the custom texture
+        const floorMaterial = new THREE.MeshPhongMaterial({
+            map: floorTexture,
+            color: 0x666666,
+            shininess: 30,
+            bumpMap: floorTexture,
+            bumpScale: 0.2,
+        });
+
+        // Create larger base platform (increased from 20 to 30)
+        const baseGeometry = new THREE.BoxGeometry(30, 1, 30);
+        const basePlatform = new THREE.Mesh(baseGeometry, floorMaterial);
+        basePlatform.position.y = 0.5;
+        basePlatform.receiveShadow = true;
+        templeGroup.add(basePlatform);
+
+        // Add corner statues
+        const statuePositions = [
+            { x: 13, z: 13 },  // Northeast
+            { x: -13, z: 13 }, // Northwest
+            { x: 13, z: -13 }, // Southeast
+            { x: -13, z: -13 } // Southwest
+        ];
+
+        // Create statue material
+        const statueMaterial = new THREE.MeshPhongMaterial({
+            color: 0x808080, // Gray color for stone
+            shininess: 10,
+            roughness: 0.8,
+        });
+
+        this.statueColliders = [];
+
+        statuePositions.forEach((pos, index) => {
+            // Create statue base
+            const baseHeight = 3;
+            const baseWidth = 2;
+            const statueBase = new THREE.Mesh(
+                new THREE.BoxGeometry(baseWidth, baseHeight, baseWidth),
+                statueMaterial
+            );
+            statueBase.position.set(pos.x, baseHeight/2 + 0.5, pos.z);
+            statueBase.castShadow = true;
+            statueBase.receiveShadow = true;
+
+            // Create statue body
+            const bodyHeight = 4;
+            const bodyWidth = 1.5;
+            const statueBody = new THREE.Mesh(
+                new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyWidth),
+                statueMaterial
+            );
+            statueBody.position.set(pos.x, baseHeight + bodyHeight/2 + 0.5, pos.z);
+            statueBody.castShadow = true;
+            statueBody.receiveShadow = true;
+
+            // Create statue head
+            const headSize = 1;
+            const statueHead = new THREE.Mesh(
+                new THREE.BoxGeometry(headSize, headSize, headSize),
+                statueMaterial
+            );
+            statueHead.position.set(pos.x, baseHeight + bodyHeight + headSize/2 + 0.5, pos.z);
+            statueHead.castShadow = true;
+            statueHead.receiveShadow = true;
+
+            // Add to temple group
+            templeGroup.add(statueBase);
+            templeGroup.add(statueBody);
+            templeGroup.add(statueHead);
+
+            // Create collider for the statue
+            this.statueColliders.push({
+                position: new THREE.Vector3(pos.x, 0, pos.z),
+                radius: baseWidth / 1.5 // Slightly smaller than the actual base for better gameplay
+            });
+        });
+
+        // Create larger cross-shaped upper platform
+        const floorGroup = new THREE.Group();
+        
+        // Vertical part of cross (increased from 6x16 to 8x24)
+        const verticalGeometry = new THREE.BoxGeometry(8, 0.5, 24);
+        const verticalFloor = new THREE.Mesh(verticalGeometry, floorMaterial);
+        verticalFloor.position.y = 0.75;
+        verticalFloor.receiveShadow = true;
+        floorGroup.add(verticalFloor);
+        
+        // Horizontal part of cross (increased from 16x6 to 24x8)
+        const horizontalGeometry = new THREE.BoxGeometry(24, 0.5, 8);
+        const horizontalFloor = new THREE.Mesh(horizontalGeometry, floorMaterial);
+        horizontalFloor.position.y = 0.75;
+        horizontalFloor.receiveShadow = true;
+        floorGroup.add(horizontalFloor);
+        
+        templeGroup.add(floorGroup);
+
+        // Add stronger ambient temple light
+        const templeLight = new THREE.PointLight(0xffd700, 0.8, 30);
+        templeLight.position.set(0, 4, 0);
+        templeGroup.add(templeLight);
+
+        // Position the entire temple at the center of the map
+        templeGroup.position.set(0, 0, 0);
+        this.scene.add(templeGroup);
+        
+        // Store temple reference
+        this.temple = templeGroup;
+    }
+
+    // Add temple interaction method
+    checkTempleProximity() {
+        if (!this.localPlayer || !this.temple) return false;
+        
+        const playerPos = this.localPlayer.position;
+        const templePos = this.temple.position;
+        
+        // Check if player is within the temple base platform bounds
+        const baseHalfWidth = 15; // 30/2 for base platform
+        return Math.abs(playerPos.x - templePos.x) <= baseHalfWidth && 
+               Math.abs(playerPos.z - templePos.z) <= baseHalfWidth;
     }
 }
 
