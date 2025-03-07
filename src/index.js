@@ -275,19 +275,24 @@ class Game {
         console.log('Rotation:', rotation);
         console.log('Is local player:', id === this.socket?.id);
         
-        let playerModel;
-        if (id === this.socket?.id) {
-            // Load detailed model for local player
-            playerModel = await this.loadCharacterModel();
-        } else {
-            // Use simple model for other players
-            playerModel = this.createBasicCharacter();
-        }
+        // Load detailed model for all players
+        let playerModel = await this.loadCharacterModel();
 
-        // Always spawn at temple center, slightly elevated
-        playerModel.position.set(0, 1.5, 0);
+        // Use provided position for existing players, temple center for new local player
+        if (id === this.socket?.id) {
+            // New local player spawns at temple center
+            playerModel.position.set(0, 1.5, 0);
+        } else {
+            // Existing players maintain their current positions
+            playerModel.position.set(
+                position.x,
+                position.y,
+                position.z
+            );
+        }
+        
         playerModel.rotation.y = rotation.y || 0;
-        console.log('Player mesh created and positioned at temple center');
+        console.log('Player mesh created and positioned at:', playerModel.position);
         return playerModel;
     }
 
@@ -334,6 +339,13 @@ class Game {
 
         this.socket.on('connect', () => {
             console.log('Connected to server with ID:', this.socket.id);
+            // Emit initial position when connected
+            if (this.localPlayer) {
+                this.socket.emit('playerMovement', {
+                    position: this.localPlayer.position,
+                    rotation: this.localPlayer.rotation
+                });
+            }
         });
 
         this.socket.on('connect_error', (error) => {
@@ -370,6 +382,11 @@ class Game {
                 if (player.id === this.socket.id) {
                     console.log('Setting local player:', player.id);
                     this.localPlayer = playerMesh;
+                    // Emit initial position after local player is created
+                    this.socket.emit('playerMovement', {
+                        position: playerMesh.position,
+                        rotation: playerMesh.rotation
+                    });
                 } else {
                     console.log('Adding remote player:', player.id);
                     this.players.set(player.id, playerMesh);
@@ -395,6 +412,14 @@ class Game {
                 this.players.set(player.id, playerMesh);
                 this.scene.add(playerMesh);
                 console.log('New player added to scene');
+                
+                // If we're an existing player, send our position to the new player
+                if (this.localPlayer) {
+                    this.socket.emit('playerMovement', {
+                        position: this.localPlayer.position,
+                        rotation: this.localPlayer.rotation
+                    });
+                }
             }
         });
 
