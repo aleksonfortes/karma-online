@@ -1127,6 +1127,15 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 this.updateInterval = null;
             }
             
+            // Reset player state
+            this.isAlive = true;
+            this.controls = {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false
+            };
+            
             // Remove the game canvas
             if (this.renderer && this.renderer.domElement) {
                 this.renderer.domElement.remove();
@@ -1142,10 +1151,15 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 }
             });
             this.players.clear();
-            if (this.localPlayer && this.localPlayer.userData.statusGroup) {
-                this.scene.remove(this.localPlayer.userData.statusGroup);
+            
+            if (this.localPlayer) {
+                if (this.localPlayer.userData.statusGroup) {
+                    this.scene.remove(this.localPlayer.userData.statusGroup);
+                }
+                this.scene.remove(this.localPlayer);
+                this.localPlayer = null;
             }
-            this.localPlayer = null;
+            
             // Stop the animation loop
             this.isRunning = false;
             const uiElements = document.querySelectorAll('div[style*="position: fixed"]');
@@ -2008,6 +2022,12 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             
             // Disable player movement and interactions immediately
             this.isAlive = false;
+            this.controls = {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false
+            };
             
             if (this.localPlayer) {
                 // Hide status bars
@@ -2015,66 +2035,20 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     this.scene.remove(this.localPlayer.userData.statusGroup);
                 }
 
-                // Set up death animation state
-                this.localPlayer.userData.deathAnimation = {
-                    startTime: Date.now(),
-                    duration: 2000,
-                    startY: this.localPlayer.position.y,
-                    startRotation: this.localPlayer.rotation.y,
-                    isAnimating: true
-                };
-
-                // Add death animation to the game's update loop
-                const originalUpdatePlayer = this.updatePlayer.bind(this);
-                this.updatePlayer = () => {
-                    if (!this.isAlive && this.localPlayer?.userData.deathAnimation?.isAnimating) {
-                        const anim = this.localPlayer.userData.deathAnimation;
-                        const elapsed = Date.now() - anim.startTime;
-                        const progress = Math.min(elapsed / anim.duration, 1);
-                        
-                        // Smooth easing
-                        const easeProgress = progress * (2 - progress);
-                        
-                        // Update position (sink)
-                        this.localPlayer.position.y = anim.startY - (easeProgress * 2);
-                        
-                        // Update rotation (spin)
-                        this.localPlayer.rotation.y = anim.startRotation + (easeProgress * Math.PI * 4);
-                        
-                        // Update scale (shrink)
-                        this.localPlayer.scale.setScalar(Math.max(0.1, 1 - easeProgress));
-
-                        // Send updated state to server
-                        if (this.socket?.connected) {
-                            this.socket.emit('playerState', {
-                                id: this.socket.id,
-                                position: this.localPlayer.position,
-                                rotation: this.localPlayer.rotation,
-                                scale: this.localPlayer.scale,
-                                isDead: true
-                            });
-                        }
-
-                        // Check if animation is complete
-                        if (progress >= 1) {
-                            this.localPlayer.userData.deathAnimation.isAnimating = false;
-                            this.scene.remove(this.localPlayer);
-                            if (this.socket?.id) {
-                                this.players.delete(this.socket.id);
-                                // Final death notification to server
-                                if (this.socket?.connected) {
-                                    this.socket.emit('playerDied', {
-                                        id: this.socket.id,
-                                        isDead: true
-                                    });
-                                }
-                            }
-                        }
-                    } else {
-                        // Call original update if not animating death
-                        originalUpdatePlayer();
+                // Remove player from scene
+                this.scene.remove(this.localPlayer);
+                
+                // Remove from players list
+                if (this.socket?.id) {
+                    this.players.delete(this.socket.id);
+                    // Final death notification to server
+                    if (this.socket?.connected) {
+                        this.socket.emit('playerDied', {
+                            id: this.socket.id,
+                            isDead: true
+                        });
                     }
-                };
+                }
             }
 
             // Create death screen overlay with pointer-events blocking
@@ -2084,7 +2058,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             deathOverlay.style.left = '0';
             deathOverlay.style.width = '100%';
             deathOverlay.style.height = '100%';
-            deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0)'; // Start transparent
+            deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0)';
             deathOverlay.style.display = 'flex';
             deathOverlay.style.flexDirection = 'column';
             deathOverlay.style.alignItems = 'center';
