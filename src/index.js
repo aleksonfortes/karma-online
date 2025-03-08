@@ -2223,18 +2223,20 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             // Create dialogue UI
             const dialogueContainer = document.createElement('div');
             dialogueContainer.style.position = 'fixed';
-            dialogueContainer.style.top = '50px';  // Changed from bottom to top
+            dialogueContainer.style.top = '50px';
             dialogueContainer.style.left = '50%';
             dialogueContainer.style.transform = 'translateX(-50%)';
-            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            dialogueContainer.style.padding = '20px';
-            dialogueContainer.style.borderRadius = '10px';
+            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+            dialogueContainer.style.padding = '25px';
+            dialogueContainer.style.borderRadius = '15px';
             dialogueContainer.style.color = 'white';
-            dialogueContainer.style.maxWidth = '600px';
-            dialogueContainer.style.width = '80%';
+            dialogueContainer.style.maxWidth = '800px';
+            dialogueContainer.style.width = '90%';
             dialogueContainer.style.zIndex = '1000';
-            dialogueContainer.style.border = '2px solid #4a9eff';
-            dialogueContainer.style.boxShadow = '0 0 20px rgba(74, 158, 255, 0.3)';
+            dialogueContainer.style.border = npcType === 'dark' ? '2px solid #6600cc' : '2px solid #ffcc00';
+            dialogueContainer.style.boxShadow = npcType === 'dark' ? 
+                '0 0 30px rgba(102, 0, 204, 0.4)' : 
+                '0 0 30px rgba(255, 204, 0, 0.4)';
 
             // Don't show choice dialogue if player already has a path
             if (this.playerStats.path) {
@@ -2257,24 +2259,75 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 return;
             }
 
-            // Initial dialogue content
-            const content = npcType === 'dark' ? 
-                'Greetings, seeker. I am the Dark Guardian. The path of darkness offers great power, but at what cost? Would you embrace the shadows and walk the Dark Path?' :
-                'Welcome, brave soul. I am the Light Guardian. The path of light offers protection and healing, but requires great sacrifice. Would you follow the Light Path?';
+            // Create title
+            const title = document.createElement('h2');
+            title.style.margin = '0 0 20px 0';
+            title.style.fontSize = '24px';
+            title.style.color = npcType === 'dark' ? '#6600cc' : '#ffcc00';
+            title.style.textShadow = '0 0 10px ' + (npcType === 'dark' ? 'rgba(102, 0, 204, 0.5)' : 'rgba(255, 204, 0, 0.5)');
+            title.textContent = npcType === 'dark' ? 'Dark Guardian' : 'Light Guardian';
 
-            const text = document.createElement('p');
-            text.style.margin = '0 0 20px 0';
-            text.style.fontSize = '18px';
-            text.style.lineHeight = '1.5';
-            text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
-            text.textContent = content;
+            // Initial greeting
+            const greeting = document.createElement('p');
+            greeting.style.margin = '0 0 20px 0';
+            greeting.style.fontSize = '18px';
+            greeting.style.lineHeight = '1.6';
+            greeting.style.color = '#ffffff';
+            greeting.textContent = npcType === 'dark' ? 
+                'Greetings, seeker of power. I am the Dark Guardian, keeper of forbidden knowledge and master of shadows.' :
+                'Welcome, noble soul. I am the Light Guardian, protector of sacred wisdom and bearer of divine light.';
 
+            // Path description
+            const description = document.createElement('div');
+            description.style.margin = '0 0 20px 0';
+            description.style.padding = '15px';
+            description.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            description.style.borderRadius = '10px';
+            description.style.fontSize = '16px';
+            description.style.lineHeight = '1.6';
+
+            const pathTitle = document.createElement('h3');
+            pathTitle.style.margin = '0 0 10px 0';
+            pathTitle.style.color = npcType === 'dark' ? '#6600cc' : '#ffcc00';
+            pathTitle.textContent = npcType === 'dark' ? 'The Path of Darkness' : 'The Path of Light';
+            description.appendChild(pathTitle);
+
+            const pathContent = document.createElement('div');
+            if (npcType === 'dark') {
+                pathContent.innerHTML = `
+                    <p>Those who walk the Dark Path seek ultimate power through sacrifice. At maximum Karma (100), you will achieve the <strong style="color: #6600cc">Forsaken</strong> status, granting you:</p>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Immunity to direct damage</li>
+                        <li>The highest damage potential in the game</li>
+                        <li>Life regeneration only through combat and kills</li>
+                        <li>Gradual health decay every 5 seconds</li>
+                    </ul>
+                    <p style="color: #ff9900"><strong>Warning:</strong> Forsaken can only be defeated by the Light's "Seal of Light" ability, which will force reincarnation.</p>
+                `;
+            } else {
+                pathContent.innerHTML = `
+                    <p>Those who walk the Light Path seek enlightenment through protection. At minimum Karma (0), you will achieve the <strong style="color: #ffcc00">Illuminated</strong> status, granting you:</p>
+                    <ul style="margin: 10px 0; padding-left: 20px;">
+                        <li>Immunity to direct damage</li>
+                        <li>Enhanced healing abilities that scale with lower Karma</li>
+                        <li>Constant life regeneration</li>
+                        <li>Access to powerful support abilities</li>
+                    </ul>
+                    <p style="color: #ff9900"><strong>Note:</strong> Illuminated cannot deal direct damage but can only be defeated by the Dark's "Curse of Darkness" ability, which will force reincarnation.</p>
+                `;
+            }
+            description.appendChild(pathContent);
+
+            // Warning about permanence
             const warning = document.createElement('p');
-            warning.style.margin = '0 0 20px 0';
+            warning.style.margin = '20px 0';
+            warning.style.padding = '10px';
+            warning.style.backgroundColor = 'rgba(255, 153, 0, 0.2)';
+            warning.style.borderRadius = '5px';
             warning.style.fontSize = '16px';
             warning.style.color = '#ff9900';
             warning.style.fontStyle = 'italic';
-            warning.textContent = 'Choose wisely. This decision is permanent and will define your journey.';
+            warning.innerHTML = '<strong>⚠ Choose wisely:</strong> Your path choice is permanent in this lifetime. Only through reincarnation can a new path be chosen.';
 
             // Create button container
             const buttonContainer = document.createElement('div');
@@ -2284,22 +2337,29 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
             // Create choice buttons
             const acceptButton = this.createDialogueButton(
-                'Accept',
+                'Accept this Path',
                 () => {
-                    this.hideDialogue();  // Hide current dialogue before showing confirmation
-                    this.choosePath(npcType === 'dark' ? 'dark' : 'light');
+                    this.hideDialogue();
+                    this.choosePath(npcType);
                 }
             );
+            acceptButton.style.backgroundColor = npcType === 'dark' ? '#6600cc' : '#ffcc00';
+            acceptButton.style.minWidth = '150px';
             
             const declineButton = this.createDialogueButton(
-                'Decline',
+                'I Need Time',
                 () => this.hideDialogue()
             );
+            declineButton.style.backgroundColor = '#444444';
+            declineButton.style.minWidth = '150px';
 
             buttonContainer.appendChild(declineButton);
             buttonContainer.appendChild(acceptButton);
 
-            dialogueContainer.appendChild(text);
+            // Assemble the dialogue
+            dialogueContainer.appendChild(title);
+            dialogueContainer.appendChild(greeting);
+            dialogueContainer.appendChild(description);
             dialogueContainer.appendChild(warning);
             dialogueContainer.appendChild(buttonContainer);
             document.body.appendChild(dialogueContainer);
@@ -2345,38 +2405,72 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             dialogueContainer.style.top = '50px';
             dialogueContainer.style.left = '50%';
             dialogueContainer.style.transform = 'translateX(-50%)';
-            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            dialogueContainer.style.padding = '20px';
-            dialogueContainer.style.borderRadius = '10px';
+            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
+            dialogueContainer.style.padding = '25px';
+            dialogueContainer.style.borderRadius = '15px';
             dialogueContainer.style.color = 'white';
-            dialogueContainer.style.maxWidth = '600px';
-            dialogueContainer.style.width = '80%';
+            dialogueContainer.style.maxWidth = '800px';
+            dialogueContainer.style.width = '90%';
             dialogueContainer.style.zIndex = '1000';
             dialogueContainer.style.border = path === 'dark' ? '2px solid #6600cc' : '2px solid #ffcc00';
             dialogueContainer.style.boxShadow = path === 'dark' ? 
-                '0 0 20px rgba(102, 0, 204, 0.3)' : 
-                '0 0 20px rgba(255, 204, 0, 0.3)';
+                '0 0 30px rgba(102, 0, 204, 0.4)' : 
+                '0 0 30px rgba(255, 204, 0, 0.4)';
 
-            const text = document.createElement('p');
-            text.style.margin = '0';
-            text.style.fontSize = '18px';
-            text.style.lineHeight = '1.5';
-            text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
-            
-            const pathMessage = path === 'dark' ?
-                'You have embraced the shadows. The Dark Path will grant you power through sacrifice.' :
-                'You have chosen the light. The Light Path will grant you strength through protection.';
-            
-            text.textContent = pathMessage;
+            // Create title
+            const title = document.createElement('h2');
+            title.style.margin = '0 0 20px 0';
+            title.style.fontSize = '24px';
+            title.style.color = path === 'dark' ? '#6600cc' : '#ffcc00';
+            title.style.textShadow = '0 0 10px ' + (path === 'dark' ? 'rgba(102, 0, 204, 0.5)' : 'rgba(255, 204, 0, 0.5)');
+            title.textContent = path === 'dark' ? 'Dark Path Chosen' : 'Light Path Chosen';
 
-            const closeButton = this.createDialogueButton('Continue', () => {
+            // Create confirmation message
+            const message = document.createElement('div');
+            message.style.margin = '0 0 20px 0';
+            message.style.fontSize = '18px';
+            message.style.lineHeight = '1.6';
+            
+            if (path === 'dark') {
+                message.innerHTML = `
+                    <p>You have embraced the shadows. The Dark Path will grant you immense power through sacrifice.</p>
+                    <p>Your journey to becoming <strong style="color: #6600cc">Forsaken</strong> begins now. Seek to increase your Karma to 100 to unlock your full potential.</p>
+                    <p>Remember: Your strength will come from combat and victory, but the shadows will constantly test your resolve.</p>
+                `;
+            } else {
+                message.innerHTML = `
+                    <p>You have chosen to walk in the light. The Light Path will grant you divine protection and healing abilities.</p>
+                    <p>Your journey to becoming <strong style="color: #ffcc00">Illuminated</strong> begins now. Seek to decrease your Karma to 0 to unlock your full potential.</p>
+                    <p>Remember: Your power lies in protection and support, and the light will constantly restore your vitality.</p>
+                `;
+            }
+
+            // Next steps section
+            const nextSteps = document.createElement('div');
+            nextSteps.style.margin = '20px 0';
+            nextSteps.style.padding = '15px';
+            nextSteps.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+            nextSteps.style.borderRadius = '10px';
+            nextSteps.innerHTML = `
+                <h3 style="margin: 0 0 10px 0; color: ${path === 'dark' ? '#6600cc' : '#ffcc00'}">Next Steps</h3>
+                <ul style="margin: 0; padding-left: 20px;">
+                    <li>Explore the world and develop your abilities</li>
+                    <li>Monitor your Karma level as it will determine your power</li>
+                    <li>Return to me for guidance on your journey</li>
+                </ul>
+            `;
+
+            const closeButton = this.createDialogueButton('Begin Journey', () => {
                 this.hideDialogue();
             });
             closeButton.style.backgroundColor = path === 'dark' ? '#6600cc' : '#ffcc00';
-            closeButton.style.marginTop = '15px';
+            closeButton.style.marginTop = '20px';
             closeButton.style.float = 'right';
+            closeButton.style.minWidth = '150px';
 
-            dialogueContainer.appendChild(text);
+            dialogueContainer.appendChild(title);
+            dialogueContainer.appendChild(message);
+            dialogueContainer.appendChild(nextSteps);
             dialogueContainer.appendChild(closeButton);
             document.body.appendChild(dialogueContainer);
 
