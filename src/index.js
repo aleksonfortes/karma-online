@@ -249,14 +249,14 @@ class Game {
             return true;
         }
         
-        // Check statue collisions with minimal buffer
+        // Check statue and NPC collisions with minimal buffer
         if (this.statueColliders) {
-            for (const statue of this.statueColliders) {
-                const dx = position.x - statue.position.x;
-                const dz = position.z - statue.position.z;
+            for (const collider of this.statueColliders) {
+                const dx = position.x - collider.position.x;
+                const dz = position.z - collider.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                if (distance < statue.radius + 0.1) { // Small buffer for statue collisions
+                if (distance < collider.radius + 0.1) { // Small buffer for collisions
                     if (previousPosition) {
                         position.x = previousPosition.x;
                         position.z = previousPosition.z;
@@ -1931,12 +1931,91 @@ class Game {
         templeLight.position.set(0, baseHeight + 4, 0); // Adjust light height
         templeGroup.add(templeLight);
 
+        // Add NPC to the temple
+        this.loadNPC(templeGroup, baseHeight);
+
         // Position the entire temple
         templeGroup.position.set(0, 0, 0);
         this.scene.add(templeGroup);
         
         // Store temple reference
         this.temple = templeGroup;
+    }
+
+    async loadNPC(templeGroup, baseHeight) {
+        try {
+            const loader = new GLTFLoader();
+            
+            // Load both NPC models
+            const [darkNPC, lightNPC] = await Promise.all([
+                new Promise((resolve, reject) => {
+                    loader.load(
+                        '/models/dark_npc.glb',
+                        (gltf) => resolve(gltf),
+                        undefined,
+                        (error) => reject(error)
+                    );
+                }),
+                new Promise((resolve, reject) => {
+                    loader.load(
+                        '/models/light_npc.glb',
+                        (gltf) => resolve(gltf),
+                        undefined,
+                        (error) => reject(error)
+                    );
+                })
+            ]);
+
+            // Set up the dark NPC model (right side)
+            const darkModel = darkNPC.scene;
+            darkModel.scale.set(3.5, 3.5, 3.5); // Reduced scale from 4.0 to 3.5
+            darkModel.position.set(8, 5.5, -12); // Keeping Y position at 5.5
+            darkModel.rotation.y = -Math.PI / 4; // Rotate to face center
+            
+            // Set up the light NPC model (left side)
+            const lightModel = lightNPC.scene;
+            lightModel.scale.set(6, 6, 6); // Increased scale to match dark NPC's appearance
+            lightModel.position.set(-8, 2.0, -12); // Lowered Y position from 2.5 to 2.0
+            lightModel.rotation.y = Math.PI / 4; // Rotate to face center
+            
+            // Add shadows to both NPCs
+            [darkModel, lightModel].forEach(model => {
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+            });
+
+            // Add both NPCs to temple group
+            templeGroup.add(darkModel);
+            templeGroup.add(lightModel);
+
+            // Store NPC references
+            this.darkNPC = darkModel;
+            this.lightNPC = lightModel;
+
+            // Create colliders for both NPCs
+            if (!this.statueColliders) {
+                this.statueColliders = [];
+            }
+
+            // Add colliders for both NPCs
+            this.statueColliders.push(
+                {
+                    position: new THREE.Vector3(8, 0, -12), // Dark NPC collider now on right
+                    radius: 1.5
+                },
+                {
+                    position: new THREE.Vector3(-8, 0, -12), // Light NPC collider now on left
+                    radius: 1.5
+                }
+            );
+
+        } catch (error) {
+            console.error('Error loading NPC models:', error);
+        }
     }
 
     // Add temple interaction method
