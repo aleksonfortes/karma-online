@@ -293,7 +293,7 @@ class Game {
 
         // Create status bars group that will not inherit rotation
         const statusGroup = new THREE.Group();
-        statusGroup.position.y = 2.5; // Set initial height above player
+        statusGroup.position.y = 2.0; // Reduced from 2.5 to 2.0 for closer positioning
         
         const barWidth = 1;
         const barHeight = 0.1;
@@ -318,8 +318,8 @@ class Game {
             });
             const fill = new THREE.Mesh(barGeometry, fillMaterial);
             
-            // Position bars vertically stacked
-            const yOffset = 3.5 + (barHeight + barSpacing) * (2 - index);
+            // Position bars vertically stacked with smaller spacing
+            const yOffset = 2.5 + (barHeight + barSpacing) * (2 - index);
             background.position.y = yOffset;
             fill.position.y = yOffset;
             fill.position.z = 0.001; // Slightly in front
@@ -395,7 +395,7 @@ class Game {
                 });
                 const fill = new THREE.Mesh(barGeometry, fillMaterial);
                 
-                const yOffset = 3.5 + (barHeight + barSpacing) * (2 - index);
+                const yOffset = 2.5 + (barHeight + barSpacing) * (2 - index);
                 background.position.y = yOffset;
                 fill.position.y = yOffset;
                 fill.position.z = 0.001;
@@ -416,8 +416,9 @@ class Game {
         const worldPosition = new THREE.Vector3();
         playerMesh.getWorldPosition(worldPosition);
         
-        // Position status group above player's head
-        statusGroup.position.set(worldPosition.x, worldPosition.y + 2.5, worldPosition.z);
+        // Position status group above player's head and ensure it's visible
+        statusGroup.position.set(worldPosition.x, worldPosition.y + 3.0, worldPosition.z);
+        statusGroup.visible = true;
         
         // Ensure status group is always facing the camera
         if (this.camera) {
@@ -425,7 +426,7 @@ class Game {
         }
 
         // Store the stats in the player's userData
-        playerMesh.userData.stats = stats;
+        playerMesh.userData.stats = { ...stats };  // Create a copy to prevent reference issues
 
         // Update each status bar
         playerMesh.userData.statusBars.forEach(bar => {
@@ -444,13 +445,15 @@ class Game {
                 case 'karma':
                     fillAmount = stats.karma / stats.maxKarma;
                     if (stats.karma === 50) {
-                        color = new THREE.Color(0xfffacd);
+                        color = new THREE.Color(0xfffacd); // Light yellow for neutral karma
                     } else if (stats.karma > 50) {
+                        // Gold gradient for high karma (50-100)
                         const intensity = (stats.karma - 50) / 50;
-                        color = new THREE.Color(0xff0000).lerp(new THREE.Color(0x800000), intensity);
+                        color = new THREE.Color(0xffcc00); // Always karma color (gold) for high karma
                     } else {
+                        // White gradient for low karma (0-50)
                         const intensity = (50 - stats.karma) / 50;
-                        color = new THREE.Color(0x4169e1).lerp(new THREE.Color(0x00ffff), intensity);
+                        color = new THREE.Color(0xffcc00).lerp(new THREE.Color(0xffffff), intensity);
                     }
                     break;
             }
@@ -461,9 +464,8 @@ class Game {
             fill.material.color = color;
         });
 
-        // Ensure the status group is visible and properly layered
-        statusGroup.visible = true;
-        statusGroup.renderOrder = 999; // Ensure it renders on top
+        // Ensure proper rendering order
+        statusGroup.renderOrder = 999;
         statusGroup.children.forEach(child => {
             child.renderOrder = 999;
         });
@@ -574,8 +576,23 @@ class Game {
                     this.updatePlayerStatus(playerMesh, stats);
                     this.players.set(player.id, playerMesh);
                     
-                    console.log(`Added player ${player.id} with status bars`);
+                    console.log(`Added player ${player.id} with status bars:`, stats);
                 }
+            }
+            
+            // Send our initial state to all players
+            if (this.localPlayer) {
+                this.sendPlayerState();
+                // Also send initial karma update
+                this.socket.emit('karmaUpdate', {
+                    id: this.socket.id,
+                    karma: this.playerStats.currentKarma,
+                    maxKarma: this.playerStats.maxKarma,
+                    life: this.playerStats.currentLife,
+                    maxLife: this.playerStats.maxLife,
+                    mana: this.playerStats.currentMana,
+                    maxMana: this.playerStats.maxMana
+                });
             }
         });
 
@@ -609,6 +626,66 @@ class Game {
             // Send our current state to the new player
             if (this.localPlayer) {
                 this.sendPlayerState();
+            }
+        });
+
+        this.socket.on('karmaUpdate', (data) => {
+            console.log(`\nReceived karma update:`, data);
+            
+            // Handle updates for other players
+            if (data.id !== this.socket.id) {
+                const playerMesh = this.players.get(data.id);
+                if (!playerMesh) {
+                    console.warn(`No player mesh found for karma update: ${data.id}`);
+                    return;
+                }
+
+                // Update player stats
+                playerMesh.userData.stats = {
+                    ...playerMesh.userData.stats,
+                    karma: data.karma,
+                    maxKarma: data.maxKarma,
+                    life: data.life,
+                    maxLife: data.maxLife,
+                    mana: data.mana,
+                    maxMana: data.maxMana
+                };
+
+                console.log(`Updated stats for player ${data.id}:`, playerMesh.userData.stats);
+                
+                // Force update of status bars
+                this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+                
+                // Ensure status group is visible
+                if (playerMesh.userData.statusGroup) {
+                    playerMesh.userData.statusGroup.visible = true;
+                }
+            } else {
+                // Handle updates for local player (for consistency)
+                if (this.localPlayer) {
+                    this.localPlayer.userData.stats = {
+                        ...this.localPlayer.userData.stats,
+                        karma: data.karma,
+                        maxKarma: data.maxKarma,
+                        life: data.life,
+                        maxLife: data.maxLife,
+                        mana: data.mana,
+                        maxMana: data.maxMana
+                    };
+                    
+                    // Update local player stats
+                    this.playerStats.currentKarma = data.karma;
+                    this.playerStats.maxKarma = data.maxKarma;
+                    this.playerStats.currentLife = data.life;
+                    this.playerStats.maxLife = data.maxLife;
+                    this.playerStats.currentMana = data.mana;
+                    this.playerStats.maxMana = data.maxMana;
+                    
+                    console.log(`Updated local player stats:`, this.playerStats);
+                    
+                    // Force update of status bars
+                    this.updatePlayerStatus(this.localPlayer, this.localPlayer.userData.stats);
+                }
             }
         });
 
@@ -661,32 +738,6 @@ class Game {
             console.log('Player ID:', playerId);
             this.removePlayer(playerId);
         });
-
-        this.socket.on('karmaUpdate', (player) => {
-            console.log(`Received karma update - Player ID: ${player.id}, Karma: ${player.karma}`);
-            const playerMesh = this.players.get(player.id);
-            if (!playerMesh) {
-                console.log(`No mesh found for player ${player.id}`);
-                return;
-            }
-
-            // Immediately update the status bars with the new karma value
-            const stats = {
-                life: player.life ?? playerMesh.userData.stats?.life ?? 100,
-                maxLife: player.maxLife ?? playerMesh.userData.stats?.maxLife ?? 100,
-                mana: player.mana ?? playerMesh.userData.stats?.mana ?? 100,
-                maxMana: player.maxMana ?? playerMesh.userData.stats?.maxMana ?? 100,
-                karma: player.karma,
-                maxKarma: player.maxKarma ?? 100
-            };
-
-            // Store the stats in the mesh's userData for future reference
-            playerMesh.userData.stats = stats;
-            
-            // Force immediate update of the status bars
-            this.updatePlayerStatus(playerMesh, stats);
-            console.log(`Updated player ${player.id} karma to: ${player.karma}`);
-        });
     }
 
     sendPlayerState() {
@@ -694,8 +745,14 @@ class Game {
 
         const playerState = {
             id: this.socket.id,
-            position: this.localPlayer.position,
-            rotation: this.localPlayer.rotation,
+            position: {
+                x: this.localPlayer.position.x,
+                y: this.localPlayer.position.y,
+                z: this.localPlayer.position.z
+            },
+            rotation: {
+                y: this.localPlayer.rotation.y
+            },
             karma: this.playerStats.currentKarma,
             maxKarma: this.playerStats.maxKarma,
             life: this.playerStats.currentLife,
@@ -1417,15 +1474,21 @@ class Game {
         console.log(`Local karma changed from ${previousKarma} to ${this.playerStats.currentKarma}`);
         
         // Update local display immediately
-        this.updateStatusBars();
-        this.updateKarmaEffects();
+        if (this.localPlayer) {
+            this.updatePlayerStatus(this.localPlayer, {
+                life: this.playerStats.currentLife,
+                maxLife: this.playerStats.maxLife,
+                mana: this.playerStats.currentMana,
+                maxMana: this.playerStats.maxMana,
+                karma: this.playerStats.currentKarma,
+                maxKarma: this.playerStats.maxKarma
+            });
+        }
         
-        // Emit karma update with volatile flag for faster transmission
-        if (this.socket && this.localPlayer) {
+        // Send karma update to server immediately
+        if (this.socket?.connected) {
             const updateData = {
                 id: this.socket.id,
-                position: this.localPlayer.position,
-                rotation: this.localPlayer.rotation,
                 karma: this.playerStats.currentKarma,
                 maxKarma: this.playerStats.maxKarma,
                 life: this.playerStats.currentLife,
@@ -1433,14 +1496,12 @@ class Game {
                 mana: this.playerStats.currentMana,
                 maxMana: this.playerStats.maxMana
             };
-
-            // Emit karma update with high priority
+            
+            // Emit dedicated karma update event
             this.socket.emit('karmaUpdate', updateData);
             
-            // Also emit regular movement update
-            this.socket.emit('playerMovement', updateData);
-            
-            console.log('Emitted karma update:', this.playerStats.currentKarma);
+            // Also update position and full state
+            this.sendPlayerState();
         }
     }
 
