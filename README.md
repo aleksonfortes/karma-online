@@ -1,204 +1,108 @@
-# Karma Online - Multiplayer Web Game
+# Karma Online
 
-A multiplayer web game where players can walk around and interact in a 3D environment.
+A real-time multiplayer game where players interact through karma-based actions in a 3D environment.
 
 ## Features
 
-- Real-time multiplayer gameplay
-- 3D character movement
-- Interactive environment
-- Smooth graphics and animations
-- Responsive design
+- **Real-time Multiplayer**: Seamless player interaction using Socket.IO
+- **3D Environment**: Built with Three.js for immersive gameplay
+- **Karma System**: Players can give or take karma from others
+- **Status Effects**: Dynamic effects based on karma levels:
+  - Enlightened (75+ karma)
+  - Blessed (60+ karma)
+  - Haunted (≤40 karma)
+  - Cursed (≤25 karma)
+- **Player Stats**: Track karma, life, and mana for each player
+- **Anti-Cheat**: Built-in movement validation and action cooldowns
 
-## Controls
+## Architecture
 
-- W: Move forward
-- S: Move backward
-- A: Turn left
-- D: Turn right
-- Space: Jump
+### Client (`src/`)
+- Built with Vite and Three.js
+- Handles 3D rendering and player input
+- Manages local player state and remote player updates
+- Real-time communication with server via Socket.IO
 
-## Development Setup
+### Server (`server/`)
+- Node.js server using Socket.IO
+- Manages game state and player synchronization
+- Validates player actions and movements
+- Processes karma effects and updates
+
+## Quick Start
 
 1. Install dependencies:
 ```bash
 npm install
 ```
 
-2. Build the game for development:
+2. Start development server:
 ```bash
-npm run build:dev
+npm run dev
 ```
 
-3. Start the development server:
-```bash
-npm start
-```
-
-4. Start the game server:
-```bash
-npm run server
-```
-
-5. Open your browser and navigate to `http://localhost:5173`
-
-## Building for Production
-
-To create a production build:
-
-```bash
-npm run build
-```
-
-The built files will be in the `dist` directory.
+This will start both the client (port 5173) and server (port 3000) in development mode.
 
 ## Deployment
 
-### Local Deployment
-
-1. First, build the game files:
+1. Build the client:
 ```bash
 npm run build
 ```
 
-2. Then start the production server:
+2. Start production server:
 ```bash
-npm run server:prod
+npm run start
 ```
 
-3. Access the game at `http://localhost:3000`
+The game will be available at `http://localhost:3000`.
 
-Note: Always run either `npm run build:dev` for development or `npm run build` for production before starting the server. The server will show an error if the `dist` directory is missing.
+## Environment Variables
 
-### Cloud Deployment
+- `NODE_ENV`: Set to 'production' or 'development'
+- `PORT`: Server port (default: 3000)
+- `CLIENT_URL`: URL for production client (default: http://localhost:3000)
 
-#### Heroku
+## Game Mechanics
 
-1. Install the Heroku CLI
-2. Create a new Heroku app:
-```bash
-heroku create karma-online
+### Player Actions
+- Movement: WASD keys
+- Give Karma: Left-click on player
+- Take Karma: Right-click on player
+- Cooldown: 1 second between karma actions
+
+### Status Effects
+Effects are automatically applied based on karma levels:
 ```
-
-3. Add a `Procfile` in the root directory:
+Karma Level | Effects
+75+         | Enlightened
+60+         | Blessed
+≤40         | Haunted
+≤25         | Cursed
 ```
-web: npm run build && npm run server:prod
-```
-
-4. Deploy to Heroku:
-```bash
-git push heroku main
-```
-
-#### DigitalOcean App Platform
-
-1. Create a new app in DigitalOcean App Platform
-2. Connect your GitHub repository
-3. Configure the app:
-   - Build Command: `npm run build`
-   - Run Command: `npm run server:prod`
-   - Environment Variables:
-     - `NODE_ENV=production`
-
-#### AWS Elastic Beanstalk
-
-1. Install the AWS CLI and EB CLI
-2. Initialize EB:
-```bash
-eb init karma-online
-```
-
-3. Create an environment:
-```bash
-eb create production
-```
-
-4. Deploy:
-```bash
-eb deploy
-```
-
-### Docker Deployment
-
-1. Create a `Dockerfile`:
-```dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-COPY package*.json ./
-RUN npm install
-
-COPY . .
-RUN npm run build
-
-EXPOSE 3000
-
-CMD ["npm", "run", "server:prod"]
-```
-
-2. Build the Docker image:
-```bash
-docker build -t karma-online .
-```
-
-3. Run the container:
-```bash
-docker run -p 3000:3000 karma-online
-```
-
-### Environment Variables
-
-For production deployment, you might want to set these environment variables:
-
-- `PORT`: The port the server will listen on (default: 3000)
-- `NODE_ENV`: Set to 'production' for production mode
-- `CORS_ORIGIN`: Allowed origins for CORS (default: '*')
-
-Example:
-```bash
-PORT=8080 NODE_ENV=production CORS_ORIGIN=https://yourdomain.com npm run server:prod
-```
-
-## Multiplayer Features
-
-- Real-time player movement synchronization
-- Player joining/leaving notifications
-- Unique player colors (green for local player, red for other players)
-- Interactive environment with obstacles
 
 ## Development
 
-The game is built using:
-- Three.js for 3D graphics
-- Socket.IO for real-time multiplayer
-- Express for the game server
-- Vite for development and building
-- Modern JavaScript (ES6+)
+### Client-Server Communication Events
 
-## Troubleshooting
+```javascript
+// Server -> Client
+'currentPlayers'   // Initial game state
+'newPlayer'        // Player joined
+'playerLeft'       // Player disconnected
+'playerMoved'      // Player position update
+'karmaUpdate'      // Player karma/stats update
 
-### Port Conflicts
-
-If you encounter port conflicts during development:
-
-1. Run the cleanup script to kill all development servers:
-```bash
-npm run cleanup
+// Client -> Server
+'playerMovement'   // Position/rotation update
+'karmaAction'      // Give/take karma
+'karmaUpdate'      // Stats update
 ```
 
-2. Restart the development servers:
-```bash
-npm run server
-npm start
-```
+## Security Features
 
-### Production Issues
-
-1. Make sure all environment variables are set correctly
-2. Check server logs for errors
-3. Ensure the server has enough resources (CPU, memory)
-4. Verify firewall rules allow the necessary ports
-5. If you see "Build Required" error:
-   - Run `npm run build:dev` for development or `npm run build` for production
-   - Restart the server with `npm run server` or `npm run server:prod`
+- Movement validation to prevent speed hacks
+- Rate limiting on player updates (50ms cooldown)
+- Karma action cooldown (1s)
+- Browser-only client validation
+- CORS protection
