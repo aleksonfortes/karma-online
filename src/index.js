@@ -40,6 +40,10 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 right: false
             };
             
+            // Add dialogue state
+            this.activeDialogue = null;
+            this.dialogueUI = null;
+            
             // Add karma recovery timer
             this.lastKarmaRecoveryTime = Date.now();
             
@@ -64,7 +68,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 manaRegen: 0.2,
                 level: 1,
                 experience: 0,
-                experienceToNextLevel: 100
+                experienceToNextLevel: 100,
+                path: null  // 'light' or 'dark' or null
             };
 
             // Add darkness overlay for karma system
@@ -848,6 +853,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             // Dispose of shared resources
             Object.values(this.sharedGeometries).forEach(geometry => geometry.dispose());
             Object.values(this.sharedMaterials).forEach(material => material.dispose());
+            this.hideDialogue();  // Clean up any active dialogue
         }
 
         updatePlayerPosition(player) {
@@ -933,6 +939,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     case 'd': this.controls.right = true; break;
                     case 'k': this.adjustKarma(10); break; // Increase Karma by 10
                     case 'r': this.adjustKarma(-this.playerStats.currentKarma); break; // Reset Karma to 0
+                    case 'e': this.handleInteraction(); break;  // Add E key interaction
                 }
             });
 
@@ -1135,6 +1142,14 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     });
                 }
                 this.lastStatusUpdate = currentTime;
+            }
+
+            // Update NPC interaction text to face camera
+            if (this.darkNPC?.interactionSprite) {
+                this.darkNPC.interactionSprite.quaternion.copy(this.camera.quaternion);
+            }
+            if (this.lightNPC?.interactionSprite) {
+                this.lightNPC.interactionSprite.quaternion.copy(this.camera.quaternion);
             }
             
             // Send player state at a lower frequency (every 50ms)
@@ -2049,14 +2064,14 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 // Set up the dark NPC model (right side)
                 const darkModel = darkNPC.scene;
                 darkModel.scale.set(3.5, 3.5, 3.5);
-                darkModel.position.set(7, 5.5, -9); // Moved closer to middle
-                darkModel.rotation.y = -Math.PI / 4; // Rotate to face center
+                darkModel.position.set(7, 5.5, -9);
+                darkModel.rotation.y = -Math.PI / 4;
                 
                 // Set up the light NPC model (left side)
                 const lightModel = lightNPC.scene;
                 lightModel.scale.set(6, 6, 6);
-                lightModel.position.set(-7, 2.0, -9); // Moved closer to middle
-                lightModel.rotation.y = Math.PI / 4; // Rotate to face center
+                lightModel.position.set(-7, 2.0, -9);
+                lightModel.rotation.y = Math.PI / 4;
                 
                 // Add shadows to both NPCs
                 [darkModel, lightModel].forEach(model => {
@@ -2067,6 +2082,10 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                         }
                     });
                 });
+
+                // Add interaction text to both NPCs with adjusted y-offsets
+                this.addInteractionText(darkModel, 1.2);  // Keep dark NPC's text position
+                this.addInteractionText(lightModel, 1.1);  // Lower light NPC's text position
 
                 // Add both NPCs to temple group
                 templeGroup.add(darkModel);
@@ -2084,11 +2103,11 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 // Add colliders for both NPCs
                 this.statueColliders.push(
                     {
-                        position: new THREE.Vector3(7, 0, -9), // Updated Dark NPC collider position to match model
+                        position: new THREE.Vector3(7, 0, -9),
                         radius: 2.0
                     },
                     {
-                        position: new THREE.Vector3(-7, 0, -9), // Updated Light NPC collider position to match model
+                        position: new THREE.Vector3(-7, 0, -9),
                         radius: 2.0
                     }
                 );
@@ -2096,6 +2115,55 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             } catch (error) {
                 console.error('Error loading NPC models:', error);
             }
+        }
+
+        addInteractionText(npcModel, yOffset) {
+            // Create a canvas for the text
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 64;
+
+            // Set text style with slightly larger font
+            context.font = 'bold 36px Arial';  // Increased from 16px to 20px
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+
+            // Create gradient for text
+            const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+            gradient.addColorStop(0, '#4a9eff');
+            gradient.addColorStop(1, '#00ff88');
+
+            // Draw text with gradient and outline
+            const text = 'Press E';  // Changed from 'E to interact' to 'E interact'
+            context.fillStyle = gradient;
+            context.strokeStyle = '#000000';
+            context.lineWidth = 2;
+            context.strokeText(text, canvas.width / 2, canvas.height / 2);
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            // Create texture from canvas
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+
+            // Create sprite material with adjusted renderOrder
+            const spriteMaterial = new THREE.SpriteMaterial({
+                map: texture,
+                transparent: true,
+                depthTest: false
+            });
+
+            // Create sprite and add to NPC
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.scale.set(0.4, 0.1, 1);
+            sprite.position.y = yOffset;
+            sprite.renderOrder = 999;
+            
+            // Add sprite as child of NPC model
+            npcModel.add(sprite);
+
+            // Store sprite reference
+            npcModel.interactionSprite = sprite;
         }
 
         // Add temple interaction method
@@ -2109,6 +2177,219 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             const baseHalfWidth = 15; // 30/2 for base platform
             return Math.abs(playerPos.x - templePos.x) <= baseHalfWidth && 
                    Math.abs(playerPos.z - templePos.z) <= baseHalfWidth;
+        }
+
+        handleInteraction() {
+            if (!this.localPlayer) return;
+
+            // Check proximity to NPCs
+            const playerPos = this.localPlayer.position;
+            
+            // Check dark NPC
+            if (this.darkNPC) {
+                const darkNPCPos = this.darkNPC.position;
+                const distanceToDark = Math.sqrt(
+                    Math.pow(playerPos.x - darkNPCPos.x, 2) +
+                    Math.pow(playerPos.z - darkNPCPos.z, 2)
+                );
+                
+                if (distanceToDark < 5) {  // Increased interaction radius from 3 to 5
+                    console.log('Interacting with Dark NPC. Distance:', distanceToDark);
+                    this.showDialogue('dark');
+                    return;
+                }
+            }
+            
+            // Check light NPC
+            if (this.lightNPC) {
+                const lightNPCPos = this.lightNPC.position;
+                const distanceToLight = Math.sqrt(
+                    Math.pow(playerPos.x - lightNPCPos.x, 2) +
+                    Math.pow(playerPos.z - lightNPCPos.z, 2)
+                );
+                
+                if (distanceToLight < 5) {  // Increased interaction radius from 3 to 5
+                    console.log('Interacting with Light NPC. Distance:', distanceToLight);
+                    this.showDialogue('light');
+                    return;
+                }
+            }
+        }
+
+        showDialogue(npcType) {
+            // Remove existing dialogue if any
+            this.hideDialogue();
+            
+            // Create dialogue UI
+            const dialogueContainer = document.createElement('div');
+            dialogueContainer.style.position = 'fixed';
+            dialogueContainer.style.top = '50px';  // Changed from bottom to top
+            dialogueContainer.style.left = '50%';
+            dialogueContainer.style.transform = 'translateX(-50%)';
+            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            dialogueContainer.style.padding = '20px';
+            dialogueContainer.style.borderRadius = '10px';
+            dialogueContainer.style.color = 'white';
+            dialogueContainer.style.maxWidth = '600px';
+            dialogueContainer.style.width = '80%';
+            dialogueContainer.style.zIndex = '1000';
+            dialogueContainer.style.border = '2px solid #4a9eff';
+            dialogueContainer.style.boxShadow = '0 0 20px rgba(74, 158, 255, 0.3)';
+
+            // Don't show choice dialogue if player already has a path
+            if (this.playerStats.path) {
+                const text = document.createElement('p');
+                text.style.margin = '0';
+                text.style.fontSize = '18px';
+                text.style.lineHeight = '1.5';
+                text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
+                text.textContent = `You have already chosen the path of ${this.playerStats.path}. This choice is permanent in this life.`;
+
+                const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
+                closeButton.style.marginTop = '15px';
+                closeButton.style.float = 'right';
+                
+                dialogueContainer.appendChild(text);
+                dialogueContainer.appendChild(closeButton);
+                document.body.appendChild(dialogueContainer);
+                
+                this.dialogueUI = dialogueContainer;
+                return;
+            }
+
+            // Initial dialogue content
+            const content = npcType === 'dark' ? 
+                'Greetings, seeker. I am the Dark Guardian. The path of darkness offers great power, but at what cost? Would you embrace the shadows and walk the Dark Path?' :
+                'Welcome, brave soul. I am the Light Guardian. The path of light offers protection and healing, but requires great sacrifice. Would you follow the Light Path?';
+
+            const text = document.createElement('p');
+            text.style.margin = '0 0 20px 0';
+            text.style.fontSize = '18px';
+            text.style.lineHeight = '1.5';
+            text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
+            text.textContent = content;
+
+            const warning = document.createElement('p');
+            warning.style.margin = '0 0 20px 0';
+            warning.style.fontSize = '16px';
+            warning.style.color = '#ff9900';
+            warning.style.fontStyle = 'italic';
+            warning.textContent = 'Choose wisely. This decision is permanent and will define your journey.';
+
+            // Create button container
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.justifyContent = 'space-between';
+            buttonContainer.style.marginTop = '20px';
+
+            // Create choice buttons
+            const acceptButton = this.createDialogueButton(
+                'Accept',
+                () => {
+                    this.hideDialogue();  // Hide current dialogue before showing confirmation
+                    this.choosePath(npcType === 'dark' ? 'dark' : 'light');
+                }
+            );
+            
+            const declineButton = this.createDialogueButton(
+                'Decline',
+                () => this.hideDialogue()
+            );
+
+            buttonContainer.appendChild(declineButton);
+            buttonContainer.appendChild(acceptButton);
+
+            dialogueContainer.appendChild(text);
+            dialogueContainer.appendChild(warning);
+            dialogueContainer.appendChild(buttonContainer);
+            document.body.appendChild(dialogueContainer);
+
+            // Store reference to active dialogue
+            this.dialogueUI = dialogueContainer;
+            this.activeDialogue = npcType;
+        }
+
+        createDialogueButton(text, onClick) {
+            const button = document.createElement('button');
+            button.textContent = text;
+            button.style.padding = '8px 16px';
+            button.style.backgroundColor = '#4a9eff';
+            button.style.border = 'none';
+            button.style.borderRadius = '5px';
+            button.style.color = 'white';
+            button.style.cursor = 'pointer';
+            button.style.minWidth = '100px';
+            button.style.fontSize = '16px';
+            
+            button.addEventListener('click', onClick);
+            button.addEventListener('mouseover', () => {
+                button.style.backgroundColor = '#2185ff';
+            });
+            button.addEventListener('mouseout', () => {
+                button.style.backgroundColor = '#4a9eff';
+            });
+
+            return button;
+        }
+
+        choosePath(path) {
+            // Remove any existing dialogue
+            this.hideDialogue();
+            
+            // Set the player's path
+            this.playerStats.path = path;
+            
+            // Create confirmation dialogue
+            const dialogueContainer = document.createElement('div');
+            dialogueContainer.style.position = 'fixed';
+            dialogueContainer.style.top = '50px';
+            dialogueContainer.style.left = '50%';
+            dialogueContainer.style.transform = 'translateX(-50%)';
+            dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            dialogueContainer.style.padding = '20px';
+            dialogueContainer.style.borderRadius = '10px';
+            dialogueContainer.style.color = 'white';
+            dialogueContainer.style.maxWidth = '600px';
+            dialogueContainer.style.width = '80%';
+            dialogueContainer.style.zIndex = '1000';
+            dialogueContainer.style.border = path === 'dark' ? '2px solid #6600cc' : '2px solid #ffcc00';
+            dialogueContainer.style.boxShadow = path === 'dark' ? 
+                '0 0 20px rgba(102, 0, 204, 0.3)' : 
+                '0 0 20px rgba(255, 204, 0, 0.3)';
+
+            const text = document.createElement('p');
+            text.style.margin = '0';
+            text.style.fontSize = '18px';
+            text.style.lineHeight = '1.5';
+            text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
+            
+            const pathMessage = path === 'dark' ?
+                'You have embraced the shadows. The Dark Path will grant you power through sacrifice.' :
+                'You have chosen the light. The Light Path will grant you strength through protection.';
+            
+            text.textContent = pathMessage;
+
+            const closeButton = this.createDialogueButton('Continue', () => {
+                this.hideDialogue();
+            });
+            closeButton.style.backgroundColor = path === 'dark' ? '#6600cc' : '#ffcc00';
+            closeButton.style.marginTop = '15px';
+            closeButton.style.float = 'right';
+
+            dialogueContainer.appendChild(text);
+            dialogueContainer.appendChild(closeButton);
+            document.body.appendChild(dialogueContainer);
+
+            // Update the dialogue reference
+            this.dialogueUI = dialogueContainer;
+        }
+
+        hideDialogue() {
+            if (this.dialogueUI) {
+                this.dialogueUI.remove();
+                this.dialogueUI = null;
+                this.activeDialogue = null;
+            }
         }
     }
 
