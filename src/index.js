@@ -46,7 +46,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     name: 'Martial Arts',
                     key: 'Space',
                     slot: 1, // Changed from 5 to 1
-                    damage: 15,
+                    damage: 75, // Increased from 15 to 75 (5x) for testing
                     range: 3,
                     cooldown: 2000, // 2 seconds
                     lastUsed: 0,
@@ -629,72 +629,60 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                         oldLife: targetMesh.userData.stats?.life,
                         isLocalPlayer: data.targetId === this.socket.id
                     });
-                    
-                    // Update target's life in userData
-                    if (targetMesh.userData.stats) {
-                        const oldLife = targetMesh.userData.stats.life;
-                        targetMesh.userData.stats.life = Math.max(0, oldLife - data.damage);
-                        
-                        // Update the visual status bars
-                        this.updatePlayerStatus(targetMesh, targetMesh.userData.stats, true);
-                        
-                        // If this is our player, update the main UI and check for death
-                        if (data.targetId === this.socket.id) {
-                            const previousLife = this.playerStats.currentLife;
-                            this.playerStats.currentLife = targetMesh.userData.stats.life;
-                            this.updateStatusBars();
-                            
-                            // Check for death
-                            if (this.playerStats.currentLife === 0 && previousLife > 0) {
-                                this.handlePlayerDeath();
-                            }
-                            
-                            console.log('🛡️ Local Player Damaged:', {
-                                newLife: this.playerStats.currentLife,
-                                maxLife: this.playerStats.maxLife,
-                                died: this.playerStats.currentLife === 0
-                            });
+
+                    // Find the character model's material (it's a child of the player mesh)
+                    let characterMaterial;
+                    targetMesh.traverse((child) => {
+                        if (child.isMesh && child.material) {
+                            characterMaterial = child.material;
                         }
+                    });
+
+                    if (!characterMaterial) {
+                        console.warn('Character material not found for damage effect');
+                        return;
                     }
                     
-                    // Create damage number
+                    // Create damage number with unique ID
+                    const damageId = `damage-${Date.now()}-${Math.random()}`;
                     const damageText = document.createElement('div');
-                    damageText.className = 'damage-text';
-                    damageText.style.position = 'absolute';
-                    damageText.style.fontFamily = 'Arial, sans-serif';
-                    damageText.style.fontWeight = 'bold';
+                    damageText.id = damageId;
+                    damageText.textContent = data.isCritical ? `${data.damage}!` : data.damage;
+                    damageText.style.position = 'fixed';
+                    damageText.style.color = data.isCritical ? '#ff0000' : '#ffffff';
                     damageText.style.fontSize = data.isCritical ? '24px' : '20px';
-                    damageText.style.color = data.isCritical ? '#ff0000' : '#ff6666';
+                    damageText.style.fontWeight = 'bold';
                     damageText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
                     damageText.style.pointerEvents = 'none';
-                    damageText.textContent = data.damage;
-
+                    damageText.style.zIndex = '1000';
                     document.body.appendChild(damageText);
 
-                    // Convert 3D position to screen coordinates
-                    const position = new THREE.Vector3();
-                    targetMesh.getWorldPosition(position);
-                    position.y += 2; // Position above the player
+                    // Get screen position for damage number
+                    const updatePosition = () => {
+                        const vector = new THREE.Vector3();
+                        vector.setFromMatrixPosition(targetMesh.matrixWorld);
+                        vector.y += 2;
 
-                    const screenPosition = position.clone();
-                    screenPosition.project(this.camera);
+                        const widthHalf = window.innerWidth / 2;
+                        const heightHalf = window.innerHeight / 2;
+                        vector.project(this.camera);
 
-                    const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
-                    const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
+                        const x = (vector.x * widthHalf) + widthHalf;
+                        const y = -(vector.y * heightHalf) + heightHalf;
 
-                    damageText.style.left = x + 'px';
-                    damageText.style.top = y + 'px';
+                        damageText.style.left = `${x}px`;
+                        damageText.style.top = `${y}px`;
+                    };
 
-                    // Store the original material color
-                    const originalColor = targetMesh.material ? targetMesh.material.color.clone() : new THREE.Color(0xffffff);
-                    
-                    // Flash the target red
-                    if (targetMesh.material) {
-                        targetMesh.material.color.setHex(0xff0000);
-                    }
-                    
+                    // Initial position
+                    updatePosition();
+
+                    // Store original color and flash the target red
+                    const originalColor = characterMaterial.color.clone();
+                    characterMaterial.color.setHex(0xff0000);
+
                     // Animate damage number
-                    let startTime = performance.now();
+                    const startTime = performance.now();
                     const animate = (currentTime) => {
                         const elapsed = currentTime - startTime;
                         const duration = 1000; // 1 second animation
@@ -703,19 +691,30 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                             const progress = elapsed / duration;
                             damageText.style.opacity = 1 - progress;
                             damageText.style.transform = `translateY(${-50 * progress}px)`;
+                            updatePosition(); // Update position each frame
                             requestAnimationFrame(animate);
                         } else {
-                            document.body.removeChild(damageText);
+                            // Ensure the element is removed
+                            const element = document.getElementById(damageId);
+                            if (element) {
+                                element.remove();
+                            }
                         }
                     };
                     requestAnimationFrame(animate);
 
                     // Reset target color after 200ms
                     setTimeout(() => {
-                        if (targetMesh.material) {
-                            targetMesh.material.color.copy(originalColor);
-                        }
+                        characterMaterial.color.copy(originalColor);
                     }, 200);
+
+                    // Backup cleanup after 2 seconds in case animation fails
+                    setTimeout(() => {
+                        const element = document.getElementById(damageId);
+                        if (element) {
+                            element.remove();
+                        }
+                    }, 2000);
                 } else if (data.type === 'immune') {
                     // Create immunity text
                     const immuneText = document.createElement('div');
@@ -826,6 +825,102 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     this.playerStats.currentMana = data.mana;
                     this.playerStats.maxMana = data.maxMana;
                     this.updateStatusBars();
+                }
+            });
+
+            // Add life update handler
+            this.socket.on('lifeUpdate', (data) => {
+                const playerMesh = this.players.get(data.id);
+                if (!playerMesh) {
+                    console.log('Player mesh not found for life update:', data.id);
+                    return;
+                }
+
+                // Update stored life stats
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+                
+                const oldLife = playerMesh.userData.stats.life;
+                playerMesh.userData.stats.life = data.life;
+                playerMesh.userData.stats.maxLife = data.maxLife;
+                
+                // Update visual status bars
+                this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+
+                // If this is our player, update the main UI and check for death
+                if (data.id === this.socket.id) {
+                    const previousLife = this.playerStats.currentLife;
+                    this.playerStats.currentLife = data.life;
+                    this.playerStats.maxLife = data.maxLife;
+                    this.updateStatusBars();
+                    
+                    // Check for death
+                    if (this.playerStats.currentLife === 0 && previousLife > 0) {
+                        this.handlePlayerDeath();
+                    }
+                    
+                    console.log('🛡️ Life Updated:', {
+                        oldLife: previousLife,
+                        newLife: this.playerStats.currentLife,
+                        maxLife: this.playerStats.maxLife,
+                        died: this.playerStats.currentLife === 0
+                    });
+                }
+            });
+
+            // Add mana update handler
+            this.socket.on('manaUpdate', (data) => {
+                const playerMesh = this.players.get(data.id);
+                if (!playerMesh) {
+                    console.log('Player mesh not found for mana update:', data.id);
+                    return;
+                }
+
+                // Update stored mana stats
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+                
+                playerMesh.userData.stats.mana = data.mana;
+                playerMesh.userData.stats.maxMana = data.maxMana;
+                
+                // Update visual status bars
+                this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+
+                // If this is our player, update the main UI
+                if (data.id === this.socket.id) {
+                    this.playerStats.currentMana = data.mana;
+                    this.playerStats.maxMana = data.maxMana;
+                    this.updateStatusBars();
+                }
+            });
+
+            // Update karma handler to only handle karma
+            this.socket.on('karmaUpdate', (data) => {
+                const playerMesh = this.players.get(data.id);
+                if (!playerMesh) {
+                    console.log('Player mesh not found for karma update:', data.id);
+                    return;
+                }
+
+                // Update stored karma stats
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+                
+                playerMesh.userData.stats.karma = data.karma;
+                playerMesh.userData.stats.maxKarma = data.maxKarma;
+                
+                // Update visual status bars
+                this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+
+                // If this is our player, update the main UI and effects
+                if (data.id === this.socket.id) {
+                    this.playerStats.currentKarma = data.karma;
+                    this.playerStats.maxKarma = data.maxKarma;
+                    this.updateStatusBars();
+                    this.updateKarmaEffects();
                 }
             });
 
@@ -948,62 +1043,6 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     this.sendPlayerState();
                 }
             });
-
-            this.socket.on('karmaUpdate', (data) => {
-                const playerMesh = this.players.get(data.id);
-                console.log('Received karmaUpdate:', {
-                    playerId: data.id,
-                    playerFound: !!playerMesh,
-                    life: data.life,
-                    currentStats: playerMesh?.userData?.stats
-                });
-                if (playerMesh) {
-                    // Store the updated stats
-                    if (!playerMesh.userData.stats) {
-                        playerMesh.userData.stats = {};
-                    }
-                    
-                    // Update the stored stats
-                    const oldStats = { ...playerMesh.userData.stats };
-                    playerMesh.userData.stats = {
-                        ...playerMesh.userData.stats,
-                        life: data.life,
-                        maxLife: data.maxLife,
-                        mana: data.mana,
-                        maxMana: data.maxMana,
-                        karma: data.karma,
-                        maxKarma: data.maxKarma
-                    };
-                    console.log('Updated player stats:', {
-                        playerId: data.id,
-                        oldLife: oldStats.life,
-                        newLife: data.life,
-                        isLocalPlayer: data.id === this.socket.id
-                    });
-
-                    // Update the visual status bars
-                    this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-
-                    // If this is our player, update the main UI
-                    if (data.id === this.socket.id) {
-                        this.playerStats.currentLife = data.life;
-                        this.playerStats.maxLife = data.maxLife;
-                        this.playerStats.currentMana = data.mana;
-                        this.playerStats.maxMana = data.maxMana;
-                        this.playerStats.currentKarma = data.karma;
-                        this.playerStats.maxKarma = data.maxKarma;
-                        this.updateStatusBars();
-                        this.updateKarmaEffects();
-                    }
-                }
-            });
-
-            // Update interval for continuous state synchronization
-            this.updateInterval = setInterval(() => {
-                if (this.localPlayer && this.socket?.connected) {
-                    this.sendPlayerState();
-                }
-            }, 16);  // 60fps update rate
 
             this.socket.on('playerMoved', (player) => {
                 if (player.id === this.socket?.id) return;
@@ -1218,7 +1257,10 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
         useMartialArts() {
             // Prevent skill use if dead
-            if (!this.isAlive) return;
+            if (!this.isAlive) {
+                console.log('Cannot use skills while dead');
+                return;
+            }
 
             // Check if player has the skill
             if (!this.activeSkills.has('martial_arts') || this.playerStats.path !== 'light') {
@@ -1247,6 +1289,14 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
             this.players.forEach((otherPlayer, playerId) => {
                 if (playerId === this.socket.id) return; // Skip self
+                
+                // Skip dead players - more thorough check
+                if (!otherPlayer.userData?.stats?.life || 
+                    otherPlayer.userData.stats.life <= 0 || 
+                    otherPlayer.userData.isDead) {
+                    console.log('Skipping dead player:', playerId);
+                    return;
+                }
 
                 const dx = otherPlayer.position.x - playerPos.x;
                 const dz = otherPlayer.position.z - playerPos.z;
@@ -1264,33 +1314,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             });
 
             if (targetFound) {
-                // Update last used time
                 skill.lastUsed = now;
-                
-                // Visual feedback
-                if (this.martialArtsSlot) {
-                    const flash = document.createElement('div');
-                    flash.style.position = 'absolute';
-                    flash.style.inset = '0';
-                    flash.style.backgroundColor = 'rgba(255, 255, 255, 0.5)';
-                    flash.style.borderRadius = '4px';
-                    flash.style.animation = 'skillFlash 0.5s ease-out';
-                    
-                    const style = document.createElement('style');
-                    style.textContent = `
-                        @keyframes skillFlash {
-                            0% { opacity: 0.5; }
-                            100% { opacity: 0; }
-                        }
-                    `;
-                    document.head.appendChild(style);
-                    
-                    this.martialArtsSlot.appendChild(flash);
-                    setTimeout(() => {
-                        flash.remove();
-                        style.remove();
-                    }, 500);
-                }
             }
         }
 
@@ -1931,12 +1955,12 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
         }
 
         updateStatusBars() {
-            // Update life ring
+            // Update life ring - fill from top to bottom
             const lifePercent = (this.playerStats.currentLife / this.playerStats.maxLife) * 100;
             this.lifeRingFill.style.height = `${lifePercent}%`;
             this.lifeTooltip.textContent = `Life: ${Math.round(this.playerStats.currentLife)} / ${this.playerStats.maxLife}`;
 
-            // Update mana ring
+            // Update mana ring - fill from top to bottom
             const manaPercent = (this.playerStats.currentMana / this.playerStats.maxMana) * 100;
             this.manaRingFill.style.height = `${manaPercent}%`;
             this.manaTooltip.textContent = `Mana: ${Math.round(this.playerStats.currentMana)} / ${this.playerStats.maxMana}`;
@@ -1952,12 +1976,18 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
         // Add damage and healing methods
         damagePlayer(amount) {
+            console.log('Damage taken:', amount);
+            console.log('Current life:', this.playerStats.currentLife);
+            
             const previousLife = this.playerStats.currentLife;
             this.playerStats.currentLife = Math.max(0, this.playerStats.currentLife - amount);
+            
+            console.log('New life:', this.playerStats.currentLife);
             this.updateStatusBars();
 
             // Check for death
             if (this.playerStats.currentLife === 0 && previousLife > 0) {
+                console.log('Player died, calling handlePlayerDeath');
                 this.handlePlayerDeath();
             }
 
@@ -1974,55 +2004,77 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
         }
 
         handlePlayerDeath() {
+            console.log('Starting death sequence...');
+            
             // Disable player movement and interactions immediately
             this.isAlive = false;
             
             if (this.localPlayer) {
-                // Hide status bars for dead player
+                // Hide status bars
                 if (this.localPlayer.userData.statusGroup) {
                     this.scene.remove(this.localPlayer.userData.statusGroup);
                 }
-                
-                // Create death animation
-                const startTime = performance.now();
-                const deathAnimationDuration = 2000; // 2 seconds
-                const startPosition = this.localPlayer.position.clone();
-                const startScale = this.localPlayer.scale.clone();
-                
-                const animateDeath = (currentTime) => {
-                    const elapsed = currentTime - startTime;
-                    const progress = Math.min(elapsed / deathAnimationDuration, 1);
-                    
-                    // Fade out by scaling down and sinking into the ground
-                    this.localPlayer.scale.copy(startScale.multiplyScalar(1 - progress));
-                    this.localPlayer.position.y = startPosition.y - (progress * 1.5); // Sink into ground
-                    this.localPlayer.rotation.y += progress * Math.PI * 2; // Spin once while dying
-                    
-                    // Add transparency if material supports it
-                    if (this.localPlayer.material) {
-                        this.localPlayer.material.transparent = true;
-                        this.localPlayer.material.opacity = 1 - progress;
-                    }
-                    
-                    if (progress < 1) {
-                        requestAnimationFrame(animateDeath);
-                    } else {
-                        // Remove the player model and status group after animation
-                        this.scene.remove(this.localPlayer);
-                        // Remove from players Map
-                        if (this.socket?.id) {
-                            this.players.delete(this.socket.id);
-                        }
-                        // Notify server of death
+
+                // Set up death animation state
+                this.localPlayer.userData.deathAnimation = {
+                    startTime: Date.now(),
+                    duration: 2000,
+                    startY: this.localPlayer.position.y,
+                    startRotation: this.localPlayer.rotation.y,
+                    isAnimating: true
+                };
+
+                // Add death animation to the game's update loop
+                const originalUpdatePlayer = this.updatePlayer.bind(this);
+                this.updatePlayer = () => {
+                    if (!this.isAlive && this.localPlayer?.userData.deathAnimation?.isAnimating) {
+                        const anim = this.localPlayer.userData.deathAnimation;
+                        const elapsed = Date.now() - anim.startTime;
+                        const progress = Math.min(elapsed / anim.duration, 1);
+                        
+                        // Smooth easing
+                        const easeProgress = progress * (2 - progress);
+                        
+                        // Update position (sink)
+                        this.localPlayer.position.y = anim.startY - (easeProgress * 2);
+                        
+                        // Update rotation (spin)
+                        this.localPlayer.rotation.y = anim.startRotation + (easeProgress * Math.PI * 4);
+                        
+                        // Update scale (shrink)
+                        this.localPlayer.scale.setScalar(Math.max(0.1, 1 - easeProgress));
+
+                        // Send updated state to server
                         if (this.socket?.connected) {
-                            this.socket.emit('playerDied', {
-                                id: this.socket.id
+                            this.socket.emit('playerState', {
+                                id: this.socket.id,
+                                position: this.localPlayer.position,
+                                rotation: this.localPlayer.rotation,
+                                scale: this.localPlayer.scale,
+                                isDead: true
                             });
                         }
+
+                        // Check if animation is complete
+                        if (progress >= 1) {
+                            this.localPlayer.userData.deathAnimation.isAnimating = false;
+                            this.scene.remove(this.localPlayer);
+                            if (this.socket?.id) {
+                                this.players.delete(this.socket.id);
+                                // Final death notification to server
+                                if (this.socket?.connected) {
+                                    this.socket.emit('playerDied', {
+                                        id: this.socket.id,
+                                        isDead: true
+                                    });
+                                }
+                            }
+                        }
+                    } else {
+                        // Call original update if not animating death
+                        originalUpdatePlayer();
                     }
                 };
-                
-                requestAnimationFrame(animateDeath);
             }
 
             // Create death screen overlay with pointer-events blocking
@@ -2259,8 +2311,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
         createStatRing(color, shadowColor, statName) {
             const ringContainer = document.createElement('div');
-            ringContainer.style.width = '96px';  // Increased from 60px to match XP ring
-            ringContainer.style.height = '96px';  // Increased from 60px to match XP ring
+            ringContainer.style.width = '96px';
+            ringContainer.style.height = '96px';
             ringContainer.style.position = 'relative';
             ringContainer.style.borderRadius = '50%';
             ringContainer.style.background = 'linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%)';
@@ -2275,15 +2327,10 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             fill.style.width = '100%';
             fill.style.background = color;
             fill.style.transition = 'height 0.3s ease-out';
-            fill.style.borderRadius = '50%';
+            fill.style.borderRadius = '0';  // Remove border radius from fill
             fill.style.opacity = '0.8';
-
-            // Position fill based on stat type
-            if (statName === 'Life') {
-                fill.style.top = '0';  // Start from top for life
-            } else {
-                fill.style.bottom = '0';  // Start from bottom for other stats
-            }
+            fill.style.bottom = '0';  // Start from bottom
+            fill.style.transformOrigin = 'bottom';  // Set transform origin to bottom
 
             // Create ring container with mask
             const maskContainer = document.createElement('div');

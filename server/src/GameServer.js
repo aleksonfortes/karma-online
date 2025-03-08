@@ -141,35 +141,27 @@ export class GameServer {
                         // Apply damage
                         target.life = Math.max(0, target.life - finalDamage);
                         
-                        // Immediately broadcast the target's updated life to all clients
-                        this.io.emit('karmaUpdate', {
+                        // Emit life update immediately
+                        this.io.emit('lifeUpdate', {
                             id: data.targetId,
-                            karma: target.karma,
-                            maxKarma: target.maxKarma,
                             life: target.life,
-                            maxLife: target.maxLife,
-                            mana: target.mana,
-                            maxMana: target.maxMana
+                            maxLife: target.maxLife
                         });
                         
                         // Karma effects from combat - only on kills
                         if (target.life === 0) {
-                            // Killing a player affects karma significantly
-                            attacker.karma = Math.max(0, attacker.karma - 10);
+                            // Killing a player increases karma by 10
+                            attacker.karma = Math.min(attacker.maxKarma, attacker.karma + 10);
                             
                             // Broadcast the attacker's karma update
                             this.io.emit('karmaUpdate', {
                                 id: socket.id,
                                 karma: attacker.karma,
-                                maxKarma: attacker.maxKarma,
-                                life: attacker.life,
-                                maxLife: attacker.maxLife,
-                                mana: attacker.mana,
-                                maxMana: attacker.maxMana
+                                maxKarma: attacker.maxKarma
                             });
                         }
 
-                        // Then emit the damage effect
+                        // Then emit the damage effect for visuals
                         this.io.emit('skillEffect', {
                             type: 'damage',
                             targetId: data.targetId,
@@ -227,27 +219,34 @@ export class GameServer {
             socket.on('karmaUpdate', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
-                    // Update player's stats in server state
+                    // Update only karma in server state
                     player.karma = data.karma;
                     player.maxKarma = data.maxKarma;
-                    player.life = data.life;
-                    player.maxLife = data.maxLife;
-                    player.mana = data.mana;
-                    player.maxMana = data.maxMana;
                     
                     // Update effects
                     this.updatePlayerEffects(player);
                     
-                    // Broadcast to ALL clients including sender for consistency
+                    // Broadcast karma update only
                     this.io.emit('karmaUpdate', {
                         id: socket.id,
                         karma: data.karma,
                         maxKarma: data.maxKarma,
-                        life: data.life,
-                        maxLife: data.maxLife,
-                        mana: data.mana,
-                        maxMana: data.maxMana,
                         effects: player.effects
+                    });
+                }
+            });
+
+            // Add new handler for mana updates
+            socket.on('manaUpdate', (data) => {
+                const player = this.players.get(socket.id);
+                if (player) {
+                    player.mana = data.mana;
+                    player.maxMana = data.maxMana;
+                    
+                    this.io.emit('manaUpdate', {
+                        id: socket.id,
+                        mana: data.mana,
+                        maxMana: data.maxMana
                     });
                 }
             });
