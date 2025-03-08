@@ -30,24 +30,16 @@ export class GameServer {
         
         this.io.on('connection', (socket) => {
             console.log(`Player connected: ${socket.id}`);
-
-            // Only create players for browser clients
-            if (socket.handshake.headers['user-agent']?.includes('Mozilla')) {
-                // Initialize player data
-                const player = this.createPlayer(socket.id);
-                
-                // Add player to the game state
-                this.players.set(socket.id, player);
-                this.gameState.players.set(socket.id, player);
-                console.log(`Player joined: ${player.displayName} (Total Players: ${this.players.size})`);
-
-                // Send current game state to the new player
-                const currentPlayers = Array.from(this.gameState.players.values());
-                socket.emit('currentPlayers', currentPlayers);
-
-                // Notify other players about the new player
-                socket.broadcast.emit('newPlayer', player);
-            }
+            
+            // Create new player
+            const player = this.createPlayer(socket.id);
+            this.players.set(socket.id, player);
+            
+            // Send current players to new player
+            socket.emit('currentPlayers', Array.from(this.players.values()));
+            
+            // Broadcast new player to others
+            socket.broadcast.emit('newPlayer', player);
 
             // Handle player movement with rate limiting
             socket.on('playerMovement', (data) => {
@@ -60,15 +52,148 @@ export class GameServer {
                     if (now - lastUpdate >= 50) {
                         player.position = data.position;
                         player.rotation = data.rotation;
+                        player.path = data.path;
+                        player.karma = data.karma;
+                        player.maxKarma = data.maxKarma;
+                        
+                        // Don't update life from client movement updates
+                        // This prevents client-side life regeneration
+                        player.mana = data.mana;
+                        player.maxMana = data.maxMana;
                         this.lastUpdateTime.set(socket.id, now);
                         
                         // Broadcast movement to other players
                         socket.broadcast.emit('playerMoved', {
                             id: socket.id,
                             position: data.position,
-                            rotation: data.rotation
+                            rotation: data.rotation,
+                            path: data.path,
+                            karma: data.karma,
+                            maxKarma: data.maxKarma,
+                            life: player.life, // Send server's life value
+                            maxLife: player.maxLife,
+                            mana: data.mana,
+                            maxMana: data.maxMana
                         });
                     }
+                }
+            });
+
+            // Handle skill damage
+            socket.on('skillDamage', (data) => {
+                const attacker = this.players.get(socket.id);
+                const target = this.players.get(data.targetId);
+                
+                if (!attacker || !target) return;
+                
+                console.log('Skill damage:', {
+                    attackerId: socket.id,
+                    attackerPath: attacker.path,
+                    attackerKarma: attacker.karma,
+                    targetId: data.targetId,
+                    skillName: data.skillName,
+                    damage: data.damage
+                });
+
+                // Prevent Illuminated players from dealing damage
+                if (attacker.karma === 0) {
+                    console.log('Illuminated attacker cannot deal damage');
+                    return;
+                }
+                
+                // Verify attacker has Light path for Martial Arts
+                if (data.skillName === 'martial_arts' && attacker.path === 'light') {
+                    // Calculate damage based on karma levels
+                    let finalDamage = data.damage;
+                    
+                    // Check for Illuminated status (0 karma)
+                    if (target.karma === 0) {
+                        // Illuminated players are immune to direct damage
+                        finalDamage = 0;
+                    } 
+                    // Check for Forsaken status (100 karma)
+                    else if (target.karma === 100) {
+                        // Forsaken players are immune to direct damage
+                        finalDamage = 0;
+                    }
+                    // Normal damage calculation
+                    else {
+                        // Damage increases as attacker's karma decreases (Light path)
+                        const karmaMultiplier = 1 + ((50 - attacker.karma) / 50);
+                        finalDamage *= karmaMultiplier;
+                        
+                        // Target's karma affects damage taken
+                        const targetKarmaReduction = target.karma / 100; // Higher karma = more damage reduction
+                        finalDamage *= (1 - targetKarmaReduction * 0.5); // Max 50% reduction at 100 karma
+                    }
+                    
+                    // Round the final damage
+                    finalDamage = Math.round(finalDamage);
+                    
+                    console.log('Calculated damage:', {
+                        attackerKarma: attacker.karma,
+                        targetKarma: target.karma,
+                        baseDamage: data.damage,
+                        finalDamage: finalDamage
+                    });
+                    
+                    if (finalDamage > 0) {
+                        // Apply damage
+                        target.life = Math.max(0, target.life - finalDamage);
+                        
+                        // Immediately broadcast the target's updated life to all clients
+                        this.io.emit('karmaUpdate', {
+                            id: data.targetId,
+                            karma: target.karma,
+                            maxKarma: target.maxKarma,
+                            life: target.life,
+                            maxLife: target.maxLife,
+                            mana: target.mana,
+                            maxMana: target.maxMana
+                        });
+                        
+                        // Karma effects from combat - only on kills
+                        if (target.life === 0) {
+                            // Killing a player affects karma significantly
+                            attacker.karma = Math.max(0, attacker.karma - 10);
+                            
+                            // Broadcast the attacker's karma update
+                            this.io.emit('karmaUpdate', {
+                                id: socket.id,
+                                karma: attacker.karma,
+                                maxKarma: attacker.maxKarma,
+                                life: attacker.life,
+                                maxLife: attacker.maxLife,
+                                mana: attacker.mana,
+                                maxMana: attacker.maxMana
+                            });
+                        }
+
+                        // Then emit the damage effect
+                        this.io.emit('skillEffect', {
+                            type: 'damage',
+                            targetId: data.targetId,
+                            damage: finalDamage,
+                            skillName: data.skillName,
+                            attackerKarma: attacker.karma,
+                            targetKarma: target.karma,
+                            isCritical: finalDamage > data.damage
+                        });
+                    } else {
+                        // Emit immunity feedback
+                        this.io.emit('skillEffect', {
+                            type: 'immune',
+                            targetId: data.targetId,
+                            skillName: data.skillName,
+                            reason: target.karma === 0 ? 'illuminated' : 'forsaken'
+                        });
+                    }
+                } else {
+                    console.log('Skill use failed:', {
+                        reason: attacker.path !== 'light' ? 'wrong path' : 'unknown skill',
+                        attackerPath: attacker.path,
+                        skillName: data.skillName
+                    });
                 }
             });
 
@@ -127,6 +252,21 @@ export class GameServer {
                 }
             });
 
+            // Handle player death
+            socket.on('playerDied', (data) => {
+                const player = this.players.get(socket.id);
+                if (player) {
+                    // Remove player from server state
+                    this.players.delete(socket.id);
+                    this.gameState.players.delete(socket.id);
+                    this.lastUpdateTime.delete(socket.id);
+                    
+                    // Notify all clients that the player has died and should be removed
+                    this.io.emit('playerLeft', socket.id);
+                    console.log(`Player died and left: ${player.displayName} (Total Players: ${this.players.size})`);
+                }
+            });
+
             // Handle disconnection
             socket.on('disconnect', () => {
                 const player = this.players.get(socket.id);
@@ -152,6 +292,7 @@ export class GameServer {
             rotation: {
                 y: 0
             },
+            path: null,
             karma: 50,
             maxKarma: 100,
             life: 100,
