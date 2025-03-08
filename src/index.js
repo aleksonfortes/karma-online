@@ -236,11 +236,12 @@ class Game {
     }
 
     checkCollision(position, previousPosition) {
-        // Check terrain boundaries
+        // Check terrain boundaries first (water/edge collision)
         const terrainSize = this.terrain.size;
         const halfTerrainSize = (terrainSize / 2) - 1;
         
-        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
+        // Strict boundary check for water
+        if (Math.abs(position.x) > halfTerrainSize - 1 || Math.abs(position.z) > halfTerrainSize - 1) {
             if (previousPosition) {
                 position.x = previousPosition.x;
                 position.z = previousPosition.z;
@@ -248,15 +249,14 @@ class Game {
             return true;
         }
         
-        // Check statue collisions
+        // Check statue collisions with minimal buffer
         if (this.statueColliders) {
             for (const statue of this.statueColliders) {
                 const dx = position.x - statue.position.x;
                 const dz = position.z - statue.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                if (distance < statue.radius) {
-                    // Collision detected, move player back
+                if (distance < statue.radius + 0.1) { // Small buffer for statue collisions
                     if (previousPosition) {
                         position.x = previousPosition.x;
                         position.z = previousPosition.z;
@@ -280,7 +280,7 @@ class Game {
 
         // Use provided position for existing players, temple center for new local player
         if (id === this.socket?.id) {
-            playerModel.position.set(0, 1.5, 0);
+            playerModel.position.set(0, 3, 0); // Start at temple height
         } else {
             playerModel.position.set(
                 position.x,
@@ -982,9 +982,15 @@ class Game {
                 nextPosition.x += moveX;
                 nextPosition.z += moveZ;
 
+                // Check if the next position is valid
                 if (!this.checkCollision(nextPosition, this.localPlayer.position.clone())) {
+                    // Update position
                     this.localPlayer.position.copy(nextPosition);
+                    
+                    // Check if player is on temple platform and update height
+                    this.isOnTemplePlatform(this.localPlayer.position);
 
+                    // Update rotation
                     const targetRotation = Math.atan2(moveX, moveZ);
                     let currentRotation = this.localPlayer.rotation.y;
                     const rotationDiff = targetRotation - currentRotation;
@@ -1022,6 +1028,13 @@ class Game {
         // Check if position is within cross horizontal part
         const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
                               Math.abs(position.z) <= crossHorizontalHalfLength;
+
+        // If on any part of the temple platform, player should be at temple height
+        if (isOnBase || isOnVertical || isOnHorizontal) {
+            position.y = 3; // Temple height (1.5 base height + 1.5 character height)
+        } else {
+            position.y = 1.5; // Ground level height
+        }
 
         return isOnBase || isOnVertical || isOnHorizontal;
     }
@@ -1769,7 +1782,7 @@ class Game {
     createTemple() {
         const templeGroup = new THREE.Group();
         
-        // Create a custom temple floor texture pattern
+        // Create a custom temple floor texture pattern (chess style)
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
         canvas.width = 512;
@@ -1779,17 +1792,17 @@ class Game {
         ctx.fillStyle = '#1a1a1a';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Create tile pattern
+        // Create chess pattern
         const tileSize = 64;
         const tiles = canvas.width / tileSize;
         
         for (let i = 0; i < tiles; i++) {
             for (let j = 0; j < tiles; j++) {
-                // Alternate tile colors for a checkered pattern
+                // Chess pattern colors
                 const isEven = (i + j) % 2 === 0;
-                ctx.fillStyle = isEven ? '#2a2a2a' : '#222222';
+                ctx.fillStyle = isEven ? '#2a2a2a' : '#1a1a1a';
                 
-                // Draw main tile
+                // Draw chess tile
                 ctx.fillRect(
                     i * tileSize,
                     j * tileSize,
@@ -1797,14 +1810,14 @@ class Game {
                     tileSize
                 );
                 
-                // Add detail to tiles
+                // Add subtle border to tiles
                 ctx.strokeStyle = '#333333';
-                ctx.lineWidth = 2;
+                ctx.lineWidth = 1;
                 ctx.strokeRect(
-                    i * tileSize + 2,
-                    j * tileSize + 2,
-                    tileSize - 4,
-                    tileSize - 4
+                    i * tileSize,
+                    j * tileSize,
+                    tileSize,
+                    tileSize
                 );
             }
         }
@@ -1813,7 +1826,7 @@ class Game {
         const floorTexture = new THREE.CanvasTexture(canvas);
         floorTexture.wrapS = THREE.RepeatWrapping;
         floorTexture.wrapT = THREE.RepeatWrapping;
-        floorTexture.repeat.set(4, 4); // Repeat the pattern
+        floorTexture.repeat.set(4, 4);
         
         // Create floor material with the custom texture
         const floorMaterial = new THREE.MeshPhongMaterial({
@@ -1824,14 +1837,15 @@ class Game {
             bumpScale: 0.2,
         });
 
-        // Create larger base platform (increased from 20 to 30)
-        const baseGeometry = new THREE.BoxGeometry(30, 1, 30);
+        // Create elevated platform
+        const baseHeight = 1.5;
+        const baseGeometry = new THREE.BoxGeometry(30, baseHeight, 30);
         const basePlatform = new THREE.Mesh(baseGeometry, floorMaterial);
-        basePlatform.position.y = 0.5;
+        basePlatform.position.y = baseHeight / 2; // Position at half height
         basePlatform.receiveShadow = true;
         templeGroup.add(basePlatform);
 
-        // Add corner statues
+        // Add corner statues - adjusted positions for new height
         const statuePositions = [
             { x: 13, z: 13 },  // Northeast
             { x: -13, z: 13 }, // Northwest
@@ -1841,7 +1855,7 @@ class Game {
 
         // Create statue material
         const statueMaterial = new THREE.MeshPhongMaterial({
-            color: 0x808080, // Gray color for stone
+            color: 0x808080,
             shininess: 10,
             roughness: 0.8,
         });
@@ -1850,13 +1864,13 @@ class Game {
 
         statuePositions.forEach((pos, index) => {
             // Create statue base
-            const baseHeight = 3;
+            const baseStatueHeight = 3;
             const baseWidth = 2;
             const statueBase = new THREE.Mesh(
-                new THREE.BoxGeometry(baseWidth, baseHeight, baseWidth),
+                new THREE.BoxGeometry(baseWidth, baseStatueHeight, baseWidth),
                 statueMaterial
             );
-            statueBase.position.set(pos.x, baseHeight/2 + 0.5, pos.z);
+            statueBase.position.set(pos.x, baseHeight + baseStatueHeight/2, pos.z);
             statueBase.castShadow = true;
             statueBase.receiveShadow = true;
 
@@ -1867,7 +1881,7 @@ class Game {
                 new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyWidth),
                 statueMaterial
             );
-            statueBody.position.set(pos.x, baseHeight + bodyHeight/2 + 0.5, pos.z);
+            statueBody.position.set(pos.x, baseHeight + baseStatueHeight + bodyHeight/2, pos.z);
             statueBody.castShadow = true;
             statueBody.receiveShadow = true;
 
@@ -1877,7 +1891,7 @@ class Game {
                 new THREE.BoxGeometry(headSize, headSize, headSize),
                 statueMaterial
             );
-            statueHead.position.set(pos.x, baseHeight + bodyHeight + headSize/2 + 0.5, pos.z);
+            statueHead.position.set(pos.x, baseHeight + baseStatueHeight + bodyHeight + headSize/2, pos.z);
             statueHead.castShadow = true;
             statueHead.receiveShadow = true;
 
@@ -1889,35 +1903,35 @@ class Game {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: baseWidth / 1.5 // Slightly smaller than the actual base for better gameplay
+                radius: baseWidth / 1.5
             });
         });
 
-        // Create larger cross-shaped upper platform
+        // Create cross-shaped upper platform
         const floorGroup = new THREE.Group();
         
-        // Vertical part of cross (increased from 6x16 to 8x24)
+        // Vertical part of cross
         const verticalGeometry = new THREE.BoxGeometry(8, 0.5, 24);
         const verticalFloor = new THREE.Mesh(verticalGeometry, floorMaterial);
-        verticalFloor.position.y = 0.75;
+        verticalFloor.position.y = baseHeight + 0.25; // Position above base
         verticalFloor.receiveShadow = true;
         floorGroup.add(verticalFloor);
         
-        // Horizontal part of cross (increased from 16x6 to 24x8)
+        // Horizontal part of cross
         const horizontalGeometry = new THREE.BoxGeometry(24, 0.5, 8);
         const horizontalFloor = new THREE.Mesh(horizontalGeometry, floorMaterial);
-        horizontalFloor.position.y = 0.75;
+        horizontalFloor.position.y = baseHeight + 0.25; // Position above base
         horizontalFloor.receiveShadow = true;
         floorGroup.add(horizontalFloor);
         
         templeGroup.add(floorGroup);
 
-        // Add stronger ambient temple light
+        // Add temple light
         const templeLight = new THREE.PointLight(0xffd700, 0.8, 30);
-        templeLight.position.set(0, 4, 0);
+        templeLight.position.set(0, baseHeight + 4, 0); // Adjust light height
         templeGroup.add(templeLight);
 
-        // Position the entire temple at the center of the map
+        // Position the entire temple
         templeGroup.position.set(0, 0, 0);
         this.scene.add(templeGroup);
         
