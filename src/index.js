@@ -40,6 +40,21 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 right: false
             };
             
+            // Add skills system
+            this.skills = {
+                martial_arts: {
+                    name: 'Martial Arts',
+                    key: 'Space',
+                    slot: 1, // Changed from 5 to 1
+                    damage: 15,
+                    range: 3,
+                    cooldown: 2000, // 2 seconds
+                    lastUsed: 0,
+                    icon: '🥋' // Changed to a defensive martial arts icon
+                }
+            };
+            this.activeSkills = new Set(); // Skills the player has learned
+            
             // Add dialogue state
             this.activeDialogue = null;
             this.dialogueUI = null;
@@ -101,6 +116,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             this.setupEventListeners();
             this.setupMultiplayer();
             this.animate();
+            
+            this.isAlive = true; // Add this new property
         }
 
         init() {
@@ -451,9 +468,12 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             return playerModel;
         }
 
-        updatePlayerStatus(playerMesh, stats) {
-            // Create status bars if they don't exist
+        updatePlayerStatus(playerMesh, stats, silent = false) {
             if (!playerMesh.userData.statusBars || !playerMesh.userData.statusGroup) {
+                if (!silent) {
+                    console.warn('⚠️ Status bars not initialized for player');
+                }
+                // Create status bars if they don't exist
                 const statusGroup = new THREE.Group();
                 
                 const bars = ['life', 'mana', 'karma'].map((type, index) => {
@@ -500,7 +520,28 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             }
 
             // Store the stats in the player's userData
+            const oldStats = playerMesh.userData.stats ? { ...playerMesh.userData.stats } : null;
             playerMesh.userData.stats = { ...stats };  // Create a copy to prevent reference issues
+
+            // Only log significant changes to life/mana values
+            if (!silent && oldStats && (
+                Math.abs(oldStats.life - stats.life) > 0.1 || 
+                Math.abs(oldStats.mana - stats.mana) > 0.1
+            )) {
+                console.log('📊 Player Stats Changed:', {
+                    playerId: playerMesh === this.localPlayer ? 'localPlayer' : 'otherPlayer',
+                    life: {
+                        old: Math.round(oldStats.life),
+                        new: Math.round(stats.life),
+                        max: stats.maxLife
+                    },
+                    mana: {
+                        old: Math.round(oldStats.mana),
+                        new: Math.round(stats.mana),
+                        max: stats.maxMana
+                    }
+                });
+            }
 
             // Update each status bar
             playerMesh.userData.statusBars.forEach(bar => {
@@ -518,12 +559,12 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                         break;
                     case 'karma':
                         fillAmount = stats.karma / stats.maxKarma;
-                        color = new THREE.Color(0x000000); // Black for karma
+                        color = new THREE.Color(0x000000);
                         break;
                 }
 
                 // Update fill amount and color
-                fill.scale.x = fillAmount;
+                fill.scale.x = Math.max(0, Math.min(1, fillAmount));
                 fill.position.x = -(width * (1 - fillAmount)) / 2;
                 fill.material.color = color;
             });
@@ -557,7 +598,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             console.log('Connecting to server...');
             
             this.socket = io(SERVER_URL, {
-                transports: ['websocket'],  // Force WebSocket for faster updates
+                transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
@@ -567,8 +608,225 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
             this.socket.on('connect', () => {
                 console.log('Connected to server with ID:', this.socket.id);
-                // Request immediate state update when connecting
                 this.socket.emit('requestStateUpdate');
+            });
+
+            // Add skill effect handler
+            this.socket.on('skillEffect', (data) => {
+                const targetMesh = this.players.get(data.targetId);
+                if (!targetMesh) {
+                    console.warn('🎯 Skill Effect: Target not found', {
+                        targetId: data.targetId,
+                        type: data.type
+                    });
+                    return;
+                }
+
+                if (data.type === 'damage') {
+                    console.log('⚔️ Damage Effect:', {
+                        targetId: data.targetId,
+                        damage: data.damage,
+                        oldLife: targetMesh.userData.stats?.life,
+                        isLocalPlayer: data.targetId === this.socket.id
+                    });
+                    
+                    // Update target's life in userData
+                    if (targetMesh.userData.stats) {
+                        const oldLife = targetMesh.userData.stats.life;
+                        targetMesh.userData.stats.life = Math.max(0, oldLife - data.damage);
+                        
+                        // Update the visual status bars
+                        this.updatePlayerStatus(targetMesh, targetMesh.userData.stats, true);
+                        
+                        // If this is our player, update the main UI and check for death
+                        if (data.targetId === this.socket.id) {
+                            const previousLife = this.playerStats.currentLife;
+                            this.playerStats.currentLife = targetMesh.userData.stats.life;
+                            this.updateStatusBars();
+                            
+                            // Check for death
+                            if (this.playerStats.currentLife === 0 && previousLife > 0) {
+                                this.handlePlayerDeath();
+                            }
+                            
+                            console.log('🛡️ Local Player Damaged:', {
+                                newLife: this.playerStats.currentLife,
+                                maxLife: this.playerStats.maxLife,
+                                died: this.playerStats.currentLife === 0
+                            });
+                        }
+                    }
+                    
+                    // Create damage number
+                    const damageText = document.createElement('div');
+                    damageText.className = 'damage-text';
+                    damageText.style.position = 'absolute';
+                    damageText.style.fontFamily = 'Arial, sans-serif';
+                    damageText.style.fontWeight = 'bold';
+                    damageText.style.fontSize = data.isCritical ? '24px' : '20px';
+                    damageText.style.color = data.isCritical ? '#ff0000' : '#ff6666';
+                    damageText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
+                    damageText.style.pointerEvents = 'none';
+                    damageText.textContent = data.damage;
+
+                    document.body.appendChild(damageText);
+
+                    // Convert 3D position to screen coordinates
+                    const position = new THREE.Vector3();
+                    targetMesh.getWorldPosition(position);
+                    position.y += 2; // Position above the player
+
+                    const screenPosition = position.clone();
+                    screenPosition.project(this.camera);
+
+                    const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
+
+                    damageText.style.left = x + 'px';
+                    damageText.style.top = y + 'px';
+
+                    // Store the original material color
+                    const originalColor = targetMesh.material ? targetMesh.material.color.clone() : new THREE.Color(0xffffff);
+                    
+                    // Flash the target red
+                    if (targetMesh.material) {
+                        targetMesh.material.color.setHex(0xff0000);
+                    }
+                    
+                    // Animate damage number
+                    let startTime = performance.now();
+                    const animate = (currentTime) => {
+                        const elapsed = currentTime - startTime;
+                        const duration = 1000; // 1 second animation
+                        
+                        if (elapsed < duration) {
+                            const progress = elapsed / duration;
+                            damageText.style.opacity = 1 - progress;
+                            damageText.style.transform = `translateY(${-50 * progress}px)`;
+                            requestAnimationFrame(animate);
+                        } else {
+                            document.body.removeChild(damageText);
+                        }
+                    };
+                    requestAnimationFrame(animate);
+
+                    // Reset target color after 200ms
+                    setTimeout(() => {
+                        if (targetMesh.material) {
+                            targetMesh.material.color.copy(originalColor);
+                        }
+                    }, 200);
+                } else if (data.type === 'immune') {
+                    // Create immunity text
+                    const immuneText = document.createElement('div');
+                    immuneText.className = 'immune-text';
+                    immuneText.style.position = 'absolute';
+                    immuneText.style.fontFamily = 'Arial, sans-serif';
+                    immuneText.style.fontWeight = 'bold';
+                    immuneText.style.fontSize = '20px';
+                    immuneText.style.color = data.reason === 'illuminated' ? '#ffff00' : '#800080';
+                    immuneText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
+                    immuneText.style.pointerEvents = 'none';
+                    immuneText.textContent = data.reason === 'illuminated' ? 'IMMUNE ✨' : 'IMMUNE 🌑';
+
+                    document.body.appendChild(immuneText);
+
+                    // Convert 3D position to screen coordinates
+                    const position = new THREE.Vector3();
+                    targetMesh.getWorldPosition(position);
+                    position.y += 2;
+
+                    const screenPosition = position.clone();
+                    screenPosition.project(this.camera);
+
+                    const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
+                    const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
+
+                    immuneText.style.left = x + 'px';
+                    immuneText.style.top = y + 'px';
+
+                    // Store the original material color
+                    const originalColor = targetMesh.material ? targetMesh.material.color.clone() : new THREE.Color(0xffffff);
+                    
+                    // Flash the target with immunity effect
+                    if (targetMesh.material) {
+                        targetMesh.material.color.setHex(data.reason === 'illuminated' ? 0xffff00 : 0x800080);
+                        if (targetMesh.material.emissive) {
+                            targetMesh.material.emissive.setHex(data.reason === 'illuminated' ? 0x666600 : 0x400040);
+                        }
+                    }
+
+                    // Animate immunity text
+                    let startTime = performance.now();
+                    const animate = (currentTime) => {
+                        const elapsed = currentTime - startTime;
+                        const duration = 1500; // 1.5 second animation
+                        
+                        if (elapsed < duration) {
+                            const progress = elapsed / duration;
+                            immuneText.style.opacity = 1 - progress;
+                            immuneText.style.transform = `translateY(${-50 * progress}px)`;
+                            requestAnimationFrame(animate);
+                        } else {
+                            document.body.removeChild(immuneText);
+                        }
+                    };
+                    requestAnimationFrame(animate);
+
+                    // Reset target material after 300ms
+                    setTimeout(() => {
+                        if (targetMesh.material) {
+                            targetMesh.material.color.copy(originalColor);
+                            if (targetMesh.material.emissive) {
+                                targetMesh.material.emissive.setHex(0x000000);
+                            }
+                        }
+                    }, 300);
+                }
+            });
+
+            // Add new handler for life and mana updates
+            this.socket.on('statsUpdate', (data) => {
+                console.log('Received statsUpdate:', data);
+                const playerMesh = this.players.get(data.id);
+                if (!playerMesh) {
+                    console.log('Player mesh not found for stats update:', data.id);
+                    return;
+                }
+
+                // Update the player's stats
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+
+                const oldStats = { ...playerMesh.userData.stats };
+                playerMesh.userData.stats = {
+                    ...playerMesh.userData.stats,
+                    life: data.life,
+                    maxLife: data.maxLife,
+                    mana: data.mana,
+                    maxMana: data.maxMana
+                };
+
+                console.log('Updated player stats:', {
+                    playerId: data.id,
+                    oldLife: oldStats.life,
+                    newLife: data.life,
+                    oldMana: oldStats.mana,
+                    newMana: data.mana
+                });
+
+                // Update the visual status bars
+                this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+
+                // If this is our player, update the main UI
+                if (data.id === this.socket.id) {
+                    this.playerStats.currentLife = data.life;
+                    this.playerStats.maxLife = data.maxLife;
+                    this.playerStats.currentMana = data.mana;
+                    this.playerStats.maxMana = data.maxMana;
+                    this.updateStatusBars();
+                }
             });
 
             this.socket.on('currentPlayers', async (players) => {
@@ -586,7 +844,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 
                 // Add all players
                 for (const player of players) {
-                    if (player.id === this.socket.id) {
+                    if (player.id === this.socket?.id) {
                         // Create local player if it doesn't exist
                         if (!this.localPlayer) {
                             this.localPlayer = await this.createPlayer(
@@ -595,6 +853,9 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                                 { y: player.rotation.y || 0 }
                             );
                             this.scene.add(this.localPlayer);
+                            
+                            // Add local player to players Map
+                            this.players.set(player.id, this.localPlayer);
                             
                             // Force update of local player status bars
                             this.updatePlayerStatus(this.localPlayer, {
@@ -650,7 +911,13 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             });
 
             this.socket.on('newPlayer', async (player) => {
-                if (player.id === this.socket.id) return;
+                if (player.id === this.socket.id) {
+                    // If this is us, make sure we're in the players Map
+                    if (!this.players.has(player.id) && this.localPlayer) {
+                        this.players.set(player.id, this.localPlayer);
+                    }
+                    return;
+                }
                 
                 console.log('Creating new player:', player.id);
                 const playerMesh = await this.createPlayer(
@@ -683,61 +950,50 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             });
 
             this.socket.on('karmaUpdate', (data) => {
-                console.log(`\nReceived karma update:`, data);
-                
-                // Handle updates for other players
-                if (data.id !== this.socket.id) {
-                    const playerMesh = this.players.get(data.id);
-                    if (!playerMesh) {
-                        console.warn(`No player mesh found for karma update: ${data.id}`);
-                        return;
+                const playerMesh = this.players.get(data.id);
+                console.log('Received karmaUpdate:', {
+                    playerId: data.id,
+                    playerFound: !!playerMesh,
+                    life: data.life,
+                    currentStats: playerMesh?.userData?.stats
+                });
+                if (playerMesh) {
+                    // Store the updated stats
+                    if (!playerMesh.userData.stats) {
+                        playerMesh.userData.stats = {};
                     }
-
-                    // Update player stats
+                    
+                    // Update the stored stats
+                    const oldStats = { ...playerMesh.userData.stats };
                     playerMesh.userData.stats = {
                         ...playerMesh.userData.stats,
-                        karma: data.karma,
-                        maxKarma: data.maxKarma,
                         life: data.life,
                         maxLife: data.maxLife,
                         mana: data.mana,
-                        maxMana: data.maxMana
+                        maxMana: data.maxMana,
+                        karma: data.karma,
+                        maxKarma: data.maxKarma
                     };
+                    console.log('Updated player stats:', {
+                        playerId: data.id,
+                        oldLife: oldStats.life,
+                        newLife: data.life,
+                        isLocalPlayer: data.id === this.socket.id
+                    });
 
-                    console.log(`Updated stats for player ${data.id}:`, playerMesh.userData.stats);
-                    
-                    // Force update of status bars
+                    // Update the visual status bars
                     this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-                    
-                    // Ensure status group is visible
-                    if (playerMesh.userData.statusGroup) {
-                        playerMesh.userData.statusGroup.visible = true;
-                    }
-                } else {
-                    // Handle updates for local player (for consistency)
-                    if (this.localPlayer) {
-                        this.localPlayer.userData.stats = {
-                            ...this.localPlayer.userData.stats,
-                            karma: data.karma,
-                            maxKarma: data.maxKarma,
-                            life: data.life,
-                            maxLife: data.maxLife,
-                            mana: data.mana,
-                            maxMana: data.maxMana
-                        };
-                        
-                        // Update local player stats
-                        this.playerStats.currentKarma = data.karma;
-                        this.playerStats.maxKarma = data.maxKarma;
+
+                    // If this is our player, update the main UI
+                    if (data.id === this.socket.id) {
                         this.playerStats.currentLife = data.life;
                         this.playerStats.maxLife = data.maxLife;
                         this.playerStats.currentMana = data.mana;
                         this.playerStats.maxMana = data.maxMana;
-                        
-                        console.log(`Updated local player stats:`, this.playerStats);
-                        
-                        // Force update of status bars
-                        this.updatePlayerStatus(this.localPlayer, this.localPlayer.userData.stats);
+                        this.playerStats.currentKarma = data.karma;
+                        this.playerStats.maxKarma = data.maxKarma;
+                        this.updateStatusBars();
+                        this.updateKarmaEffects();
                     }
                 }
             });
@@ -763,13 +1019,18 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     playerMesh.rotation.y = player.rotation.y || 0;
                     
                     // Update stats
+                    if (!playerMesh.userData.stats) {
+                        playerMesh.userData.stats = {};
+                    }
+                    
                     const stats = {
-                        life: player.life ?? playerMesh.userData.stats?.life ?? 100,
-                        maxLife: player.maxLife ?? playerMesh.userData.stats?.maxLife ?? 100,
-                        mana: player.mana ?? playerMesh.userData.stats?.mana ?? 100,
-                        maxMana: player.maxMana ?? playerMesh.userData.stats?.maxMana ?? 100,
-                        karma: player.karma ?? playerMesh.userData.stats?.karma ?? 50,
-                        maxKarma: player.maxKarma ?? playerMesh.userData.stats?.maxKarma ?? 100
+                        ...playerMesh.userData.stats,
+                        life: player.life,
+                        maxLife: player.maxLife,
+                        mana: player.mana,
+                        maxMana: player.maxMana,
+                        karma: player.karma,
+                        maxKarma: player.maxKarma
                     };
                     
                     playerMesh.userData.stats = stats;
@@ -806,6 +1067,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 rotation: {
                     y: this.localPlayer.rotation.y
                 },
+                path: this.playerStats.path,
                 karma: this.playerStats.currentKarma,
                 maxKarma: this.playerStats.maxKarma,
                 life: this.playerStats.currentLife,
@@ -940,6 +1202,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     case 'k': this.adjustKarma(10); break; // Increase Karma by 10
                     case 'r': this.adjustKarma(-this.playerStats.currentKarma); break; // Reset Karma to 0
                     case 'e': this.handleInteraction(); break;  // Add E key interaction
+                    case ' ': this.useMartialArts(); break; // Space key for Martial Arts
                 }
             });
 
@@ -951,6 +1214,84 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                     case 'd': this.controls.right = false; break;
                 }
             });
+        }
+
+        useMartialArts() {
+            // Prevent skill use if dead
+            if (!this.isAlive) return;
+
+            // Check if player has the skill
+            if (!this.activeSkills.has('martial_arts') || this.playerStats.path !== 'light') {
+                return;
+            }
+
+            // Prevent Illuminated players from using martial arts
+            if (this.playerStats.currentKarma === 0) {
+                console.log('Illuminated players cannot use direct damage skills');
+                return;
+            }
+
+            const skill = this.skills.martial_arts;
+            const now = Date.now();
+
+            // Check cooldown
+            if (now - skill.lastUsed < skill.cooldown) {
+                return;
+            }
+
+            // Find nearby players
+            if (!this.localPlayer) return;
+
+            const playerPos = this.localPlayer.position;
+            let targetFound = false;
+
+            this.players.forEach((otherPlayer, playerId) => {
+                if (playerId === this.socket.id) return; // Skip self
+
+                const dx = otherPlayer.position.x - playerPos.x;
+                const dz = otherPlayer.position.z - playerPos.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+
+                if (distance <= skill.range) {
+                    targetFound = true;
+                    // Emit damage event to server
+                    this.socket.emit('skillDamage', {
+                        targetId: playerId,
+                        damage: skill.damage,
+                        skillName: 'martial_arts'
+                    });
+                }
+            });
+
+            if (targetFound) {
+                // Update last used time
+                skill.lastUsed = now;
+                
+                // Visual feedback
+                if (this.martialArtsSlot) {
+                    const flash = document.createElement('div');
+                    flash.style.position = 'absolute';
+                    flash.style.inset = '0';
+                    flash.style.backgroundColor = 'rgba(255, 255, 255, 0.5)';
+                    flash.style.borderRadius = '4px';
+                    flash.style.animation = 'skillFlash 0.5s ease-out';
+                    
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        @keyframes skillFlash {
+                            0% { opacity: 0.5; }
+                            100% { opacity: 0; }
+                        }
+                    `;
+                    document.head.appendChild(style);
+                    
+                    this.martialArtsSlot.appendChild(flash);
+                    setTimeout(() => {
+                        flash.remove();
+                        style.remove();
+                    }, 500);
+                }
+            }
         }
 
         async loadCharacterModel() {
@@ -994,7 +1335,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
         }
 
         updatePlayer() {
-            if (!this.localPlayer) return;
+            if (!this.localPlayer || !this.isAlive) return; // Skip update if player is dead
 
             const speed = 0.1;
             const rotationSpeed = 0.1;
@@ -1020,9 +1361,9 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 this.lastKarmaRecoveryTime = Date.now();
             }
 
-            // Update local player's status bars
+            // Update local player's status bars without life regeneration
             this.updatePlayerStatus(this.localPlayer, {
-                life: this.playerStats.currentLife,
+                life: this.playerStats.currentLife, // Don't modify life here
                 maxLife: this.playerStats.maxLife,
                 mana: this.playerStats.currentMana,
                 maxMana: this.playerStats.maxMana,
@@ -1185,12 +1526,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             
             // Update player stats at a lower frequency (every 100ms)
             if (!this.lastStatsUpdate || currentTime - this.lastStatsUpdate >= 100) {
-                if (this.playerStats.currentLife < this.playerStats.maxLife) {
-                    this.playerStats.currentLife = Math.min(
-                        this.playerStats.maxLife,
-                        this.playerStats.currentLife + this.playerStats.lifeRegen
-                    );
-                }
+                // Only regenerate mana, not life
                 if (this.playerStats.currentMana < this.playerStats.maxMana) {
                     this.playerStats.currentMana = Math.min(
                         this.playerStats.maxMana,
@@ -1430,6 +1766,10 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 slot.style.borderRadius = '4px';
                 slot.style.position = 'relative';
                 slot.style.boxShadow = 'inset 0 0 10px rgba(0, 0, 0, 0.5)';
+                slot.style.display = 'flex';
+                slot.style.alignItems = 'center';
+                slot.style.justifyContent = 'center';
+                slot.style.fontSize = '24px';
 
                 // Add key number
                 const keyNumber = document.createElement('div');
@@ -1437,17 +1777,72 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
                 keyNumber.style.position = 'absolute';
                 keyNumber.style.bottom = '2px';
                 keyNumber.style.right = '2px';
-                keyNumber.style.color = '#666';
-                keyNumber.style.fontSize = '12px';
+                keyNumber.style.color = '#fff';
+                keyNumber.style.fontSize = '10px';
                 keyNumber.style.fontWeight = 'bold';
                 keyNumber.style.textShadow = '1px 1px 1px rgba(0, 0, 0, 0.5)';
                 keyNumber.style.userSelect = 'none';
 
+                // Add Space key indicator for slot 1
+                if (i === 1) {
+                    const spaceKey = document.createElement('div');
+                    spaceKey.textContent = 'Space';
+                    spaceKey.style.position = 'absolute';
+                    spaceKey.style.bottom = '2px';
+                    spaceKey.style.left = '2px';
+                    spaceKey.style.color = '#fff';
+                    spaceKey.style.fontSize = '10px';
+                    spaceKey.style.fontWeight = 'bold';
+                    spaceKey.style.textShadow = '1px 1px 1px rgba(0, 0, 0, 0.5)';
+                    spaceKey.style.userSelect = 'none';
+                    slot.appendChild(spaceKey);
+                }
+
                 slot.appendChild(keyNumber);
                 container.appendChild(slot);
+                
+                // Store reference to slot for updating later
+                if (i === 1) {
+                    this.martialArtsSlot = slot;
+                }
             }
 
             return container;
+        }
+
+        updateSkillBar() {
+            // Update Martial Arts slot if player has chosen Light path
+            if (this.martialArtsSlot) {
+                if (this.playerStats.path === 'light' && this.activeSkills.has('martial_arts')) {
+                    const skill = this.skills.martial_arts;
+                    
+                    // Create skill icon container
+                    const iconContainer = document.createElement('div');
+                    iconContainer.textContent = skill.icon;
+                    iconContainer.style.fontSize = '28px';
+                    iconContainer.style.position = 'absolute';
+                    iconContainer.style.top = '50%';
+                    iconContainer.style.left = '50%';
+                    iconContainer.style.transform = 'translate(-50%, -50%)';
+                    iconContainer.style.color = '#fff';
+                    iconContainer.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+                    
+                    // Clear previous icon if any
+                    const oldIcon = this.martialArtsSlot.querySelector('.skill-icon');
+                    if (oldIcon) {
+                        oldIcon.remove();
+                    }
+                    
+                    iconContainer.className = 'skill-icon';
+                    this.martialArtsSlot.appendChild(iconContainer);
+                } else {
+                    // Clear the slot if path is not light or skill not learned
+                    const oldIcon = this.martialArtsSlot.querySelector('.skill-icon');
+                    if (oldIcon) {
+                        oldIcon.remove();
+                    }
+                }
+            }
         }
 
         createModernStatusBar(label, color, shadowColor) {
@@ -1557,19 +1952,195 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
 
         // Add damage and healing methods
         damagePlayer(amount) {
+            const previousLife = this.playerStats.currentLife;
             this.playerStats.currentLife = Math.max(0, this.playerStats.currentLife - amount);
             this.updateStatusBars();
+
+            // Check for death
+            if (this.playerStats.currentLife === 0 && previousLife > 0) {
+                this.handlePlayerDeath();
+            }
+
+            // Emit stats update to server
+            if (this.socket?.connected) {
+                this.socket.emit('statsUpdate', {
+                    id: this.socket.id,
+                    life: this.playerStats.currentLife,
+                    maxLife: this.playerStats.maxLife,
+                    mana: this.playerStats.currentMana,
+                    maxMana: this.playerStats.maxMana
+                });
+            }
+        }
+
+        handlePlayerDeath() {
+            // Disable player movement and interactions immediately
+            this.isAlive = false;
+            
+            if (this.localPlayer) {
+                // Hide status bars for dead player
+                if (this.localPlayer.userData.statusGroup) {
+                    this.scene.remove(this.localPlayer.userData.statusGroup);
+                }
+                
+                // Create death animation
+                const startTime = performance.now();
+                const deathAnimationDuration = 2000; // 2 seconds
+                const startPosition = this.localPlayer.position.clone();
+                const startScale = this.localPlayer.scale.clone();
+                
+                const animateDeath = (currentTime) => {
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / deathAnimationDuration, 1);
+                    
+                    // Fade out by scaling down and sinking into the ground
+                    this.localPlayer.scale.copy(startScale.multiplyScalar(1 - progress));
+                    this.localPlayer.position.y = startPosition.y - (progress * 1.5); // Sink into ground
+                    this.localPlayer.rotation.y += progress * Math.PI * 2; // Spin once while dying
+                    
+                    // Add transparency if material supports it
+                    if (this.localPlayer.material) {
+                        this.localPlayer.material.transparent = true;
+                        this.localPlayer.material.opacity = 1 - progress;
+                    }
+                    
+                    if (progress < 1) {
+                        requestAnimationFrame(animateDeath);
+                    } else {
+                        // Remove the player model and status group after animation
+                        this.scene.remove(this.localPlayer);
+                        // Remove from players Map
+                        if (this.socket?.id) {
+                            this.players.delete(this.socket.id);
+                        }
+                        // Notify server of death
+                        if (this.socket?.connected) {
+                            this.socket.emit('playerDied', {
+                                id: this.socket.id
+                            });
+                        }
+                    }
+                };
+                
+                requestAnimationFrame(animateDeath);
+            }
+
+            // Create death screen overlay with pointer-events blocking
+            const deathOverlay = document.createElement('div');
+            deathOverlay.style.position = 'fixed';
+            deathOverlay.style.top = '0';
+            deathOverlay.style.left = '0';
+            deathOverlay.style.width = '100%';
+            deathOverlay.style.height = '100%';
+            deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0)'; // Start transparent
+            deathOverlay.style.display = 'flex';
+            deathOverlay.style.flexDirection = 'column';
+            deathOverlay.style.alignItems = 'center';
+            deathOverlay.style.justifyContent = 'center';
+            deathOverlay.style.zIndex = '9999';
+            deathOverlay.style.pointerEvents = 'all';
+            deathOverlay.style.transition = 'background-color 2s ease-in';
+
+            // Death message with fade in
+            const deathMessage = document.createElement('h1');
+            deathMessage.textContent = 'You Have Died';
+            deathMessage.style.color = '#ff0000';
+            deathMessage.style.fontSize = '48px';
+            deathMessage.style.marginBottom = '20px';
+            deathMessage.style.textShadow = '0 0 10px rgba(255, 0, 0, 0.7)';
+            deathMessage.style.opacity = '0';
+            deathMessage.style.transition = 'opacity 2s ease-in';
+
+            // Add flavor text
+            const flavorText = document.createElement('p');
+            flavorText.textContent = 'Your journey in this life has ended...';
+            flavorText.style.color = '#ffffff';
+            flavorText.style.fontSize = '24px';
+            flavorText.style.marginBottom = '30px';
+            flavorText.style.textShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+            flavorText.style.opacity = '0';
+            flavorText.style.transition = 'opacity 2s ease-in';
+
+            // Restart button
+            const restartButton = document.createElement('button');
+            restartButton.textContent = 'Begin a New Life';
+            restartButton.style.padding = '15px 30px';
+            restartButton.style.fontSize = '24px';
+            restartButton.style.backgroundColor = '#ff3333';
+            restartButton.style.color = 'white';
+            restartButton.style.border = 'none';
+            restartButton.style.borderRadius = '5px';
+            restartButton.style.cursor = 'pointer';
+            restartButton.style.transition = 'all 0.3s ease';
+            restartButton.style.transform = 'scale(1)';
+            restartButton.style.opacity = '0';
+
+            restartButton.addEventListener('mouseover', () => {
+                restartButton.style.backgroundColor = '#ff0000';
+                restartButton.style.transform = 'scale(1.1)';
+            });
+
+            restartButton.addEventListener('mouseout', () => {
+                restartButton.style.backgroundColor = '#ff3333';
+                restartButton.style.transform = 'scale(1)';
+            });
+
+            restartButton.addEventListener('click', () => {
+                // Clean up current game state
+                this.cleanup();
+                
+                // Clear any stored game data
+                clearGameData();
+                
+                // Force a hard reload of the page
+                window.location.reload(true);
+            });
+
+            deathOverlay.appendChild(deathMessage);
+            deathOverlay.appendChild(flavorText);
+            deathOverlay.appendChild(restartButton);
+            document.body.appendChild(deathOverlay);
+
+            // Trigger fade-in animations after a short delay
+            setTimeout(() => {
+                deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                deathMessage.style.opacity = '1';
+                flavorText.style.opacity = '1';
+                restartButton.style.opacity = '1';
+            }, 100);
         }
 
         healPlayer(amount) {
             this.playerStats.currentLife = Math.min(this.playerStats.maxLife, this.playerStats.currentLife + amount);
             this.updateStatusBars();
+
+            // Emit stats update to server
+            if (this.socket?.connected) {
+                this.socket.emit('statsUpdate', {
+                    id: this.socket.id,
+                    life: this.playerStats.currentLife,
+                    maxLife: this.playerStats.maxLife,
+                    mana: this.playerStats.currentMana,
+                    maxMana: this.playerStats.maxMana
+                });
+            }
         }
 
         useMana(amount) {
             if (this.playerStats.currentMana >= amount) {
                 this.playerStats.currentMana -= amount;
                 this.updateStatusBars();
+
+                // Emit stats update to server
+                if (this.socket?.connected) {
+                    this.socket.emit('statsUpdate', {
+                        id: this.socket.id,
+                        life: this.playerStats.currentLife,
+                        maxLife: this.playerStats.maxLife,
+                        mana: this.playerStats.currentMana,
+                        maxMana: this.playerStats.maxMana
+                    });
+                }
                 return true;
             }
             return false;
@@ -1700,14 +2271,19 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             const fill = document.createElement('div');
             fill.className = 'fill';
             fill.style.position = 'absolute';
-            fill.style.bottom = '0';
             fill.style.left = '0';
             fill.style.width = '100%';
-            fill.style.height = '100%';
             fill.style.background = color;
             fill.style.transition = 'height 0.3s ease-out';
             fill.style.borderRadius = '50%';
             fill.style.opacity = '0.8';
+
+            // Position fill based on stat type
+            if (statName === 'Life') {
+                fill.style.top = '0';  // Start from top for life
+            } else {
+                fill.style.bottom = '0';  // Start from bottom for other stats
+            }
 
             // Create ring container with mask
             const maskContainer = document.createElement('div');
@@ -2398,6 +2974,12 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
             
             // Set the player's path
             this.playerStats.path = path;
+            
+            // Grant Martial Arts skill if choosing Light path
+            if (path === 'light') {
+                this.activeSkills.add('martial_arts');
+                this.updateSkillBar();
+            }
             
             // Create confirmation dialogue
             const dialogueContainer = document.createElement('div');
