@@ -249,17 +249,63 @@ class Game {
             return true;
         }
         
-        // Check statue and NPC collisions with minimal buffer
+        // Check statue and NPC collisions with larger buffer
         if (this.statueColliders) {
             for (const collider of this.statueColliders) {
                 const dx = position.x - collider.position.x;
                 const dz = position.z - collider.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                if (distance < collider.radius + 0.1) { // Small buffer for collisions
+                // Increased buffer from 0.1 to 1.0 for more noticeable collisions
+                if (distance < collider.radius + 1.0) {
                     if (previousPosition) {
-                        position.x = previousPosition.x;
-                        position.z = previousPosition.z;
+                        // Push player away from the collision point
+                        const angle = Math.atan2(dz, dx);
+                        const pushDistance = (collider.radius + 1.0) - distance;
+                        position.x = collider.position.x + (Math.cos(angle) * (collider.radius + 1.0));
+                        position.z = collider.position.z + (Math.sin(angle) * (collider.radius + 1.0));
+                    }
+                    return true;
+                }
+            }
+        }
+        
+        // Check collisions with other players
+        if (this.players) {
+            const playerRadius = 1.0; // Radius for player collision
+            const spawnRadius = 3.0; // Radius around temple center where collisions are more lenient
+            const isInSpawnArea = Math.abs(position.x) < spawnRadius && Math.abs(position.z) < spawnRadius;
+            
+            // Check collision with other players
+            for (const [id, otherPlayer] of this.players) {
+                // Skip self-collision check
+                if (this.localPlayer && otherPlayer === this.localPlayer) continue;
+                
+                const dx = position.x - otherPlayer.position.x;
+                const dz = position.z - otherPlayer.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                // If in spawn area, allow more movement to prevent getting stuck
+                if (isInSpawnArea) {
+                    // Only collide if extremely close and moving closer
+                    if (distance < playerRadius && previousPosition) {
+                        const prevDx = previousPosition.x - otherPlayer.position.x;
+                        const prevDz = previousPosition.z - otherPlayer.position.z;
+                        const prevDistance = Math.sqrt(prevDx * prevDx + prevDz * prevDz);
+                        
+                        // If moving away from other player, allow movement
+                        if (distance >= prevDistance) {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+                } else if (distance < playerRadius * 2) { // Normal collision outside spawn area
+                    if (previousPosition) {
+                        // Push players apart
+                        const angle = Math.atan2(dz, dx);
+                        position.x = otherPlayer.position.x + (Math.cos(angle) * playerRadius * 2);
+                        position.z = otherPlayer.position.z + (Math.sin(angle) * playerRadius * 2);
                     }
                     return true;
                 }
@@ -317,6 +363,11 @@ class Game {
                 opacity: 0.9
             });
             const fill = new THREE.Mesh(barGeometry, fillMaterial);
+            
+            // Set background color for karma bar to white
+            if (type === 'karma') {
+                background.material.color = new THREE.Color(0xffffff);
+            }
             
             // Position bars vertically stacked with smaller spacing
             const yOffset = 2.5 + (barHeight + barSpacing) * (2 - index);
@@ -444,17 +495,7 @@ class Game {
                     break;
                 case 'karma':
                     fillAmount = stats.karma / stats.maxKarma;
-                    if (stats.karma === 50) {
-                        color = new THREE.Color(0xfffacd); // Light yellow for neutral karma
-                    } else if (stats.karma > 50) {
-                        // Gold gradient for high karma (50-100)
-                        const intensity = (stats.karma - 50) / 50;
-                        color = new THREE.Color(0xffcc00); // Always karma color (gold) for high karma
-                    } else {
-                        // White gradient for low karma (0-50)
-                        const intensity = (50 - stats.karma) / 50;
-                        color = new THREE.Color(0xffcc00).lerp(new THREE.Color(0xffffff), intensity);
-                    }
+                    color = new THREE.Color(0x000000); // Black for karma
                     break;
             }
 
@@ -1156,10 +1197,23 @@ class Game {
         // Create Karma bar container
         const karmaContainer = document.createElement('div');
         karmaContainer.style.width = '300px'; // Match skills bar width
-        const karmaBar = this.createModernStatusBar('Karma', '#ffcc00', '#665200');
+        const karmaBar = this.createModernStatusBar('', '#000000', '#000000'); // Changed to empty label
         this.karmaBarFill = karmaBar.querySelector('.fill');
         this.karmaText = karmaBar.querySelector('.text');
         this.karmaTooltip = karmaBar.querySelector('.tooltip');
+
+        // Update karma bar background to white and text to golden
+        const karmaBackground = karmaBar.querySelector('div[style*="background: linear-gradient"]');
+        if (karmaBackground) {
+            karmaBackground.style.background = '#ffffff';
+        }
+        const karmaTextElement = karmaBar.querySelector('span');
+        if (karmaTextElement) {
+            karmaTextElement.style.color = '#FFD700'; // Golden color
+            karmaTextElement.style.fontSize = '14px';
+            karmaTextElement.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.7), -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff'; // Golden glow + white border
+        }
+
         karmaContainer.appendChild(karmaBar);
 
         // Create container for Life ring, skills, and Mana ring
@@ -1454,7 +1508,7 @@ class Game {
         // Update karma bar
         const karmaPercent = (this.playerStats.currentKarma / this.playerStats.maxKarma) * 100;
         this.karmaBarFill.style.width = `${karmaPercent}%`;
-        this.karmaBarFill.style.boxShadow = `0 0 ${10 + (karmaPercent/10)}px #ffcc00`;
+        this.karmaBarFill.style.boxShadow = `0 0 ${10 + (karmaPercent/10)}px #000000`;
         if (this.karmaTooltip) {
             this.karmaTooltip.textContent = `Karma: ${Math.round(this.playerStats.currentKarma)} / ${this.playerStats.maxKarma}`;
         }
@@ -1903,7 +1957,7 @@ class Game {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: baseWidth / 1.5
+                radius: baseWidth // Changed from baseWidth / 1.5 to baseWidth for larger collision area
             });
         });
 
@@ -1968,14 +2022,14 @@ class Game {
 
             // Set up the dark NPC model (right side)
             const darkModel = darkNPC.scene;
-            darkModel.scale.set(3.5, 3.5, 3.5); // Reduced scale from 4.0 to 3.5
-            darkModel.position.set(8, 5.5, -12); // Keeping Y position at 5.5
+            darkModel.scale.set(3.5, 3.5, 3.5);
+            darkModel.position.set(7, 5.5, -9); // Moved closer to middle
             darkModel.rotation.y = -Math.PI / 4; // Rotate to face center
             
             // Set up the light NPC model (left side)
             const lightModel = lightNPC.scene;
-            lightModel.scale.set(6, 6, 6); // Increased scale to match dark NPC's appearance
-            lightModel.position.set(-8, 2.0, -12); // Lowered Y position from 2.5 to 2.0
+            lightModel.scale.set(6, 6, 6);
+            lightModel.position.set(-7, 2.0, -9); // Moved closer to middle
             lightModel.rotation.y = Math.PI / 4; // Rotate to face center
             
             // Add shadows to both NPCs
@@ -2004,12 +2058,12 @@ class Game {
             // Add colliders for both NPCs
             this.statueColliders.push(
                 {
-                    position: new THREE.Vector3(8, 0, -12), // Dark NPC collider now on right
-                    radius: 1.5
+                    position: new THREE.Vector3(7, 0, -9), // Updated Dark NPC collider position to match model
+                    radius: 2.0
                 },
                 {
-                    position: new THREE.Vector3(-8, 0, -12), // Light NPC collider now on left
-                    radius: 1.5
+                    position: new THREE.Vector3(-7, 0, -9), // Updated Light NPC collider position to match model
+                    radius: 2.0
                 }
             );
 
