@@ -38,6 +38,17 @@ export class GameClient {
         // Start render loop
         this.animate();
         console.log('GameClient: Initialization complete');
+
+        // Add skills system initialization in the constructor
+        this.skills = {
+            martial_arts: {
+                key: 'Space',
+                damage: 75,
+                range: 3,
+                cooldown: 2000,
+                lastUsed: 0
+            }
+        };
     }
 
     setupRenderer() {
@@ -206,19 +217,26 @@ export class GameClient {
         return bar;
     }
 
-    updatePlayerStats(playerMesh, data) {
-        if (playerMesh.karmaBar) {
-            playerMesh.karmaBar.scale.x = data.karma / data.maxKarma;
+    updatePlayerStats(playerMesh, stats, silent = false) {
+        if (!playerMesh.userData.statusGroup) {
+            const statusGroup = new THREE.Group();
+            ['life', 'mana', 'karma'].forEach((type, index) => {
+                const bar = this.createStatusBar(type);
+                bar.position.y = 2.5 + (0.15 * index);
+                playerMesh.add(bar);
+                playerMesh[`${type}Bar`] = bar;
+            });
+            playerMesh.userData.statusGroup = statusGroup;
         }
-        if (playerMesh.lifeBar) {
-            playerMesh.lifeBar.scale.x = data.life / data.maxLife;
-        }
-        if (playerMesh.manaBar) {
-            playerMesh.manaBar.scale.x = data.mana / data.maxMana;
-        }
-        
-        // Update stored data
-        playerMesh.userData = { ...playerMesh.userData, ...data };
+
+        ['life', 'mana', 'karma'].forEach(type => {
+            const bar = playerMesh[`${type}Bar`];
+            if (bar) {
+                bar.scale.x = stats[type] / stats[`max${type.charAt(0).toUpperCase() + type.slice(1)}`];
+            }
+        });
+
+        playerMesh.userData.stats = { ...stats };
     }
 
     setupControls() {
@@ -269,6 +287,11 @@ export class GameClient {
                 }
             }
         }, 16); // 60fps
+
+        // Add keyboard event listener for skill usage
+        window.addEventListener('keydown', (e) => {
+            if (e.key === ' ') this.useMartialArts();
+        });
     }
 
     animate() {
@@ -289,6 +312,41 @@ export class GameClient {
             action: 'take',
             targetId
         });
+    }
+
+    // Method to use martial arts skill
+    useMartialArts() {
+        const now = Date.now();
+        const skill = this.skills.martial_arts;
+        if (now - skill.lastUsed >= skill.cooldown) {
+            skill.lastUsed = now;
+            this.socket.emit('skillDamage', {
+                skillName: 'martial_arts',
+                damage: skill.damage,
+                targetId: this.getTargetId()
+            });
+        }
+    }
+
+    // Method to check if player is on temple platform
+    isOnTemplePlatform(position) {
+        const baseHalfWidth = 15;
+        const crossVerticalHalfWidth = 4;
+        const crossHorizontalHalfWidth = 12;
+        const crossVerticalHalfLength = 12;
+        const crossHorizontalHalfLength = 4;
+
+        const isOnBase = Math.abs(position.x) <= baseHalfWidth && Math.abs(position.z) <= baseHalfWidth;
+        const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && Math.abs(position.z) <= crossVerticalHalfLength;
+        const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && Math.abs(position.z) <= crossHorizontalHalfLength;
+
+        if (isOnBase || isOnVertical || isOnHorizontal) {
+            position.y = 3;
+        } else {
+            position.y = 1.5;
+        }
+
+        return isOnBase || isOnVertical || isOnHorizontal;
     }
 }
 
