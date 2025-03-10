@@ -1,8 +1,8 @@
 import './style.css';
-import GameClient from './GameClient';
+import { Game } from './modules/core/Game.js';
 
 // Initialize game when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    const game = new GameClient();
+    const game = new Game();
     window.game = game; // For debugging in development only
 }); 

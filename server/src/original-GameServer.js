@@ -6,47 +6,19 @@ export class GameServer {
         console.log('GameServer: Initializing...');
         this.io = new Server(httpServer, {
             cors: {
-                origin: "*",
-                methods: ["GET", "POST"]
+                origin: ["http://localhost:5173", "http://localhost:3000"],
+                methods: ["GET", "POST"],
+                credentials: true
             },
             transports: ['websocket', 'polling']
         });
 
         this.players = new Map();
         this.gameState = {
-            players: new Map()
+            players: new Map(),
+            lastUpdate: Date.now()
         };
         this.lastUpdateTime = new Map();
-        this.lastStateTime = new Map();
-
-        // Debug: Periodically log the number of connected players
-        setInterval(() => {
-            // Check if player count matches socket count
-            const socketCount = this.io.sockets.sockets.size;
-            const playerCount = this.players.size;
-            
-            if (socketCount !== playerCount) {
-                console.log(`[WARNING] Player count mismatch: ${playerCount} players vs ${socketCount} sockets`);
-                
-                // Check for and cleanup stale players
-                let cleaned = 0;
-                this.players.forEach((player, socketId) => {
-                    // Check if socket still exists
-                    if (!this.io.sockets.sockets.has(socketId)) {
-                        console.log(`Cleaning up stale player: ${player.displayName} (${socketId})`);
-                        this.players.delete(socketId);
-                        this.gameState.players.delete(socketId);
-                        this.lastUpdateTime.delete(socketId);
-                        this.lastStateTime.delete(socketId);
-                        cleaned++;
-                    }
-                });
-                
-                if (cleaned > 0) {
-                    console.log(`Cleaned up ${cleaned} stale players. New count: ${this.players.size}`);
-                }
-            }
-        }, 30000); // Check every 30 seconds
 
         this.setupSocketHandlers();
         this.startGameLoop();
@@ -57,66 +29,17 @@ export class GameServer {
         console.log('GameServer: Setting up socket handlers');
         
         this.io.on('connection', (socket) => {
-            // Log basic connection info
-            console.log(`Socket connected: ${socket.id}`);
+            console.log(`Player connected: ${socket.id}`);
             
-            // Check if socket ID already exists (reconnection case)
-            const existingPlayer = this.players.get(socket.id);
-            if (existingPlayer) {
-                console.log(`Player reconnected: ${existingPlayer.displayName} (Total Players: ${this.players.size})`);
-                
-                // Reset player position to temple center on reconnect
-                existingPlayer.position = {
-                    x: 0,
-                    y: 3,
-                    z: 0
-                };
-                
-                // Send updated player list to reconnected player
-                socket.emit('currentPlayers', Array.from(this.players.values()));
-                
-                // Broadcast updated player to others
-                socket.broadcast.emit('playerMoved', {
-                    id: socket.id,
-                    position: existingPlayer.position,
-                    rotation: existingPlayer.rotation,
-                    path: existingPlayer.path,
-                    karma: existingPlayer.karma,
-                    maxKarma: existingPlayer.maxKarma,
-                    life: existingPlayer.life,
-                    maxLife: existingPlayer.maxLife,
-                    mana: existingPlayer.mana,
-                    maxMana: existingPlayer.maxMana
-                });
-            } else {
-                // Create new player for first-time connection
-                const player = this.createPlayer(socket.id);
-                this.players.set(socket.id, player);
-                
-                // Log player connection WITH total player count
-                console.log(`Player connected: ${player.displayName} (Total Players: ${this.players.size})`);
-                
-                // Send current players to new player
-                socket.emit('currentPlayers', Array.from(this.players.values()));
-                
-                // Broadcast new player to others
-                socket.broadcast.emit('newPlayer', player);
-            }
-
-            // Handle disconnect to clean up player data
-            socket.on('disconnect', () => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    this.players.delete(socket.id);
-                    this.gameState.players.delete(socket.id);
-                    this.lastUpdateTime.delete(socket.id);
-                    this.lastStateTime.delete(socket.id);
-                    
-                    // Notify all clients about player leaving
-                    this.io.emit('playerLeft', socket.id);
-                    console.log(`Player left: ${player.displayName} (Total Players: ${this.players.size})`);
-                }
-            });
+            // Create new player
+            const player = this.createPlayer(socket.id);
+            this.players.set(socket.id, player);
+            
+            // Send current players to new player
+            socket.emit('currentPlayers', Array.from(this.players.values()));
+            
+            // Broadcast new player to others
+            socket.broadcast.emit('newPlayer', player);
 
             // Handle player movement with rate limiting
             socket.on('playerMovement', (data) => {
@@ -155,21 +78,6 @@ export class GameServer {
                     }
                 }
             });
-            
-            // Handle player state updates - simple version
-            socket.on('playerState', (data) => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    // Update player data
-                    player.position = data.position;
-                    player.rotation = data.rotation;
-                    player.path = data.path;
-                    player.karma = data.karma;
-                    player.maxKarma = data.maxKarma;
-                    player.mana = data.mana;
-                    player.maxMana = data.maxMana;
-                }
-            });
 
             // Handle skill damage
             socket.on('skillDamage', (data) => {
@@ -186,37 +94,54 @@ export class GameServer {
                     skillName: data.skillName,
                     damage: data.damage
                 });
+
+                // Prevent Illuminated players from dealing damage
+                if (attacker.karma === 0) {
+                    console.log('Illuminated attacker cannot deal damage');
+                    return;
+                }
                 
-                // Verify that player has the appropriate path for the skill
-                if (data.skillName === 'martial_arts') {
-                    // Apply actual damage based on karma levels
+                // Verify attacker has Light path for Martial Arts
+                if (data.skillName === 'martial_arts' && attacker.path === 'light') {
+                    // Calculate damage based on karma levels
                     let finalDamage = data.damage;
                     
-                    // Check for immunity - fully light players (karma 0) and fully dark (karma 100) are immune
-                    if (target.karma === 0 || target.karma === 100) {
-                        console.log('Target is immune to damage due to karma level:', target.karma);
+                    // Check for Illuminated status (0 karma)
+                    if (target.karma === 0) {
+                        // Illuminated players are immune to direct damage
                         finalDamage = 0;
-                    } else {
-                        // Apply damage modifiers based on karma
-                        // Light players (low karma) do more damage to dark players (high karma)
+                    } 
+                    // Check for Forsaken status (100 karma)
+                    else if (target.karma === 100) {
+                        // Forsaken players are immune to direct damage
+                        finalDamage = 0;
+                    }
+                    // Normal damage calculation
+                    else {
+                        // Damage increases as attacker's karma decreases (Light path)
                         const karmaMultiplier = 1 + ((50 - attacker.karma) / 50);
                         finalDamage *= karmaMultiplier;
                         
-                        // Karma provides damage reduction - higher karma gives more reduction
-                        const targetKarmaReduction = target.karma / 100;
-                        finalDamage *= (1 - targetKarmaReduction * 0.5);
-                        
-                        // Round to nearest integer
-                        finalDamage = Math.round(finalDamage);
+                        // Target's karma affects damage taken
+                        const targetKarmaReduction = target.karma / 100; // Higher karma = more damage reduction
+                        finalDamage *= (1 - targetKarmaReduction * 0.5); // Max 50% reduction at 100 karma
                     }
                     
-                    console.log(`Final damage calculated: ${finalDamage}`);
+                    // Round the final damage
+                    finalDamage = Math.round(finalDamage);
                     
-                    // Apply damage to target if it's greater than 0
+                    console.log('Calculated damage:', {
+                        attackerKarma: attacker.karma,
+                        targetKarma: target.karma,
+                        baseDamage: data.damage,
+                        finalDamage: finalDamage
+                    });
+                    
                     if (finalDamage > 0) {
+                        // Apply damage
                         target.life = Math.max(0, target.life - finalDamage);
                         
-                        // Broadcast life update to all players
+                        // Emit life update immediately
                         this.io.emit('lifeUpdate', {
                             id: data.targetId,
                             life: target.life,
@@ -327,17 +252,29 @@ export class GameServer {
             });
 
             // Handle player death
-            socket.on('playerDied', () => {
+            socket.on('playerDied', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
-                    // Remove player from game state but don't disconnect
+                    // Remove player from server state
                     this.players.delete(socket.id);
                     this.gameState.players.delete(socket.id);
                     this.lastUpdateTime.delete(socket.id);
-                    this.lastStateTime.delete(socket.id);
                     
-                    // Notify other players
+                    // Notify all clients that the player has died and should be removed
                     this.io.emit('playerLeft', socket.id);
+                    console.log(`Player died and left: ${player.displayName} (Total Players: ${this.players.size})`);
+                }
+            });
+
+            // Handle disconnection
+            socket.on('disconnect', () => {
+                const player = this.players.get(socket.id);
+                if (player) {
+                    this.players.delete(socket.id);
+                    this.gameState.players.delete(socket.id);
+                    this.lastUpdateTime.delete(socket.id);
+                    this.io.emit('playerLeft', socket.id);
+                    console.log(`Player left: ${player.displayName} (Total Players: ${this.players.size})`);
                 }
             });
         });
@@ -347,9 +284,9 @@ export class GameServer {
         return {
             id: socketId,
             position: {
-                x: 0,  // Fixed position at temple center
-                y: 3,  // Changed from 0 to 3 to ensure player is properly positioned above the temple floor
-                z: 0
+                x: Math.random() * 80 - 40,  // Random position between -40 and 40
+                y: 0,
+                z: Math.random() * 80 - 40
             },
             rotation: {
                 y: 0
@@ -368,21 +305,119 @@ export class GameServer {
         };
     }
 
+    validateMovement(data) {
+        // Implement movement validation logic
+        // Check for speed hacks, teleporting, etc.
+        const maxSpeed = 10; // units per second
+        const timeDelta = (Date.now() - this.gameState.lastUpdate) / 1000;
+        
+        if (!data.position || !data.rotation) return false;
+        
+        // Basic position validation
+        if (Math.abs(data.position.x) > 1000 || 
+            Math.abs(data.position.y) > 1000 || 
+            Math.abs(data.position.z) > 1000) {
+            return false;
+        }
+
+        // Speed validation
+        const speed = Math.sqrt(
+            Math.pow(data.position.x, 2) + 
+            Math.pow(data.position.z, 2)
+        ) / timeDelta;
+
+        return speed <= maxSpeed;
+    }
+
+    validateKarmaAction(data) {
+        // Implement karma action validation
+        const player = this.players.get(data.playerId);
+        if (!player) return false;
+
+        // Check cooldown
+        const cooldown = 1000; // 1 second
+        if (Date.now() - player.lastKarmaAction < cooldown) {
+            return false;
+        }
+
+        // Validate action type and target
+        return ['give', 'take'].includes(data.action) && 
+               this.gameState.players.has(data.targetId);
+    }
+
+    processKarmaAction(player, data) {
+        const target = this.gameState.players.get(data.targetId);
+        if (!target) return { success: false };
+
+        const amount = data.action === 'give' ? 1 : -1;
+        target.karma += amount;
+        player.lastKarmaAction = Date.now();
+
+        // Calculate and apply effects
+        const effects = this.calculateKarmaEffects(target.karma);
+        target.effects = effects;
+
+        return {
+            success: true,
+            effect: {
+                type: data.action,
+                amount,
+                effects
+            }
+        };
+    }
+
+    calculateKarmaEffects(karma) {
+        // Implement karma effects calculation
+        const effects = [];
+        
+        if (karma >= 10) effects.push('enlightened');
+        else if (karma <= -10) effects.push('cursed');
+        
+        if (Math.abs(karma) >= 5) {
+            effects.push(karma > 0 ? 'blessed' : 'haunted');
+        }
+
+        return effects;
+    }
+
     startGameLoop() {
+        const tickRate = 60; // Updates per second
+        const tickInterval = 1000 / tickRate;
+
         setInterval(() => {
-            this.gameState.lastUpdate = Date.now();
-        }, 1000 / 60);
+            this.update();
+        }, tickInterval);
+    }
+
+    update() {
+        // Update game state
+        this.gameState.lastUpdate = Date.now();
+
+        // Process any time-based effects
+        for (const [_, player] of this.gameState.players) {
+            this.updatePlayerEffects(player);
+        }
+
+        // Broadcast game state if needed
+        if (this.gameState.players.size > 0) {
+            this.io.emit('gameStateUpdate', {
+                players: Array.from(this.gameState.players.values()),
+                timestamp: this.gameState.lastUpdate
+            });
+        }
     }
 
     updatePlayerEffects(player) {
+        // Calculate effects based on karma
         const effects = [];
-
+        
         if (player.karma >= 75) effects.push('enlightened');
         else if (player.karma <= 25) effects.push('cursed');
-
+        
         if (player.karma >= 60) effects.push('blessed');
         else if (player.karma <= 40) effects.push('haunted');
-
+        
         player.effects = effects;
     }
 } 
