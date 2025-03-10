@@ -18,6 +18,8 @@ export class Game {
         this.socket = null;
         this.isRunning = true;
         this.isAlive = true; // Explicitly set isAlive to true
+        
+        // Initialize controls object first
         this.controls = {
             forward: false,
             backward: false,
@@ -25,74 +27,47 @@ export class Game {
             right: false
         };
         
-        // Logging control to prevent spam
-        this.lastPositionLog = 0;
-        this.logFrequency = 5000; // Log at most once every 5 seconds
-        
-        // Add skills system
-        this.skills = {
-            martial_arts: {
-                name: 'Martial Arts',
-                key: 'Space',
-                slot: 1,
-                damage: 75,
-                range: 3,
-                cooldown: 2000,
-                lastUsed: 0,
-                icon: '🥋'
-            }
-        };
-        this.activeSkills = new Set(); // Skills the player has learned
+        // Initialize keys object to track key states
+        this.keys = {};
         
         // Add dialogue state
         this.activeDialogue = null;
         this.dialogueUI = null;
         
-        // Add karma recovery timer
-        this.lastKarmaRecoveryTime = Date.now();
+        // Logging control to prevent spam
+        this.lastPositionLog = 0;
+        this.logFrequency = 5000; // Log at most once every 5 seconds
         
-        // Camera settings for LoL-style view with zoom limits
-        this.cameraOffset = new THREE.Vector3(0, 15, 15);
+        // Add camera control variables
+        this.cameraOffset = { x: 0, y: 8, z: 10 };
+        this.cameraTarget = null;
         this.minZoom = 12;
         this.maxZoom = 20;
         this.zoomSpeed = 0.5;
         this.currentZoom = 15;
         
-        // Player state variables
-        this.lastStatusUpdate = 0;
-        this.lastStateUpdate = 0;
-        this.lastWaterUpdate = 0;
-        this.waterTime = 0;
-        
         // Set up player stats
         this.playerStats = {
-            id: "",
-            name: "Player",
-            level: 1,
-            experience: 0,
             currentLife: 100,
             maxLife: 100,
             currentMana: 100,
             maxMana: 100,
             currentKarma: 50,
             maxKarma: 100,
-            strength: 10,
-            agility: 10,
-            intelligence: 10,
-            stamina: 10,
-            charisma: 10,
-            path: null // Start with no path chosen (not "neutral")
+            level: 1,
+            experience: 0,
+            experienceToNextLevel: 100,
+            path: null
         };
         
-        // Server URL for multiplayer
-        this.SERVER_URL = serverUrl || "http://localhost:3000";
-        
-        // Shared geometries and materials for optimization
+        // Shared resources for optimization
         this.sharedGeometries = {
             boxGeometry: new THREE.BoxGeometry(1, 1, 1),
             sphereGeometry: new THREE.SphereGeometry(0.5, 16, 16),
             planeGeometry: new THREE.PlaneGeometry(1, 1),
-            barGeometry: new THREE.PlaneGeometry(1, 0.1)
+            barGeometry: new THREE.PlaneGeometry(1, 0.1),
+            playerBase: new THREE.BoxGeometry(0.8, 1.2, 0.5),
+            playerHead: new THREE.SphereGeometry(0.3, 16, 16)
         };
         
         this.sharedMaterials = {
@@ -102,23 +77,24 @@ export class Game {
                 side: THREE.DoubleSide,
                 transparent: true,
                 opacity: 0.7
+            }),
+            playerBody: new THREE.MeshPhongMaterial({
+                color: 0x999999,
+                shininess: 10
             })
         };
-        
-        // Initialize colliders array
-        this.statueColliders = [];
         
         // Animation timing
         this.clock = new THREE.Clock();
         this.lastTime = 0;
         
+        // Initialize game systems
+        this.SERVER_URL = serverUrl || 'http://localhost:3000';
+        
         // NPC flags
         this.npcProximity = false;
         
-        // Wave animation
-        this.waveRings = [];
-        
-        // Initialize the game
+        // Call init to start the game
         this.init();
     }
     
@@ -126,48 +102,46 @@ export class Game {
         console.log('Initializing game...');
         
         try {
-            // Setup renderer with a background color matching the ocean
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
-            this.renderer.shadowMap.enabled = true;
-            this.renderer.setClearColor(0x004488); // Match the ocean color exactly
-            document.body.appendChild(this.renderer.domElement);
-
-            // Setup camera for isometric view
-            this.camera.position.set(0, 15, 15);
-            this.camera.lookAt(0, 0, 0);
-            this.camera.rotation.x = -Math.PI / 4;
-
-            // Add fog to blend with the background
-            this.scene.fog = new THREE.Fog(0x004488, 150, 400);
-
-            // Add ambient light
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-            this.scene.add(ambientLight);
-
-            // Add directional light from above
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-            directionalLight.position.set(5, 15, 8);
-            directionalLight.castShadow = true;
-            this.scene.add(directionalLight);
-
-            // Add hemisphere light for better environment lighting
-            const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x0066aa, 0.6);
-            this.scene.add(hemisphereLight);
-
-            // Create terrain first (it should be above the ocean)
-            this.createTerrain();
-
-            // Create temple in the center
-            this.createTemple();
-
-            // Create ocean border (it should be below the terrain)
-            this.createOcean();
+            // Add event for debug logging
+            window.addEventListener('error', (event) => {
+                console.error('Unhandled error:', event.error);
+            });
+            
+            // Setup rendering
+            this.setupScene();
+            
+            // Explicitly set player position height off the ground
+            this.playerY = 0; // This will be used for collision detection
+            
+            // Initialize player stats
+            this.playerStats = {
+                currentLife: 100,
+                maxLife: 100,
+                currentMana: 100,
+                maxMana: 100,
+                currentKarma: 50,
+                maxKarma: 100,
+                level: 1,
+                experience: 0,
+                experienceToNextLevel: 100,
+                path: null
+            };
             
             // Initialize managers
             await this.initializeManagers();
             
+            // Create the temple in the center of the scene
+            this.createTemple();
+            
+            // Setup event listeners after everything is loaded
+            this.setupEventListeners();
+            
             // Setup input handlers and camera
             this.setupInputHandlers();
+            this.setupCamera();
+            
+            // Initialize player from template or network
+            await this.initializePlayer();
             
             // Start the game loop
             this.startGameLoop();
@@ -285,70 +259,23 @@ export class Game {
     }
     
     // Initialize managers while keeping the same flow as the original
-    async initializeManagers() {
-        console.log('Initializing game managers...');
+    initializeManagers() {
+        // Create all manager instances
+        this.uiManager = new UIManager(this);
+        this.networkManager = new NetworkManager(this, this.SERVER_URL);
+        this.playerManager = new PlayerManager(this);
+        this.skillsManager = new SkillsManager(this);
+        this.karmaManager = new KarmaManager(this);
+        this.npcManager = new NPCManager(this);
         
-        try {
-            // Initialize scene manager first
-            if (this.sceneManager) {
-                await this.sceneManager.init();
-                console.log('Scene Manager initialized');
-            }
-            
-            // Initialize input manager
-            if (this.inputManager) {
-                await this.inputManager.init();
-                console.log('Input Manager initialized');
-            }
-            
-            // Initialize audio manager
-            if (this.audioManager) {
-                await this.audioManager.init();
-                console.log('Audio Manager initialized');
-            }
-            
-            // Initialize UI manager
-            if (this.uiManager) {
-                await this.uiManager.init();
-                console.log('UI Manager initialized');
-            }
-            
-            // Initialize player manager
-            if (this.playerManager) {
-                await this.playerManager.init();
-                console.log('Player Manager initialized');
-            }
-            
-            // Initialize karma manager
-            if (this.karmaManager) {
-                await this.karmaManager.init();
-                console.log('Karma Manager initialized');
-            }
-            
-            // Initialize skills manager
-            if (this.skillsManager) {
-                await this.skillsManager.init();
-                console.log('Skills Manager initialized');
-            }
-            
-            // Initialize network manager last
-            if (this.networkManager) {
-                await this.networkManager.init();
-                console.log('Network Manager initialized');
-            }
-            
-            // All managers initialized
-            console.log('All managers initialized successfully');
-            this.isInitialized = true;
-            
-            // Start the game loop
-            this.startGameLoop();
-            
-            return true;
-        } catch (error) {
-            console.error('Error initializing managers:', error);
-            return false;
-        }
+        // Setup multiplayer (same logic as original but through the NetworkManager)
+        this.networkManager.setupMultiplayer();
+        
+        // Create UI (same as original but through UIManager)
+        this.uiManager.createUI();
+        
+        // Load player (same as original but through PlayerManager)
+        this.playerManager.loadCharacterModel();
     }
     
     // Setup event listeners just like in the original
@@ -367,10 +294,28 @@ export class Game {
     
     // Handle key down events
     handleKeyDown(event) {
-        if (this.activeDialogue) return; // Don't process movement if dialogue is active
+        // Skip if inside input field or dialogue is active
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            return;
+        }
         
-        // Track key state
+        if (this.activeDialogue) {
+            return; // Don't process movement if dialogue is active
+        }
+        
+        // Safely track key state
+        if (!this.keys) this.keys = {};
         this.keys[event.code] = true;
+        
+        // Ensure controls object exists
+        if (!this.controls) {
+            this.controls = {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false
+            };
+        }
         
         switch (event.code) {
             case 'KeyW':
@@ -386,20 +331,28 @@ export class Game {
                 this.controls.right = true;
                 break;
             case 'Space':
-                this.useMartialArts();
+                if (typeof this.useMartialArts === 'function') {
+                    this.useMartialArts();
+                }
                 break;
             case 'KeyE':
-                this.handleInteraction();
+                if (typeof this.handleInteraction === 'function') {
+                    this.handleInteraction();
+                }
                 break;
             case 'KeyK':
-                this.adjustKarma(10); // Increase Karma by 10
+                if (typeof this.adjustKarma === 'function') {
+                    this.adjustKarma(10); // Increase Karma by 10
+                }
                 break;
             case 'KeyR':
-                this.adjustKarma(-this.playerStats.currentKarma); // Reset Karma to 0
+                if (typeof this.adjustKarma === 'function') {
+                    this.adjustKarma(-this.playerStats.currentKarma); // Reset Karma to 0
+                }
                 break;
             case 'KeyF12':
                 // Force clean all players (debug)
-                if (this.networkManager) {
+                if (this.networkManager && typeof this.networkManager.forceCleanAllPlayers === 'function') {
                     console.log('🧹 MANUAL CLEANUP: Force cleaning all ghost players...');
                     this.networkManager.forceCleanAllPlayers();
                 }
@@ -409,6 +362,25 @@ export class Game {
     
     // Handle key up events
     handleKeyUp(event) {
+        // Skip if inside input field
+        if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
+            return;
+        }
+        
+        // Safely track key state
+        if (!this.keys) this.keys = {};
+        this.keys[event.code] = false;
+        
+        // Ensure controls object exists
+        if (!this.controls) {
+            this.controls = {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false
+            };
+        }
+        
         switch (event.code) {
             case 'KeyW':
                 this.controls.forward = false;
@@ -719,9 +691,9 @@ export class Game {
             );
             
             // Update camera offset
-            const zoomFactor = this.currentZoom / 15; // Normalize to default zoom
-            this.cameraOffset.y = 15 * zoomFactor;
-            this.cameraOffset.z = 15 * zoomFactor;
+            const zoomRatio = this.currentZoom / 15; // 15 is the default zoom
+            this.cameraOffset.y = 15 * zoomRatio;
+            this.cameraOffset.z = 15 * zoomRatio;
         });
 
         // Update camera aspect ratio and size when window resizes
@@ -841,7 +813,7 @@ export class Game {
     
     createTerrain() {
         // Terrain size (more like LoL)
-        const size = 120;
+        const size = 200; // Increased from 120 to 200 for a larger arena
         const segments = 128;
         
         // Create plane geometry
@@ -851,7 +823,7 @@ export class Game {
         const grassTexture = new THREE.TextureLoader().load('/textures/grass.jpg');
         grassTexture.wrapS = THREE.RepeatWrapping;
         grassTexture.wrapT = THREE.RepeatWrapping;
-        grassTexture.repeat.set(10, 10);
+        grassTexture.repeat.set(25, 25); // Increased texture repeat to match larger size
         
         const material = new THREE.MeshPhongMaterial({
             map: grassTexture,
@@ -1333,82 +1305,69 @@ export class Game {
             playerMesh.userData = {};
         }
 
-        // Check if status bars exist, create them if not
-        if (!playerMesh.userData.bars || !playerMesh.userData.statusGroup) {
-            console.warn(`Status bars not initialized for player: ${playerMesh.userData.id || 'unknown'}`);
-            return; // Don't try to update non-existent status bars
-        }
-
-        // Update life bar
-        if (stats.life !== undefined && playerMesh.userData.bars.life) {
-            const lifeBar = playerMesh.userData.bars.life;
-            lifeBar.value = stats.life;
-            lifeBar.maxValue = stats.maxLife || 100;
-            const lifeRatio = Math.max(0, Math.min(1, lifeBar.value / lifeBar.maxValue));
-            lifeBar.fill.scale.x = lifeRatio;
-            lifeBar.fill.position.x = -0.5 + (lifeRatio / 2);
-        }
-
-        // Update mana bar
-        if (stats.mana !== undefined && playerMesh.userData.bars.mana) {
-            const manaBar = playerMesh.userData.bars.mana;
-            manaBar.value = stats.mana;
-            manaBar.maxValue = stats.maxMana || 100;
-            const manaRatio = Math.max(0, Math.min(1, manaBar.value / manaBar.maxValue));
-            manaBar.fill.scale.x = manaRatio;
-            manaBar.fill.position.x = -0.5 + (manaRatio / 2);
-        }
-
-        // Update karma bar
-        if (stats.karma !== undefined && playerMesh.userData.bars.karma) {
-            const karmaBar = playerMesh.userData.bars.karma;
-            karmaBar.value = stats.karma;
-            karmaBar.maxValue = stats.maxKarma || 100;
-            const karmaRatio = Math.max(0, Math.min(1, karmaBar.value / karmaBar.maxValue));
-            karmaBar.fill.scale.x = karmaRatio;
-            karmaBar.fill.position.x = -0.5 + (karmaRatio / 2);
-            
-            // Change karma bar color based on karma value
-            if (stats.karma <= 10) {
-                karmaBar.fill.material.color.set(0xFF0000); // Red for Dark Karma (Near Forsaken)
-            } else if (stats.karma >= 90) {
-                karmaBar.fill.material.color.set(0xFFFFFF); // White for Light Karma (Near Illuminated)
-            } else if (stats.karma < 50) {
-                // Gradient from red to yellow (Dark Leaning)
-                const t = (stats.karma - 10) / 40;
-                karmaBar.fill.material.color.setRGB(1, t, 0);
-            } else {
-                // Gradient from yellow to white (Light Leaning)
-                const t = (stats.karma - 50) / 40;
-                karmaBar.fill.material.color.setRGB(1, 1, t);
-            }
-        }
-
-        // Update player's stored stats
+        // Store the stats in player userData
         if (!playerMesh.userData.stats) {
             playerMesh.userData.stats = {};
         }
         
-        // Only update stats if provided
+        // Update the stored stats with new values
         if (stats.life !== undefined) playerMesh.userData.stats.life = stats.life;
         if (stats.maxLife !== undefined) playerMesh.userData.stats.maxLife = stats.maxLife;
         if (stats.mana !== undefined) playerMesh.userData.stats.mana = stats.mana;
         if (stats.maxMana !== undefined) playerMesh.userData.stats.maxMana = stats.maxMana;
         if (stats.karma !== undefined) playerMesh.userData.stats.karma = stats.karma;
         if (stats.maxKarma !== undefined) playerMesh.userData.stats.maxKarma = stats.maxKarma;
-        
-        // If this is the local player, update the game's player stats
-        if (playerMesh === this.localPlayer && !silent) {
-            if (stats.life !== undefined) this.playerStats.currentLife = stats.life;
-            if (stats.maxLife !== undefined) this.playerStats.maxLife = stats.maxLife;
-            if (stats.mana !== undefined) this.playerStats.currentMana = stats.mana;
-            if (stats.maxMana !== undefined) this.playerStats.maxMana = stats.maxMana;
-            if (stats.karma !== undefined) this.playerStats.currentKarma = stats.karma;
-            if (stats.maxKarma !== undefined) this.playerStats.maxKarma = stats.maxKarma;
+
+        // Update status bars if they exist
+        if (playerMesh.userData.statusBars && playerMesh.userData.statusGroup) {
+            playerMesh.userData.statusBars.forEach(bar => {
+                const statValue = playerMesh.userData.stats[bar.type];
+                const maxValue = playerMesh.userData.stats[`max${bar.type.charAt(0).toUpperCase() + bar.type.slice(1)}`];
+                
+                if (statValue !== undefined && maxValue !== undefined) {
+                    const ratio = Math.max(0, Math.min(1, statValue / maxValue));
+                    bar.fill.scale.x = ratio;
+                    
+                    // Center the fill bar
+                    bar.fill.position.x = (ratio - 1) * bar.width / 2;
+                    
+                    // Update color for karma bar
+                    if (bar.type === 'karma') {
+                        // Karma color gradient from red (0) to yellow (50) to green (100)
+                        if (ratio <= 0.5) {
+                            // Red to yellow
+                            const r = 1.0;
+                            const g = ratio * 2;
+                            bar.fill.material.color.setRGB(r, g, 0);
+                        } else {
+                            // Yellow to green
+                            const r = 1.0 - (ratio - 0.5) * 2;
+                            const g = 1.0;
+                            bar.fill.material.color.setRGB(r, g, 0);
+                        }
+                    }
+                }
+            });
+            
+            // Update status group position to follow player
+            const worldPosition = new THREE.Vector3();
+            playerMesh.getWorldPosition(worldPosition);
+            playerMesh.userData.statusGroup.position.set(
+                worldPosition.x,
+                worldPosition.y + 2.0,
+                worldPosition.z
+            );
+        } else if (!silent) {
+            console.warn(`Status bars not found for player: ${playerMesh.userData.id || 'unknown'}`);
         }
         
-        // Make sure status bars are correctly positioned
-        this.updateStatusBarPositions();
+        // Handle special cases, like death
+        if (stats.life === 0 && this.playerManager && playerMesh === this.localPlayer) {
+            console.log('Player died, handling death');
+            if (this.playerManager.handlePlayerDeath) {
+                this.playerManager.handlePlayerDeath(playerMesh);
+            }
+        }
     }
     
     // Add temple interaction method
@@ -2057,6 +2016,7 @@ export class Game {
         nextSteps.style.margin = '20px 0';
         nextSteps.style.padding = '15px';
         nextSteps.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        nextSteps.style.borderRadius = '10px';
         nextSteps.innerHTML = `
             <h3 style="margin: 0 0 10px 0; color: ${path === 'dark' ? '#6600cc' : '#ffcc00'}">Next Steps</h3>
             <ul style="margin: 0; padding-left: 20px;">

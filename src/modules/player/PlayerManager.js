@@ -6,7 +6,7 @@ export class PlayerManager {
         this.game = game;
         this.loader = new GLTFLoader();
         this.characterModel = null;
-        this.characterModelPath = '/models/character.glb';
+        this.characterModelPath = '/models/scene.glb';
         this.defaultPlayerColor = 0x999999; // Neutral gray
         this.lightPathColor = 0x3366ff; // Blue for light path
         this.darkPathColor = 0x990000; // Red for dark path
@@ -31,55 +31,82 @@ export class PlayerManager {
     }
     
     async loadCharacterModel() {
-        return new Promise((resolve, reject) => {
-            this.loader.load(
-                this.characterModelPath,
-                (gltf) => {
-                    console.log('Character model loaded successfully');
-                    resolve(gltf.scene);
-                },
-                (progress) => {
-                    console.log('Loading character model:', (progress.loaded / progress.total * 100) + '%');
-                },
-                (error) => {
-                    console.error('Error loading character model:', error);
-                    
-                    // Create a fallback model if loading fails
-                    console.log('Using fallback character model');
-                    const fallbackModel = this.createFallbackCharacterModel();
-                    resolve(fallbackModel);
-                }
-            );
-        });
+        try {
+            console.log('Starting to load character model...');
+            
+            return new Promise((resolve, reject) => {
+                this.loader.load(
+                    this.characterModelPath,
+                    (gltf) => {
+                        console.log('Model loaded successfully:', gltf);
+                        
+                        // Create a group to hold the model
+                        const modelGroup = new THREE.Group();
+                        modelGroup.add(gltf.scene);
+                        
+                        // Set up the model with larger scale exactly as in original
+                        gltf.scene.scale.set(5, 5, 5);
+                        gltf.scene.position.y = 0;
+                        gltf.scene.rotation.y = 0;
+                        
+                        console.log('Model setup complete');
+                        resolve(modelGroup);
+                    },
+                    (progress) => console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%'),
+                    (error) => {
+                        console.error('Error loading model:', error);
+                        reject(error);
+                    }
+                );
+            });
+        } catch (error) {
+            console.error('Error in loadCharacterModel:', error);
+            // Fallback to basic character if loading fails
+            return this.createFallbackCharacterModel();
+        }
     }
     
     createFallbackCharacterModel() {
-        // Create a simple character model as fallback
-        const group = new THREE.Group();
+        console.log('Creating fallback character model');
+        const playerGroup = new THREE.Group();
         
-        // Create body
-        const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1.5, 32);
-        const bodyMaterial = new THREE.MeshPhongMaterial({
-            color: this.defaultPlayerColor,
-            shininess: 0
-        });
-        const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-        body.position.y = 0.75;
-        body.name = 'body';
-        group.add(body);
+        // Create shared geometries if they don't exist
+        if (!this.game.sharedGeometries) {
+            this.game.sharedGeometries = {
+                playerBase: new THREE.BoxGeometry(0.8, 1.2, 0.5),
+                playerHead: new THREE.SphereGeometry(0.3, 16, 16)
+            };
+        }
         
-        // Create head
-        const headGeometry = new THREE.SphereGeometry(0.3, 32, 32);
-        const headMaterial = new THREE.MeshPhongMaterial({
-            color: this.defaultPlayerColor,
-            shininess: 0
-        });
-        const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 1.65;
-        head.name = 'head';
-        group.add(head);
+        // Create shared materials if they don't exist
+        if (!this.game.sharedMaterials) {
+            this.game.sharedMaterials = {
+                playerBody: new THREE.MeshPhongMaterial({
+                    color: this.defaultPlayerColor,
+                    shininess: 10
+                })
+            };
+        }
         
-        return group;
+        // Use shared geometries and materials
+        const body = new THREE.Mesh(
+            this.game.sharedGeometries.playerBase, 
+            this.game.sharedMaterials.playerBody.clone()
+        );
+        body.castShadow = true;
+        body.receiveShadow = true;
+        playerGroup.add(body);
+
+        const head = new THREE.Mesh(
+            this.game.sharedGeometries.playerHead, 
+            this.game.sharedMaterials.playerBody.clone()
+        );
+        head.position.y = 0.75;
+        head.castShadow = true;
+        head.receiveShadow = true;
+        playerGroup.add(head);
+
+        return playerGroup;
     }
     
     async createLocalPlayer() {
@@ -126,8 +153,9 @@ export class PlayerManager {
         console.log('Rotation:', rotation);
         console.log('Is local player:', id === this.game.socket?.id);
         
-        // Load detailed model for all players
+        // Load detailed model for all players - this now returns a Group with scene inside
         let playerModel = await this.loadCharacterModel();
+        console.log('Player model loaded:', playerModel);
 
         // Use provided position for existing players, temple center for new local player
         if (id === this.game.socket?.id) {
@@ -142,7 +170,7 @@ export class PlayerManager {
         
         playerModel.rotation.y = rotation.y || 0;
 
-        // Add shadow casting
+        // Add shadow casting to all meshes in the model
         playerModel.traverse((child) => {
             if (child.isMesh) {
                 child.castShadow = true;
@@ -150,6 +178,96 @@ export class PlayerManager {
             }
         });
 
+        // Create status bars group that will not inherit rotation
+        const statusGroup = new THREE.Group();
+        statusGroup.position.y = 2.0; // Position above player's head
+        
+        const barWidth = 1;
+        const barHeight = 0.1;
+        const barSpacing = 0.05;
+        const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
+
+        // Create background bars
+        const backgroundMaterial = new THREE.MeshBasicMaterial({
+            color: 0x333333,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.7
+        });
+
+        // Create three status bars (life, mana, karma)
+        const bars = ['life', 'mana', 'karma'].map((type, index) => {
+            const background = new THREE.Mesh(barGeometry, backgroundMaterial.clone());
+            const fillMaterial = new THREE.MeshBasicMaterial({
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.9
+            });
+            const fill = new THREE.Mesh(barGeometry, fillMaterial);
+            
+            // Set colors based on type
+            if (type === 'life') {
+                fillMaterial.color = new THREE.Color(0xff0000); // Red for life
+            } else if (type === 'mana') {
+                fillMaterial.color = new THREE.Color(0x0000ff); // Blue for mana
+            } else if (type === 'karma') {
+                background.material.color = new THREE.Color(0xffffff); // White bg for karma
+                fillMaterial.color = new THREE.Color(0xffcc00); // Gold for karma
+            }
+            
+            // Position bars vertically stacked with smaller spacing
+            const yOffset = (barHeight + barSpacing) * (2 - index);
+            background.position.y = yOffset;
+            fill.position.y = yOffset;
+            fill.position.z = 0.001; // Slightly in front
+            
+            // Set initial scale
+            fill.scale.x = 1.0;
+            
+            // Center bars horizontally
+            background.position.x = 0;
+            fill.position.x = 0;
+
+            statusGroup.add(background);
+            statusGroup.add(fill);
+
+            return {
+                background,
+                fill,
+                width: barWidth,
+                type
+            };
+        });
+
+        // Store status bars and group in player model's userData
+        playerModel.userData = playerModel.userData || {};
+        playerModel.userData.statusBars = bars;
+        playerModel.userData.statusGroup = statusGroup;
+        playerModel.userData.isPlayer = true;
+
+        // Add status group to scene
+        this.game.scene.add(statusGroup);
+
+        // Set initial values and update status bars immediately
+        const initialStats = id === this.game.socket?.id ? {
+            life: this.game.playerStats.currentLife || 100,
+            maxLife: this.game.playerStats.maxLife || 100,
+            mana: this.game.playerStats.currentMana || 100,
+            maxMana: this.game.playerStats.maxMana || 100,
+            karma: this.game.playerStats.currentKarma || 50,
+            maxKarma: this.game.playerStats.maxKarma || 100
+        } : {
+            life: 100,
+            maxLife: 100,
+            mana: 100,
+            maxMana: 100,
+            karma: 50,
+            maxKarma: 100
+        };
+
+        // Store initial stats in userData
+        playerModel.userData.stats = initialStats;
+        
         // Add player to scene
         this.game.scene.add(playerModel);
         
@@ -162,6 +280,9 @@ export class PlayerManager {
             this.localPlayer = playerModel;
             this.game.isAlive = true;
         }
+        
+        // Force immediate update of status bars
+        this.game.updatePlayerStatus(playerModel, initialStats);
 
         return playerModel;
     }
@@ -333,7 +454,57 @@ export class PlayerManager {
     updatePlayerAnimations() {
         // Update animations for all players
         this.game.players.forEach((player) => {
-            // Animation logic would go here
+            // Skip if player is invalid
+            if (!player || !player.userData) return;
+            
+            // Check if player is moving
+            const isMoving = player.userData.isMoving || 
+                (player.userData.targetPosition && 
+                player.position.distanceToSquared(player.userData.targetPosition) > 0.01);
+            
+            // Update animation state
+            if (player.userData.animations) {
+                // Handle model-specific animations if they exist
+                if (isMoving && player.userData.currentAnimation !== 'Running') {
+                    // Change to running animation
+                    const runAction = player.userData.animations['Running'];
+                    if (runAction) {
+                        if (player.userData.currentAction) {
+                            player.userData.currentAction.fadeOut(0.2);
+                        }
+                        runAction.reset().fadeIn(0.2).play();
+                        player.userData.currentAction = runAction;
+                        player.userData.currentAnimation = 'Running';
+                    }
+                } else if (!isMoving && player.userData.currentAnimation !== 'Idle') {
+                    // Change to idle animation
+                    const idleAction = player.userData.animations['Idle'];
+                    if (idleAction) {
+                        if (player.userData.currentAction) {
+                            player.userData.currentAction.fadeOut(0.2);
+                        }
+                        idleAction.reset().fadeIn(0.2).play();
+                        player.userData.currentAction = idleAction;
+                        player.userData.currentAnimation = 'Idle';
+                    }
+                }
+                
+                // Update animation mixer if it exists
+                if (player.userData.mixer) {
+                    player.userData.mixer.update(this.game.clock.getDelta());
+                }
+            }
+            
+            // Update status bar position to follow player
+            if (player.userData.statusGroup) {
+                const worldPosition = new THREE.Vector3();
+                player.getWorldPosition(worldPosition);
+                player.userData.statusGroup.position.set(
+                    worldPosition.x,
+                    worldPosition.y + 2.0,
+                    worldPosition.z
+                );
+            }
         });
     }
 }

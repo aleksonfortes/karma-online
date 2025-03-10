@@ -4,7 +4,7 @@ export class SkillsManager {
     constructor(game) {
         this.game = game;
         
-        // Add skills system with exact same properties as original
+        // Add skills system
         this.skills = {
             martial_arts: {
                 id: 'martial_arts',
@@ -22,28 +22,13 @@ export class SkillsManager {
     
     init() {
         console.log('Initializing Skills Manager');
-        // Add martial arts to active skills if on light path
-        if (this.game.playerStats && this.game.playerStats.path === 'light') {
-            this.game.activeSkills.add('martial_arts');
-        }
+        // Any initialization logic for skills
         return true;
     }
     
     useSkill(skillId) {
         if (!this.skills[skillId]) {
             console.warn(`Skill ${skillId} not found`);
-            return false;
-        }
-        
-        // Prevent skill use if player is dead
-        if (!this.game.isAlive) {
-            console.log('Cannot use skills while dead');
-            return false;
-        }
-
-        // Check if player has the skill
-        if (!this.game.activeSkills || !this.game.activeSkills.has(skillId)) {
-            console.log(`Player does not have ${skillId} skill`);
             return false;
         }
         
@@ -59,19 +44,17 @@ export class SkillsManager {
         
         // Use the skill
         console.log(`Using skill: ${skill.name}`);
+        skill.lastUsed = now;
         
         // Handle specific skill effects
         switch(skillId) {
             case 'martial_arts':
+                console.log('Martial arts attack!');
                 this.useMartialArts();
                 break;
             default:
                 console.warn(`No implementation for skill ${skillId}`);
-                return false;
         }
-        
-        // Set last used time
-        skill.lastUsed = now;
         
         // Update UI
         if (this.game.uiManager) {
@@ -82,6 +65,18 @@ export class SkillsManager {
     }
     
     useMartialArts() {
+        // Prevent skill use if player is dead
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return;
+        }
+
+        // Check if player has the skill
+        if (!this.game.activeSkills || !this.game.activeSkills.has('martial_arts')) {
+            console.log('Player does not have martial arts skill');
+            return;
+        }
+        
         // Check if player is on light path
         if (this.game.playerStats && this.game.playerStats.path !== 'light') {
             console.log('Only light path players can use martial arts');
@@ -132,15 +127,10 @@ export class SkillsManager {
                 targetFound = true;
                 console.log('Target found in range, emitting damage event');
                 
-                // Calculate damage based on karma - more damage with higher karma
-                const baseDamage = skill.damage;
-                const karmaMultiplier = this.game.playerStats.currentKarma / 50; // 1.0 at 50 karma, 2.0 at 100 karma
-                const finalDamage = Math.floor(baseDamage * karmaMultiplier);
-                
                 // Emit damage event to server
                 this.game.socket.emit('skillDamage', {
                     targetId: playerId,
-                    damage: finalDamage,
+                    damage: skill.damage,
                     skillName: 'martial_arts'
                 });
             }
@@ -152,13 +142,6 @@ export class SkillsManager {
         if (targetFound) {
             skill.lastUsed = now;
             console.log('Martial arts skill used successfully');
-            
-            // Reduce karma slightly when using offensive skills
-            if (this.game.playerStats) {
-                // Karma cost increases as karma gets higher
-                const karmaCost = Math.max(1, Math.floor(this.game.playerStats.currentKarma / 25));
-                this.game.karmaManager.adjustKarma(-karmaCost);
-            }
         } else {
             console.log('No targets in range for martial arts');
         }
@@ -167,7 +150,7 @@ export class SkillsManager {
     createMartialArtsEffect() {
         if (!this.game.localPlayer || !this.game.scene) return;
         
-        // Create a visual effect for the martial arts attack - match original exactly
+        // Create a visual effect for the martial arts attack - simpler version matching original
         const effectGeometry = new THREE.SphereGeometry(0.5, 16, 16);
         const effectMaterial = new THREE.MeshBasicMaterial({
             color: 0xffcc00,
@@ -204,110 +187,41 @@ export class SkillsManager {
         };
         
         animate();
-        
-        // Add sound effect if available
-        if (this.game.audioManager && typeof this.game.audioManager.playSound === 'function') {
-            this.game.audioManager.playSound('martial_arts');
-        }
     }
     
-    // Handle receiving damage from other players
-    receiveDamage(data) {
-        if (!this.game.localPlayer || !this.game.isAlive) return;
+    findTargetsInRange(range) {
+        const targets = [];
         
-        console.log('Received damage:', data);
+        // In a real game, we would check for enemies in range
+        // This is a simplified version
         
-        // Apply damage to player
-        if (this.game.playerStats) {
-            const previousLife = this.game.playerStats.currentLife;
-            this.game.playerStats.currentLife = Math.max(0, this.game.playerStats.currentLife - data.damage);
-            
-            // Update UI
-            if (this.game.uiManager) {
-                this.game.uiManager.updateLifeBar(this.game.playerStats.currentLife, this.game.playerStats.maxLife);
-            }
-            
-            // Create damage effect
-            this.createDamageEffect(data.damage);
-            
-            // Check for death
-            if (previousLife > 0 && this.game.playerStats.currentLife <= 0) {
-                this.game.handlePlayerDeath();
-            }
-        }
+        return targets;
     }
     
-    createDamageEffect(damage) {
-        if (!this.game.localPlayer || !this.game.scene) return;
-        
-        // Create floating damage text
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = 128;
-        canvas.height = 64;
-        
-        context.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        
-        context.font = 'bold 32px Arial';
-        context.fillStyle = '#ff0000';
-        context.textAlign = 'center';
-        context.textBaseline = 'middle';
-        context.fillText(`-${damage}`, canvas.width / 2, canvas.height / 2);
-        
-        const texture = new THREE.CanvasTexture(canvas);
-        const material = new THREE.SpriteMaterial({
-            map: texture,
-            transparent: true
-        });
-        
-        const sprite = new THREE.Sprite(material);
-        sprite.position.copy(this.game.localPlayer.position);
-        sprite.position.y += 2;
-        sprite.scale.set(2, 1, 1);
-        
-        this.game.scene.add(sprite);
-        
-        // Animate and remove
-        let time = 0;
-        const animate = () => {
-            time += 0.05;
-            sprite.position.y += 0.05;
-            sprite.material.opacity = 1 - time;
-            
-            if (time >= 1) {
-                this.game.scene.remove(sprite);
-                texture.dispose();
-                material.dispose();
-                return;
-            }
-            
-            requestAnimationFrame(animate);
+    applyDamageEffect(target, damage) {
+        // In a real game, this would apply damage to the target
+        // This is just a placeholder
+        const flashEffect = () => {
+            console.log(`Applied ${damage} damage to target`);
         };
         
-        animate();
+        flashEffect();
     }
     
-    // Handle cooldown display and UI updates
-    getCooldownPercent(skillId) {
-        if (!this.skills[skillId]) return 0;
-        
-        const skill = this.skills[skillId];
-        const now = Date.now();
-        const elapsed = now - skill.lastUsed;
-        
-        if (elapsed >= skill.cooldown) return 0;
-        
-        return 1 - (elapsed / skill.cooldown);
+    cleanup() {
+        // Reset skill state
+        for (const skillName in this.skills) {
+            this.skills[skillName].lastUsed = 0;
+        }
     }
     
-    isSkillAvailable(skillId) {
-        if (!this.skills[skillId]) return false;
-        if (!this.game.activeSkills || !this.game.activeSkills.has(skillId)) return false;
-        
-        const skill = this.skills[skillId];
+    update() {
+        // Update skill cooldowns
         const now = Date.now();
         
-        return now - skill.lastUsed >= skill.cooldown;
+        // Update skill UI if needed
+        if (this.game.uiManager && typeof this.game.uiManager.updateSkillBar === 'function') {
+            this.game.uiManager.updateSkillBar();
+        }
     }
-}
+} 
