@@ -14,7 +14,8 @@ export class GameServer {
 
         this.players = new Map();
         this.gameState = {
-            players: new Map()
+            players: new Map(),
+            lastUpdate: Date.now()
         };
         this.lastUpdateTime = new Map();
         this.lastStateTime = new Map();
@@ -44,7 +45,61 @@ export class GameServer {
                 
                 if (cleaned > 0) {
                     console.log(`Cleaned up ${cleaned} stale players. New count: ${this.players.size}`);
+                    // Broadcast to all clients to update their player lists
+                    this.io.emit('syncPlayers');
                 }
+            }
+            
+            // Check for duplicate players (same position/name)
+            const positions = new Map();
+            const nameCounts = {};
+            const playersToRemove = [];
+            
+            this.players.forEach((player, socketId) => {
+                // Check for duplicate names
+                const name = player.displayName;
+                nameCounts[name] = (nameCounts[name] || 0) + 1;
+                
+                // Check for duplicate positions (exactly the same)
+                if (player.position) {
+                    const posKey = `${player.position.x},${player.position.y},${player.position.z}`;
+                    if (positions.has(posKey)) {
+                        // Potential duplicate - check when they last moved
+                        const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
+                        const now = Date.now();
+                        
+                        // If no movement for 2 minutes, consider it a ghost
+                        if (now - lastUpdate > 120000) {
+                            console.log(`Found potential ghost player: ${player.displayName} (${socketId}) - no movement for ${(now - lastUpdate)/1000}s`);
+                            playersToRemove.push(socketId);
+                        }
+                    } else {
+                        positions.set(posKey, socketId);
+                    }
+                }
+            });
+            
+            // Log duplicate names
+            for (const [name, count] of Object.entries(nameCounts)) {
+                if (count > 1) {
+                    console.log(`Warning: Found ${count} players with the same name: ${name}`);
+                }
+            }
+            
+            // Remove ghost players
+            if (playersToRemove.length > 0) {
+                playersToRemove.forEach(socketId => {
+                    console.log(`Removing ghost player: ${this.players.get(socketId)?.displayName} (${socketId})`);
+                    this.players.delete(socketId);
+                    this.gameState.players.delete(socketId);
+                    this.lastUpdateTime.delete(socketId);
+                    this.lastStateTime.delete(socketId);
+                });
+                
+                console.log(`Cleaned up ${playersToRemove.length} ghost players. New count: ${this.players.size}`);
+                
+                // Notify all clients to update their player lists
+                this.io.emit('syncPlayers');
             }
         }, 30000); // Check every 30 seconds
 
@@ -59,6 +114,24 @@ export class GameServer {
         this.io.on('connection', (socket) => {
             // Log basic connection info
             console.log(`Socket connected: ${socket.id}`);
+            
+            // Clean up any potential duplicate players
+            for (const [socketId, player] of this.players.entries()) {
+                // If this player has a different socket ID but same display name (likely a reconnect)
+                if (socketId !== socket.id && player.displayName === `Player ${socket.id.slice(0, 4)}`) {
+                    console.log(`Found potential stale player with same display name: ${player.displayName} (${socketId})`);
+                    
+                    // Remove the stale player
+                    this.players.delete(socketId);
+                    this.gameState.players.delete(socketId);
+                    this.lastUpdateTime.delete(socketId);
+                    this.lastStateTime.delete(socketId);
+                    
+                    // Notify all clients to remove this player
+                    this.io.emit('playerLeft', socketId);
+                    console.log(`Cleaned up stale player with ID ${socketId}`);
+                }
+            }
             
             // Check if socket ID already exists (reconnection case)
             const existingPlayer = this.players.get(socket.id);
@@ -88,6 +161,8 @@ export class GameServer {
                     mana: existingPlayer.mana,
                     maxMana: existingPlayer.maxMana
                 });
+                
+                console.log(`Sent updated player data for reconnected player ${socket.id}`);
             } else {
                 // Create new player for first-time connection
                 const player = this.createPlayer(socket.id);
@@ -107,6 +182,10 @@ export class GameServer {
             socket.on('disconnect', () => {
                 const player = this.players.get(socket.id);
                 if (player) {
+                    // Log disconnect
+                    console.log(`Player disconnected: ${player.displayName} (${socket.id})`);
+                    
+                    // Remove from all data structures
                     this.players.delete(socket.id);
                     this.gameState.players.delete(socket.id);
                     this.lastUpdateTime.delete(socket.id);
@@ -115,6 +194,32 @@ export class GameServer {
                     // Notify all clients about player leaving
                     this.io.emit('playerLeft', socket.id);
                     console.log(`Player left: ${player.displayName} (Total Players: ${this.players.size})`);
+                    
+                    // Force garbage collection of player data
+                    player.position = null;
+                    player.rotation = null;
+                    player.effects = null;
+                } else {
+                    // This shouldn't happen, but let's handle it anyway
+                    console.warn(`Disconnect event for socket ${socket.id} but no player found`);
+                }
+                
+                // Double check for stale socket references
+                const socketStillExists = this.io.sockets.sockets.has(socket.id);
+                if (socketStillExists) {
+                    console.warn(`Socket ${socket.id} still exists after disconnect - attempting forced cleanup`);
+                    
+                    // Try to force socket cleanup
+                    try {
+                        const socketObj = this.io.sockets.sockets.get(socket.id);
+                        if (socketObj && typeof socketObj.disconnect === 'function') {
+                            socketObj.disconnect(true);
+                        }
+                        // Remove from collection
+                        this.io.sockets.sockets.delete(socket.id);
+                    } catch (e) {
+                        console.error('Error during forced socket cleanup:', e);
+                    }
                 }
             });
 
@@ -155,19 +260,45 @@ export class GameServer {
                     }
                 }
             });
-            
-            // Handle player state updates - simple version
+
+            // Handle player synchronization request
+            socket.on('requestPlayersSync', () => {
+                // Send current players list to requester
+                socket.emit('fullPlayersSync', Array.from(this.players.values()));
+                
+                // Log the sync request
+                console.log(`Player ${socket.id.substring(0, 8)} requested a full players sync. Sent ${this.players.size} players.`);
+                
+                // Also broadcast sync event to all clients to ensure everyone is in sync
+                socket.broadcast.emit('syncPlayers');
+            });
+
+            // Handle player state updates - similar to movement but less frequent
             socket.on('playerState', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
-                    // Update player data
-                    player.position = data.position;
-                    player.rotation = data.rotation;
-                    player.path = data.path;
-                    player.karma = data.karma;
-                    player.maxKarma = data.maxKarma;
-                    player.mana = data.mana;
-                    player.maxMana = data.maxMana;
+                    // Update player state (avoiding too frequent updates)
+                    const now = Date.now();
+                    const lastUpdate = this.lastStateTime ? this.lastStateTime.get(socket.id) || 0 : 0;
+                    
+                    // Only update state every 500ms (2 times per second)
+                    if (now - lastUpdate >= 500) {
+                        // Update player data
+                        player.position = data.position;
+                        player.rotation = data.rotation;
+                        player.path = data.path;
+                        player.karma = data.karma;
+                        player.maxKarma = data.maxKarma;
+                        player.mana = data.mana;
+                        player.maxMana = data.maxMana;
+                        
+                        // Store last update time
+                        if (!this.lastStateTime) this.lastStateTime = new Map();
+                        this.lastStateTime.set(socket.id, now);
+                        
+                        // No need to broadcast state updates to other players
+                        // Movement updates are still sent more frequently and handle position/rotation
+                    }
                 }
             });
 
