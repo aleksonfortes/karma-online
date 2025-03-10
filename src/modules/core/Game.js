@@ -34,6 +34,21 @@ export class Game {
         this.activeDialogue = null;
         this.dialogueUI = null;
         
+        // Add skills system
+        this.skills = {
+            martial_arts: {
+                name: 'Martial Arts',
+                key: 'Space',
+                slot: 1,
+                damage: 75,
+                range: 3,
+                cooldown: 2000,
+                lastUsed: 0,
+                icon: '🥋'
+            }
+        };
+        this.activeSkills = new Set(['martial_arts']); // Skills the player has learned
+        
         // Logging control to prevent spam
         this.lastPositionLog = 0;
         this.logFrequency = 5000; // Log at most once every 5 seconds
@@ -419,130 +434,113 @@ export class Game {
     
     animate() {
         if (!this.isRunning) return;
+        
+        // Calculate delta time
+        const now = Date.now();
+        const deltaTime = (now - this.lastTime) / 1000;
+        this.lastTime = now;
+        
+        // Request next frame
         requestAnimationFrame(() => this.animate());
         
-        // Update status bars at a lower frequency (every 100ms)
-        const currentTime = Date.now();
-        if (!this.lastStatusUpdate || currentTime - this.lastStatusUpdate >= 100) {
-            this.players.forEach((playerMesh) => {
-                if (playerMesh.userData.stats) {
-                    this.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-                }
-            });
-            
-            if (this.localPlayer?.userData.stats) {
-                this.updatePlayerStatus(this.localPlayer, {
-                    life: this.playerStats.currentLife,
-                    maxLife: this.playerStats.maxLife,
-                    mana: this.playerStats.currentMana,
-                    maxMana: this.playerStats.maxMana,
-                    karma: this.playerStats.currentKarma,
-                    maxKarma: this.playerStats.maxKarma
+        try {
+            // Update status bars at a lower frequency (every 100ms)
+            if (!this.lastStatusUpdate || now - this.lastStatusUpdate >= 100) {
+                // Update all players' status bars
+                this.players.forEach((playerMesh) => {
+                    if (playerMesh.userData && playerMesh.userData.stats) {
+                        this.updatePlayerStatus(playerMesh, playerMesh.userData.stats, true);
+                    }
                 });
+                
+                // Update local player status
+                if (this.localPlayer && this.playerStats) {
+                    this.updatePlayerStatus(this.localPlayer, {
+                        life: this.playerStats.life,
+                        maxLife: this.playerStats.maxLife,
+                        mana: this.playerStats.mana,
+                        maxMana: this.playerStats.maxMana,
+                        karma: this.playerStats.karma,
+                        maxKarma: this.playerStats.maxKarma
+                    }, true);
+                }
+                
+                // Update UI status bars
+                this.updateStatusBars();
+                
+                this.lastStatusUpdate = now;
             }
-            this.lastStatusUpdate = currentTime;
             
-            // Update status bar positions to follow characters
+            // Update camera to follow player
+            this.updateCamera();
+            
+            // Update player movement
+            this.updatePlayer();
+            
+            // Update status bar positions
             this.updateStatusBarPositions();
-        }
-
-        // Update NPC interaction text to face camera
-        if (this.darkNPC?.interactionSprite) {
-            this.darkNPC.interactionSprite.quaternion.copy(this.camera.quaternion);
-        }
-        if (this.lightNPC?.interactionSprite) {
-            this.lightNPC.interactionSprite.quaternion.copy(this.camera.quaternion);
-        }
-        
-        // Send player state at a lower frequency (every 50ms)
-        if (!this.lastStateUpdate || currentTime - this.lastStateUpdate >= 50) {
-            if (this.localPlayer?.userData.stats) {
-                this.sendPlayerState();
-            }
-            this.lastStateUpdate = currentTime;
-        }
-        
-        // Update network manager to interpolate remote player positions
-        if (this.networkManager) {
-            this.networkManager.update();
-        }
-        
-        // Optimize water animation by reducing calculations
-        if (this.ocean && this.ocean.material) {
-            this.waterTime += 0.001;
             
-            if (this.ocean.material.normalMap && (!this.lastWaterUpdate || currentTime - this.lastWaterUpdate >= 50)) {
-                const timeX = Math.sin(this.waterTime * 0.5) * 0.2;
-                const timeY = Math.cos(this.waterTime * 0.3) * 0.2;
-                this.ocean.material.normalMap.offset.x = timeX;
-                this.ocean.material.normalMap.offset.y = timeY;
-                this.lastWaterUpdate = currentTime;
-            }
-        }
-        
-        // Update light pulses and wave rings
-        if (this.lights) {
-            for (const light of this.lights) {
-                if (light.userData && light.userData.pulse) {
-                    light.intensity = light.userData.baseIntensity + 
-                        Math.sin(currentTime * 0.002) * light.userData.pulseAmount;
+            // Update network state if connected
+            if (this.networkManager) {
+                try {
+                    this.networkManager.update();
+                } catch (error) {
+                    console.error('Error updating network state:', error);
                 }
             }
-        }
-        
-        if (this.waveRings) {
-            for (const ring of this.waveRings) {
-                const time = currentTime * 0.0005;
-                ring.mesh.position.y = ring.baseY + Math.sin(time + ring.phase) * ring.amplitude;
+            
+            // Update NPC interaction text if it exists
+            if (this.darkNPC && this.darkNPC.userData.interactionText) {
+                this.darkNPC.userData.interactionText.lookAt(this.camera.position);
             }
-        }
-        
-        // Update player and camera
-        this.updatePlayer();
-        this.updateCamera();
-        
-        // Update animations for all characters
-        const delta = currentTime - this.lastTime;
-        this.lastTime = currentTime;
-        
-        // Update mixers for all players
-        this.players.forEach(player => {
-            if (player.userData && player.userData.mixer) {
-                player.userData.mixer.update(delta / 1000);
+            if (this.lightNPC && this.lightNPC.userData.interactionText) {
+                this.lightNPC.userData.interactionText.lookAt(this.camera.position);
             }
-        });
-        
-        // Render scene
-        this.renderer.render(this.scene, this.camera);
+            
+            // Render the scene
+            this.renderer.render(this.scene, this.camera);
+        } catch (error) {
+            console.error('Error in animation loop:', error);
+        }
     }
     
     // Helper method to update status bar positions
     updateStatusBarPositions() {
-        // Update local player status bars if they exist
-        if (this.localPlayer && this.localPlayer.userData.statusGroup) {
-            const worldPosition = new THREE.Vector3();
-            this.localPlayer.getWorldPosition(worldPosition);
-            this.localPlayer.userData.statusGroup.position.set(
-                worldPosition.x, 
-                worldPosition.y + 3.0, 
-                worldPosition.z
-            );
-            this.localPlayer.userData.statusGroup.quaternion.copy(this.camera.quaternion);
-        }
-        
-        // Update other players' status bars if they exist
+        // Update status bar positions for all players
         this.players.forEach(player => {
-            if (player !== this.localPlayer && player.userData.statusGroup) {
+            if (player && player.userData && player.userData.statusGroup) {
                 const worldPosition = new THREE.Vector3();
                 player.getWorldPosition(worldPosition);
+                
                 player.userData.statusGroup.position.set(
-                    worldPosition.x, 
-                    worldPosition.y + 3.0, 
+                    worldPosition.x,
+                    worldPosition.y + 2.0, // Position above player's head
                     worldPosition.z
                 );
+                
+                // Make status group face the camera
                 player.userData.statusGroup.quaternion.copy(this.camera.quaternion);
             }
         });
+        
+        // Also update local player if not in players map
+        if (this.localPlayer && 
+            this.localPlayer.userData && 
+            this.localPlayer.userData.statusGroup && 
+            !this.players.has(this.socket?.id)) {
+            
+            const worldPosition = new THREE.Vector3();
+            this.localPlayer.getWorldPosition(worldPosition);
+            
+            this.localPlayer.userData.statusGroup.position.set(
+                worldPosition.x,
+                worldPosition.y + 2.0, // Position above player's head
+                worldPosition.z
+            );
+            
+            // Make status group face the camera
+            this.localPlayer.userData.statusGroup.quaternion.copy(this.camera.quaternion);
+        }
     }
     
     setupCamera() {
@@ -1095,13 +1093,18 @@ export class Game {
             console.log("DEBUG Controls:", 
                 this.controls, 
                 "LocalPlayer exists:", !!this.localPlayer,
-                "Position:", this.localPlayer?.position
+                "Position:", this.localPlayer?.position ? {
+                    x: this.localPlayer.position.x.toFixed(2),
+                    y: this.localPlayer.position.y.toFixed(2),
+                    z: this.localPlayer.position.z.toFixed(2)
+                } : null
             );
             this._lastDebugLog = now;
         }
 
         // Skip update if player doesn't exist
         if (!this.localPlayer) {
+            console.warn("Cannot update player: localPlayer does not exist");
             return;
         }
         
@@ -1124,10 +1127,23 @@ export class Game {
             moveX = (moveX / magnitude) * speed;
             moveZ = (moveZ / magnitude) * speed;
             
+            // Store previous position for debugging
+            const previousPosition = this.localPlayer.position.clone();
+            
             // Calculate next position
             const nextPosition = this.localPlayer.position.clone();
             nextPosition.x += moveX;
             nextPosition.z += moveZ;
+            
+            // Log movement once every 5 seconds
+            if (now - (this._lastMovementLog || 0) > 5000) {
+                console.log("Player moving from", 
+                    {x: previousPosition.x.toFixed(2), z: previousPosition.z.toFixed(2)}, 
+                    "to", 
+                    {x: nextPosition.x.toFixed(2), z: nextPosition.z.toFixed(2)}
+                );
+                this._lastMovementLog = now;
+            }
             
             // Skip collision for now to ensure movement works
             const collision = false;
@@ -1549,7 +1565,7 @@ export class Game {
     }
     
     useMartialArts() {
-        console.log('Game.useMartialArts called, checking if SkillsManager available');
+        console.log('Game.useMartialArts called');
         
         // Delegate to SkillsManager if available
         if (this.skillsManager && typeof this.skillsManager.useMartialArts === 'function') {
@@ -1572,8 +1588,8 @@ export class Game {
             return;
         }
         
-        // Check if player is on light path
-        if (this.playerStats && this.playerStats.path !== 'light') {
+        // Check if player is on light path - only enforce if path is set
+        if (this.playerStats && this.playerStats.path && this.playerStats.path !== 'light') {
             console.log('Only light path players can use martial arts');
             return;
         }
@@ -1581,6 +1597,12 @@ export class Game {
         // Prevent Illuminated players from using martial arts
         if (this.playerStats && this.playerStats.currentKarma === 0) {
             console.log('Illuminated players cannot use direct damage skills');
+            return;
+        }
+
+        // Make sure skills object exists
+        if (!this.skills || !this.skills.martial_arts) {
+            console.log('Martial arts skill not found');
             return;
         }
 
@@ -1599,13 +1621,14 @@ export class Game {
             return;
         }
 
-        const playerPos = this.localPlayer.position;
-        let targetFound = false;
-
         // Create visual effect
         this.createMartialArtsEffect();
-
-        // Check for targets
+        
+        // Get player position
+        const playerPos = this.localPlayer.position.clone();
+        let targetFound = false;
+        
+        // Check each player for potential targets
         this.players.forEach((otherPlayer, playerId) => {
             if (playerId === this.socket?.id) return; // Skip self
             
@@ -1716,14 +1739,88 @@ export class Game {
     }
     
     updateStatusBars() {
-        // This is a simplified version that just logs the status updates
-        // In the full game, this would update the UI elements
-        console.log(`Status: Life: ${Math.round(this.playerStats.currentLife)}/${this.playerStats.maxLife}, Mana: ${Math.round(this.playerStats.currentMana)}/${this.playerStats.maxMana}, Karma: ${Math.round(this.playerStats.currentKarma)}/${this.playerStats.maxKarma}`);
+        console.log(`Player Status: Life: ${this.playerStats.life}/${this.playerStats.maxLife}, Mana: ${this.playerStats.mana}/${this.playerStats.maxMana}, Karma: ${this.playerStats.karma}/${this.playerStats.maxKarma}`);
         
-        // If the UIManager exists, delegate to it
+        // Update UI manager if available
         if (this.uiManager && typeof this.uiManager.updateStatusBars === 'function') {
             this.uiManager.updateStatusBars(this.playerStats);
         }
+        
+        // Update 3D status bars for local player
+        if (this.localPlayer && this.localPlayer.userData && this.localPlayer.userData.statusBars) {
+            const { statusBars } = this.localPlayer.userData;
+            
+            // Update life bar
+            const lifeBar = statusBars.find(bar => bar.type === 'life');
+            if (lifeBar) {
+                const lifePercent = Math.max(0, Math.min(1, this.playerStats.life / this.playerStats.maxLife));
+                lifeBar.fill.scale.x = lifePercent;
+                lifeBar.fill.position.x = (lifePercent - 1) * lifeBar.width / 2;
+            }
+            
+            // Update mana bar
+            const manaBar = statusBars.find(bar => bar.type === 'mana');
+            if (manaBar) {
+                const manaPercent = Math.max(0, Math.min(1, this.playerStats.mana / this.playerStats.maxMana));
+                manaBar.fill.scale.x = manaPercent;
+                manaBar.fill.position.x = (manaPercent - 1) * manaBar.width / 2;
+            }
+            
+            // Update karma bar
+            const karmaBar = statusBars.find(bar => bar.type === 'karma');
+            if (karmaBar) {
+                const karmaValue = Math.abs(this.playerStats.karma);
+                const karmaPercent = Math.max(0, Math.min(1, karmaValue / 100));
+                karmaBar.fill.scale.x = karmaPercent;
+                karmaBar.fill.position.x = (karmaPercent - 1) * karmaBar.width / 2;
+                
+                // Update color based on karma alignment
+                if (this.playerStats.karma > 0) {
+                    karmaBar.fill.material.color.set(0xffcc00); // Gold for light
+                } else {
+                    karmaBar.fill.material.color.set(0x800080); // Purple for dark
+                }
+            }
+        }
+        
+        // Update 3D status bars for other players
+        this.players.forEach((player, id) => {
+            if (player && player.userData && player.userData.statusBars && player.userData.stats) {
+                const { statusBars, stats } = player.userData;
+                
+                // Update life bar
+                const lifeBar = statusBars.find(bar => bar.type === 'life');
+                if (lifeBar && stats.life !== undefined && stats.maxLife !== undefined) {
+                    const lifePercent = Math.max(0, Math.min(1, stats.life / stats.maxLife));
+                    lifeBar.fill.scale.x = lifePercent;
+                    lifeBar.fill.position.x = (lifePercent - 1) * lifeBar.width / 2;
+                }
+                
+                // Update mana bar
+                const manaBar = statusBars.find(bar => bar.type === 'mana');
+                if (manaBar && stats.mana !== undefined && stats.maxMana !== undefined) {
+                    const manaPercent = Math.max(0, Math.min(1, stats.mana / stats.maxMana));
+                    manaBar.fill.scale.x = manaPercent;
+                    manaBar.fill.position.x = (manaPercent - 1) * manaBar.width / 2;
+                }
+                
+                // Update karma bar
+                const karmaBar = statusBars.find(bar => bar.type === 'karma');
+                if (karmaBar && stats.karma !== undefined) {
+                    const karmaValue = Math.abs(stats.karma);
+                    const karmaPercent = Math.max(0, Math.min(1, karmaValue / 100));
+                    karmaBar.fill.scale.x = karmaPercent;
+                    karmaBar.fill.position.x = (karmaPercent - 1) * karmaBar.width / 2;
+                    
+                    // Update color based on karma alignment
+                    if (stats.karma > 0) {
+                        karmaBar.fill.material.color.set(0xffcc00); // Gold for light
+                    } else {
+                        karmaBar.fill.material.color.set(0x800080); // Purple for dark
+                    }
+                }
+            }
+        });
     }
 
     handleInteraction() {

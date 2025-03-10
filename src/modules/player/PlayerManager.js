@@ -159,7 +159,12 @@ export class PlayerManager {
 
         // Use provided position for existing players, temple center for new local player
         if (id === this.game.socket?.id) {
-            playerModel.position.set(0, 3, 0); // Start at temple height
+            // Don't override position for local player, use the provided position
+            playerModel.position.set(
+                position.x,
+                position.y,
+                position.z
+            );
         } else {
             playerModel.position.set(
                 position.x,

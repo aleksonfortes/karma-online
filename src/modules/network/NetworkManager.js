@@ -163,15 +163,32 @@ export class NetworkManager {
         
         // Handle player movement updates - silently process without logging
         this.socket.on('playerMoved', (playerData) => {
-            // First verify this player ID exists in the server player list
-            if (!this.verifiedPlayerIds.has(playerData.id)) {
-                this.log(`First movement from unverified player ${playerData.id.substring(0, 8)} - requesting sync`);
-                this.socket.emit('requestPlayersSync');
-                this.verifiedPlayerIds.add(playerData.id);
+            try {
+                // Check if playerData is valid
+                if (!playerData || !playerData.id) {
+                    console.error('Received invalid playerData in playerMoved event:', playerData);
+                    return;
+                }
+                
+                // First verify this player ID exists in the server player list
+                if (!this.verifiedPlayerIds.has(playerData.id)) {
+                    this.log(`First movement from unverified player ${playerData.id.substring(0, 8)} - requesting sync`);
+                    this.socket.emit('requestPlayersSync');
+                    this.verifiedPlayerIds.add(playerData.id);
+                }
+                
+                // For debug logging - periodically log player movements
+                const now = Date.now();
+                if (now - (this._lastMovementLog || 0) > 5000) {
+                    this.log(`Movement update from player ${playerData.id.substring(0, 8)} at position: ${JSON.stringify(playerData.position)}`);
+                    this._lastMovementLog = now;
+                }
+                
+                // Update as normal
+                this.updatePlayerPosition(playerData);
+            } catch (error) {
+                console.error('Error handling playerMoved event:', error);
             }
-            
-            // Update as normal
-            this.updatePlayerPosition(playerData);
         });
         
         // Handle player life updates
@@ -267,16 +284,44 @@ export class NetworkManager {
         
         // Handle full player sync from server
         this.socket.on('fullPlayersSync', (players) => {
-            this.log('Received FULL players sync with ' + players.length + ' players');
-            
-            // Force cleanup everything first
-            this.forceCleanAllPlayers();
-            
-            // Process the sync data
-            this.updatePlayerList(players);
-            
-            // Log players after sync
-            this.log(`After sync: ${this.game.players.size} players in scene`);
+            try {
+                this.log(`Received FULL players sync with ${players.length} players from request by player ${players.requestedBy || 'unknown'}`);
+                
+                // Force cleanup everything first
+                this.forceCleanAllPlayers();
+                
+                // Process the sync data
+                this.updatePlayerList(players);
+                
+                // Mark initial sync as complete
+                if (!this.initialSyncComplete) {
+                    this.log('Initial sync completed');
+                    this.initialSyncComplete = true;
+                }
+                
+                // Log players after sync
+                this.log(`After sync: ${this.game.players.size} players in scene`);
+                
+                // Debug output of all player positions
+                this.game.players.forEach((player, id) => {
+                    this.log(`Player ${id.substring(0, 8)} position: ${JSON.stringify({
+                        x: player.position.x.toFixed(2),
+                        y: player.position.y.toFixed(2),
+                        z: player.position.z.toFixed(2)
+                    })}`);
+                });
+                
+                // If our local player exists, log its position
+                if (this.game.localPlayer) {
+                    this.log(`Local player position after sync: ${JSON.stringify({
+                        x: this.game.localPlayer.position.x.toFixed(2),
+                        y: this.game.localPlayer.position.y.toFixed(2),
+                        z: this.game.localPlayer.position.z.toFixed(2)
+                    })}`);
+                }
+            } catch (error) {
+                console.error('Error handling fullPlayersSync event:', error);
+            }
         });
         
         // Handle sync request from another client
@@ -385,14 +430,16 @@ export class NetworkManager {
                         const existingPlayer = this.game.localPlayer;
                         
                         if (player.position) {
-                            // Only update position from server during initial sync, not during regular movement
-                            if (!this.initialSyncComplete) {
-                                existingPlayer.position.set(
-                                    player.position.x,
-                                    player.position.y,
-                                    player.position.z
-                                );
-                            }
+                            // Always update position from server during sync requests
+                            // This ensures that the server's position is authoritative
+                            existingPlayer.position.set(
+                                player.position.x,
+                                player.position.y,
+                                player.position.z
+                            );
+                            
+                            // Log the position update for debugging
+                            this.log(`Updated local player position from sync: ${JSON.stringify(player.position)}`);
                         }
                         
                         // Update stats if they've changed
