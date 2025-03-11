@@ -21,7 +21,42 @@ export class NPCManager {
     
     async loadNPC(position, npcType) {
         console.log(`Loading NPC: ${npcType} at position:`, position);
-        // This will be called from Game.js loadNPC
+        
+        try {
+            // Create NPC model (using same model as players for now)
+            const npcGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+            const npcMaterial = new THREE.MeshStandardMaterial({
+                color: npcType === 'light_npc' ? 0xffcc00 : 0x660066,
+                metalness: 0.3,
+                roughness: 0.7
+            });
+            
+            const npcModel = new THREE.Mesh(npcGeometry, npcMaterial);
+            npcModel.position.copy(position);
+            npcModel.castShadow = true;
+            npcModel.receiveShadow = true;
+            
+            // Add interaction text sprite
+            this.addInteractionText(npcModel);
+            
+            // Store reference based on type
+            if (npcType === 'light_npc') {
+                this.game.lightNPC = npcModel;
+                npcModel.position.set(-5, 1, -5); // Light NPC position
+            } else if (npcType === 'dark_npc') {
+                this.game.darkNPC = npcModel;
+                npcModel.position.set(5, 1, -5); // Dark NPC position
+            }
+            
+            // Add to scene
+            this.game.scene.add(npcModel);
+            this.npcs.push({ mesh: npcModel, type: npcType });
+            
+            return npcModel;
+        } catch (error) {
+            console.error('Failed to load NPC:', error);
+            return null;
+        }
     }
     
     addInteractionText(npcModel, yOffset = 2) {

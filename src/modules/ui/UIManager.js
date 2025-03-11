@@ -1213,8 +1213,28 @@ export class UIManager {
     }
     
     update() {
-        // Update UI elements that need to track game objects
-        this.updateStatusBars();
-        this.updateSkillBar();
+        // Update any animated UI elements here
+    }
+
+    updateKarmaDisplay(currentKarma, maxKarma) {
+        if (!this.karmaBarFill || !this.karmaTooltip) return;
+        
+        // Update karma bar fill
+        const percentage = (currentKarma / maxKarma) * 100;
+        this.karmaBarFill.style.width = `${percentage}%`;
+        
+        // Update tooltip text with karma status
+        let karmaStatus = 'Neutral';
+        if (currentKarma < maxKarma * 0.3) {
+            karmaStatus = 'Dark';
+            this.karmaBarFill.style.background = '#660000'; // Dark red for dark path
+        } else if (currentKarma > maxKarma * 0.7) {
+            karmaStatus = 'Light';
+            this.karmaBarFill.style.background = '#ffffff'; // White for light path
+        } else {
+            this.karmaBarFill.style.background = '#000000'; // Black for neutral
+        }
+        
+        this.karmaTooltip.textContent = `Karma: ${karmaStatus} (${currentKarma}/${maxKarma})`;
     }
 } 
