@@ -4,6 +4,8 @@ import * as THREE from 'three';
 export class NetworkManager {
     constructor(game) {
         this.game = game;
+        this.isOfflineMode = false;
+        this.isConnected = false;
         
         // Initialize socket connection with exact same options as original game
         const SERVER_URL = window.location.hostname === 'localhost' && window.location.port === '5173'
@@ -27,8 +29,51 @@ export class NetworkManager {
     }
 
     async init() {
-        // Simply return true since socket initialization is handled in constructor
-        return true;
+        return new Promise((resolve) => {
+            if (this.socket) {
+                // Listen for connection
+                this.socket.once('connect', () => {
+                    this.isConnected = true;
+                    resolve(true);
+                });
+                
+                // Listen for connection error
+                this.socket.once('connect_error', () => {
+                    console.warn('Failed to connect to server');
+                    this.enterOfflineMode();
+                    resolve(false);
+                });
+                
+                // Set a timeout
+                setTimeout(() => {
+                    if (!this.isConnected) {
+                        console.warn('Connection timeout');
+                        this.enterOfflineMode();
+                        resolve(false);
+                    }
+                }, 5000);
+            } else {
+                this.enterOfflineMode();
+                resolve(false);
+            }
+        });
+    }
+
+    enterOfflineMode() {
+        console.log('Entering offline mode');
+        this.isOfflineMode = true;
+        this.isConnected = false;
+        
+        // Clean up socket if it exists
+        if (this.socket) {
+            this.socket.disconnect();
+            this.socket = null;
+        }
+        
+        // Notify game about offline mode
+        if (this.game) {
+            this.game.onNetworkEvent('offlineMode');
+        }
     }
 
     setupSocketHandlers() {
@@ -474,11 +519,6 @@ export class NetworkManager {
                 this.game.scene.remove(player);
                 this.game.playerManager.players.delete(playerId);
             }
-        });
-
-        // Handle connection error - exactly like original
-        this.socket.on('connect_error', (error) => {
-            console.error('Failed to connect to server:', error);
         });
 
         // Handle disconnect - exactly like original

@@ -31,14 +31,17 @@ window.forceFullCleanup = function() {
 };
 
 // Import the Game class
-import { Game } from './modules/core/Game.js';
+import { Game } from './Game.js';
 
 // Initialize game when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     try {
-        // Create and initialize the game
-        window.game = new Game();
-        window.game.init();
+        // Create and initialize the game with server URL
+        const serverUrl = window.location.hostname === 'localhost' 
+            ? 'http://localhost:3000'
+            : window.location.origin;
+            
+        window.game = new Game(serverUrl);
     } catch (error) {
         console.error('Failed to initialize game:', error);
     }
