@@ -265,51 +265,26 @@ export class Game {
         this.npcManager = new NPCManager(this);
         
         // Initialize UI first so we can show loading indicators
-        this.uiManager.init();
+        await this.uiManager.init();
         this.uiManager.showLoadingScreen('Connecting to server...');
         
         try {
-            // Initialize network first to determine if we're online
-            const networkInitResult = await this.networkManager.init();
+            // Initialize all managers in sequence - exactly like original
+            await this.networkManager.init();
+            await this.playerManager.init();
+            await this.skillsManager.init();
+            await this.karmaManager.init();
+            await this.npcManager.init();
             
-            // If network initialization failed, immediately go to offline mode
-            if (!networkInitResult) {
-                throw new Error('Network initialization returned false');
-            }
-            
-            // Try to connect with a timeout
-            let isConnected = false;
-            const connectionTimeout = 10000; // 10 seconds
-            const startTime = Date.now();
-            
-            while (!isConnected && Date.now() - startTime < connectionTimeout) {
-                if (this.networkManager.isConnected) {
-                    isConnected = true;
-                    break;
-                }
-                
-                // Wait a short time before checking again
-                await new Promise(resolve => setTimeout(resolve, 100));
-            }
-            
-            if (!isConnected) {
-                console.warn('Connection timeout, continuing in offline mode');
-                this.networkManager.enterOfflineMode();
-                this.uiManager.showNotification('Failed to connect to server - playing in offline mode', 'warning');
-                this.uiManager.hideLoadingScreen();
-            }
-        } catch (error) {
-            console.warn('Network initialization failed, continuing in offline mode:', error);
-            this.networkManager.enterOfflineMode();
-            this.uiManager.showNotification('Network error - playing in offline mode', 'warning');
+            // Hide loading screen once everything is initialized
             this.uiManager.hideLoadingScreen();
+            this.uiManager.createUI();
+            
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize managers:', error);
+            return false;
         }
-        
-        // Continue with other managers initialization regardless of network status
-        this.playerManager.init();
-        this.skillsManager.init();
-        this.karmaManager.init();
-        this.npcManager.init();
     }
     
     // Setup event listeners just like in the original

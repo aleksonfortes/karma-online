@@ -11,6 +11,9 @@ export class PlayerManager {
         this.lightPathColor = 0x3366ff; // Blue for light path
         this.darkPathColor = 0x990000; // Red for dark path
         this.respawnDelay = 5000; // 5 seconds
+        
+        // Initialize players Map - exactly like original game
+        this.players = new Map();
     }
     
     async init() {
@@ -128,39 +131,36 @@ export class PlayerManager {
     }
     
     async createLocalPlayer() {
-        // Check if there's a socket connection
-        if (!this.game.networkManager?.socket?.id) {
-            const localPlayer = await this.createOfflinePlayer();
-            this.game.localPlayer = localPlayer;
-            this.game.isAlive = true;
-            return localPlayer;
+        // Get socket ID if available
+        const socketId = this.game.networkManager?.socket?.id;
+        
+        // Create player at temple center - exactly like original
+        const position = { x: 0, y: 3, z: 0 };
+        const rotation = { y: 0 };
+        
+        // Create player using socket ID or generate temporary ID
+        const playerId = socketId || 'temp-' + Math.random().toString(36).substr(2, 9);
+        const player = await this.createPlayer(playerId, position, rotation, true);
+        
+        if (player) {
+            this.game.localPlayer = player;
+            this.game.scene.add(player);
+            this.players.set(playerId, player);
+            
+            // Send initial state if connected
+            if (socketId && this.game.networkManager) {
+                this.game.networkManager.sendPlayerState();
+            }
         }
         
-        // Get socket ID
-        const socketId = this.game.networkManager.socket.id;
-        
-        // Create player at temple center
-        const position = { x: 0, y: 3, z: 0 };
-        const rotation = { y: 0 };
-        
-        // Create player using socket ID
-        return this.createPlayer(socketId, position, rotation);
+        return player;
     }
     
-    async createOfflinePlayer() {
-        // For offline mode, create a player with a random ID
-        const randomId = 'offline-' + Math.floor(Math.random() * 1000000);
-        const position = { x: 0, y: 3, z: 0 };
-        const rotation = { y: 0 };
-        
-        return this.createPlayer(randomId, position, rotation);
-    }
-    
-    async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }) {
+    async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
         console.log('Creating player mesh for ID:', id);
         console.log('Position:', position);
         console.log('Rotation:', rotation);
-        console.log('Is local player:', id === this.game.socket?.id);
+        console.log('Is local player:', isLocal);
         
         // Check if player already exists - don't create duplicates
         if (this.game.players.has(id)) {
@@ -174,7 +174,7 @@ export class PlayerManager {
             playerModel = await this.loadCharacterModel();
             
             // Use provided position for existing players, temple center for new local player
-            if (id === this.game.socket?.id) {
+            if (isLocal) {
                 console.log('Setting local player position to temple center (0, 3, 0)');
                 playerModel.position.set(0, 3, 0); // Start at temple height
             } else {
