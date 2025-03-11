@@ -100,12 +100,15 @@ export class NetworkManager {
                 try {
                     const detectedPort = await this.detectServerPort();
                     serverUrl = `${window.location.protocol}//${window.location.hostname}:${detectedPort}`;
+                    console.log(`Detected server port: ${detectedPort}`);
                 } catch (err) {
-                    // Use default URL if detection fails
+                    console.warn('Failed to detect server port, using default:', this.SERVER_URL);
                 }
             }
             
             if (serverUrl) {
+                console.log('Connecting to server at:', serverUrl);
+                
                 // Import Socket.io client dynamically
                 const { io } = await import('socket.io-client');
                 
@@ -121,6 +124,9 @@ export class NetworkManager {
                     autoConnect: true
                 });
                 
+                // Setup explicit reference in the game for socket
+                this.game.socket = this.socket;
+                
                 // Wait for connection to establish before proceeding
                 await new Promise((resolve, reject) => {
                     const timeout = setTimeout(() => {
@@ -129,7 +135,8 @@ export class NetworkManager {
                     
                     this.socket.on('connect', () => {
                         clearTimeout(timeout);
-                        console.log('Connected to server');
+                        console.log('Connected to server with socket ID:', this.socket.id);
+                        this.isConnected = true;
                         resolve();
                     });
                     
@@ -143,14 +150,19 @@ export class NetworkManager {
                 
                 // Initialize multiplayer with delay to ensure socket is ready
                 setTimeout(() => this.setupMultiplayer(), 500);
+                
+                return true;
             } else {
+                console.warn('No server URL provided, initializing in offline mode');
                 this.initializeLocalPlayerOffline();
+                return false;
             }
         } catch (error) {
             console.error('Failed to initialize network connection:', error);
             
             // Fall back to offline mode if connection fails
             this.initializeLocalPlayerOffline();
+            return false;
         }
     }
     
@@ -397,56 +409,41 @@ export class NetworkManager {
         }
     }
     
-    // Send player position to server
-    sendPlayerPosition() {
-        // Skip if socket is not connected or player doesn't exist
-        if (!this.socket?.connected || !this.game.localPlayer) {
+    // Update sendPlayerState to ensure it properly sends player state
+    sendPlayerState(playerData) {
+        if (!this.socket || !this.socket.connected) {
             return;
         }
         
-        // Send player position and rotation to server
-        this.socket.emit('playerMovement', {
-            position: {
-                x: this.game.localPlayer.position.x,
-                y: this.game.localPlayer.position.y,
-                z: this.game.localPlayer.position.z
-            },
-            rotation: {
-                y: this.game.localPlayer.rotation.y
-            },
-            // Include other player stats
-            path: this.game.playerStats.path,
-            karma: this.game.playerStats.currentKarma,
-            maxKarma: this.game.playerStats.maxKarma,
-            mana: this.game.playerStats.currentMana,
-            maxMana: this.game.playerStats.maxMana
-        });
-    }
-    
-    // Add the missing sendPlayerState method
-    sendPlayerState() {
-        if (!this.socket?.connected || !this.game.localPlayer) {
+        // Rate limit state updates
+        const now = Date.now();
+        if (now - this.lastStateSend < 50) { // 50ms rate limit
             return;
         }
+        this.lastStateSend = now;
         
-        // Send complete player state to server (just like sendPlayerPosition)
-        this.socket.emit('playerState', {
-            position: {
-                x: this.game.localPlayer.position.x,
-                y: this.game.localPlayer.position.y,
-                z: this.game.localPlayer.position.z
-            },
-            rotation: {
-                y: this.game.localPlayer.rotation.y
-            },
-            path: this.game.playerStats ? this.game.playerStats.path : null,
-            karma: this.game.playerStats ? this.game.playerStats.currentKarma : 50,
-            maxKarma: this.game.playerStats ? this.game.playerStats.maxKarma : 100,
-            life: this.game.playerStats ? this.game.playerStats.currentLife : 100,
-            maxLife: this.game.playerStats ? this.game.playerStats.maxLife : 100,
-            mana: this.game.playerStats ? this.game.playerStats.currentMana : 100,
-            maxMana: this.game.playerStats ? this.game.playerStats.maxMana : 100
-        });
+        try {
+            // Send player state to server
+            this.socket.emit('playerMovement', {
+                position: playerData.position,
+                rotation: playerData.rotation,
+                path: playerData.path,
+                karma: playerData.karma,
+                maxKarma: playerData.maxKarma,
+                life: playerData.life,
+                maxLife: playerData.maxLife,
+                mana: playerData.mana,
+                maxMana: playerData.maxMana
+            });
+            
+            // Occasionally log position for debugging
+            if (now - this.lastPositionLog > this.logFrequency) {
+                console.log(`Player position: (${playerData.position.x.toFixed(2)}, ${playerData.position.y.toFixed(2)}, ${playerData.position.z.toFixed(2)})`);
+                this.lastPositionLog = now;
+            }
+        } catch (error) {
+            console.error('Error sending player state:', error);
+        }
     }
     
     sendPlayerAction(action, data) {
@@ -460,36 +457,35 @@ export class NetworkManager {
         });
     }
     
-    initializeLocalPlayerOffline() {
-        console.log('Initializing player in offline mode');
+    // Enhance offline player creation
+    async initializeLocalPlayerOffline() {
+        console.log('Creating offline local player');
+        this.isOffline = true;
         
-        // Create a local player even without server connection
-        if (this.game.playerManager) {
-            this.game.playerManager.loadCharacterModel()
-                .then(player => {
-                    // Set as local player in both Game and PlayerManager
-                    this.game.localPlayer = player;
-                    this.game.playerManager.localPlayer = player;
-                    
-                    // Add to scene and players map with a generated ID
-                    this.game.scene.add(player);
-                    this.game.players.set('local-player', player);
-                    
-                    // Update stats
-                    this.game.updatePlayerStatus(player, {
-                        life: this.game.playerStats.currentLife,
-                        maxLife: this.game.playerStats.maxLife,
-                        mana: this.game.playerStats.currentMana,
-                        maxMana: this.game.playerStats.maxMana,
-                        karma: this.game.playerStats.currentKarma,
-                        maxKarma: this.game.playerStats.maxKarma
-                    });
-                    
-                    console.log('Local player created in offline mode');
-                })
-                .catch(error => {
-                    console.error('Failed to create local player in offline mode:', error);
-                });
+        try {
+            // Generate a unique offline ID
+            const offlineId = 'offline-' + Math.floor(Math.random() * 1000000);
+            
+            // Create an offline player
+            const player = await this.game.playerManager.createPlayer(
+                offlineId,
+                { x: 0, y: 3, z: 0 },
+                { y: 0 }
+            );
+            
+            // Set references
+            this.game.localPlayer = player;
+            this.game.isAlive = true;
+            
+            // Add to scene and players map
+            this.game.scene.add(player);
+            this.game.players.set(offlineId, player);
+            
+            console.log('Offline local player created with ID:', offlineId);
+            return player;
+        } catch (error) {
+            console.error('Failed to create offline player:', error);
+            return null;
         }
     }
     
@@ -1255,19 +1251,82 @@ export class NetworkManager {
     }
 
     async createLocalPlayer() {
-        // Only proceed if socket is connected
-        if (!this.socket || !this.socket.connected) {
-            console.log('Cannot create local player: Socket not connected');
-            return null;
+        console.log('NetworkManager: Creating local player with socket ID:', this.socket?.id);
+        
+        // If no socket ID is available, create an offline player
+        if (!this.socket || !this.socket.id) {
+            console.warn('No socket ID available, creating offline player');
+            return this.initializeLocalPlayerOffline();
         }
         
-        if (!this.socket.id) {
-            console.log('Cannot create local player: No socket ID available');
+        try {
+            // Clean up any existing player
+            if (this.game.localPlayer) {
+                console.log('Removing existing local player before creating new one');
+                this.game.scene.remove(this.game.localPlayer);
+                this.game.localPlayer = null;
+            }
+            
+            // Create a new player with the socket ID
+            const player = await this.game.playerManager.createPlayer(
+                this.socket.id,
+                { x: 0, y: 3, z: 0 }, // Start at temple center
+                { y: 0 }
+            );
+            
+            // Set as the game's local player
+            this.game.localPlayer = player;
+            this.game.isAlive = true;
+            
+            // Add to scene and players map
+            this.game.scene.add(player);
+            this.game.players.set(this.socket.id, player);
+            
+            console.log('Local player created successfully with ID:', this.socket.id);
+            
+            // Send an initial position update to the server
+            this.sendPosition();
+            
+            return player;
+        } catch (error) {
+            console.error('Failed to create local player:', error);
             return null;
         }
+    }
+
+    // Send player position to server
+    sendPosition() {
+        // Skip if not connected or player doesn't exist
+        if (!this.socket?.connected || !this.game.localPlayer) {
+            return;
+        }
         
-        // Create local player
-        console.log(`Creating local player with ID: ${this.socket.id}`);
-        return await this.game.playerManager.createLocalPlayer();
+        // Rate limit position updates
+        const now = Date.now();
+        if (now - this.lastPositionSend < 50) { // 50ms rate limit
+            return;
+        }
+        this.lastPositionSend = now;
+        
+        try {
+            // Send player position to server
+            this.socket.emit('playerMovement', {
+                position: {
+                    x: this.game.localPlayer.position.x,
+                    y: this.game.localPlayer.position.y,
+                    z: this.game.localPlayer.position.z
+                },
+                rotation: {
+                    y: this.game.localPlayer.rotation.y
+                },
+                path: this.game.playerStats.path,
+                karma: this.game.playerStats.currentKarma,
+                maxKarma: this.game.playerStats.maxKarma,
+                mana: this.game.playerStats.currentMana,
+                maxMana: this.game.playerStats.maxMana
+            });
+        } catch (error) {
+            console.error('Error sending player position:', error);
+        }
     }
 } 

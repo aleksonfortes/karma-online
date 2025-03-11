@@ -169,128 +169,136 @@ export class Game {
         }
     }
     
-    // New method to initialize player properly
-    initializePlayer() {
+    // Update the player initialization method
+    async initializePlayer() {
         console.log('Initializing player for the game...');
         
-        // Check if we should use network mode
-        const useNetworkMode = this.networkManager && (this.networkManager.isConnected || this.networkManager.socket);
-        
-        if (useNetworkMode) {
-            console.log('Network mode detected - waiting for server to send player info');
-            // In network mode, we'll wait for the networkManager to create the player
-            // based on server data
+        try {
+            // Check if we should use network mode
+            const useNetworkMode = this.networkManager && this.networkManager.socket && this.networkManager.socket.connected;
             
-            // If we already created a local player, keep it until server replacement arrives
-            if (!this.localPlayer) {
-                console.log('No local player exists yet, creating temporary player at temple center');
-                // In the meantime, create a temporary player for visualization
-                this.playerManager.createPlayer('local-temp')
-                    .then(player => {
-                        player.position.set(0, 3, 0);
-                        this.scene.add(player);
-                        this.localPlayer = player;
-                        this.isAlive = true;
-                        this.players.set('local-temp', player);
-                        console.log('Temporary player created while waiting for server');
-                    })
-                    .catch(err => console.error('Failed to create temporary player:', err));
+            if (useNetworkMode) {
+                console.log('Network mode detected - using socket ID:', this.networkManager.socket.id);
+                
+                // In network mode, create the player using the NetworkManager
+                const player = await this.networkManager.createLocalPlayer();
+                
+                if (player) {
+                    console.log('Player created successfully via network with ID:', player.userData?.id);
+                    // The NetworkManager already adds the player to the scene and sets it as localPlayer
+                    return true;
+                } else {
+                    console.warn('Failed to create player via network, falling back to offline mode');
+                    // Fall back to offline mode
+                    return this.createOfflinePlayer();
+                }
+            } else {
+                // Offline mode
+                return this.createOfflinePlayer();
             }
-        } else {
-            // Offline mode - create player directly
-            console.log('Offline mode - creating local player directly');
-            
+        } catch (error) {
+            console.error('Error initializing player:', error);
+            // Attempt recovery with offline player
+            return this.createOfflinePlayer();
+        }
+    }
+    
+    // Add a helper method to create an offline player
+    async createOfflinePlayer() {
+        console.log('Creating offline player');
+        
+        try {
             // Clean up any existing player
             if (this.localPlayer) {
-                console.log('Removing existing player before creating new one');
-                if (this.localPlayer.userData?.statusGroup) {
-                    this.scene.remove(this.localPlayer.userData.statusGroup);
-                }
+                console.log('Removing existing player before creating offline player');
                 this.scene.remove(this.localPlayer);
-                
-                // Remove from players map
-                for (const [id, player] of this.players.entries()) {
-                    if (player === this.localPlayer) {
-                        this.players.delete(id);
-                        break;
-                    }
-                }
-                
                 this.localPlayer = null;
             }
             
-            // Create a new player
-            this.playerManager.createPlayer('local')
-                .then(player => {
-                    console.log('Player created successfully');
-                    
-                    // Configure position
-                    player.position.set(0, 3, 0);
-                    
-                    // Add to scene
-                    this.scene.add(player);
-                    
-                    // Set references
-                    this.localPlayer = player;
-                    this.isAlive = true; 
-                    this.players.set('local', player);
-                    
-                    // Initialize userData if needed
-                    if (!player.userData) {
-                        player.userData = {};
-                    }
-                    
-                    // Set initial stats
-                    const initialStats = {
-                        life: this.playerStats.currentLife,
-                        maxLife: this.playerStats.maxLife,
-                        mana: this.playerStats.currentMana,
-                        maxMana: this.playerStats.maxMana,
-                        karma: this.playerStats.currentKarma,
-                        maxKarma: this.playerStats.maxKarma
-                    };
-                    
-                    player.userData.stats = initialStats;
-                    
-                    // Update status bars
-                    this.updatePlayerStatus(player, initialStats);
-                    
-                    console.log('Local player fully initialized at position:', player.position);
-                })
-                .catch(error => {
-                    console.error('Failed to create player:', error);
-                    
-                    // Try fallback character
-                    console.log('Using fallback character');
-                    this.localPlayer = this.playerManager.createFallbackCharacter();
-                    this.localPlayer.position.set(0, 3, 0);
-                    this.scene.add(this.localPlayer);
-                    this.isAlive = true;
-                    this.players.set('local', this.localPlayer);
-                    
-                    console.log('Fallback character created and positioned');
-                });
+            // Create a new offline player
+            const player = await this.playerManager.createPlayer(
+                'offline-' + Math.floor(Math.random() * 1000000),
+                { x: 0, y: 3, z: 0 },
+                { y: 0 }
+            );
+            
+            // Set as the local player
+            this.localPlayer = player;
+            this.isAlive = true;
+            
+            // Add to scene
+            this.scene.add(player);
+            
+            // Add to players map
+            if (player.userData && player.userData.id) {
+                this.players.set(player.userData.id, player);
+            } else {
+                this.players.set('offline-player', player);
+            }
+            
+            // Set initial stats
+            this.updatePlayerStatus(player, {
+                life: this.playerStats.currentLife,
+                maxLife: this.playerStats.maxLife,
+                mana: this.playerStats.currentMana,
+                maxMana: this.playerStats.maxMana,
+                karma: this.playerStats.currentKarma,
+                maxKarma: this.playerStats.maxKarma
+            });
+            
+            console.log('Offline player created successfully');
+            return true;
+        } catch (error) {
+            console.error('Failed to create offline player:', error);
+            return false;
         }
     }
     
     // Initialize managers while keeping the same flow as the original
-    initializeManagers() {
-        // Create all manager instances
-        this.uiManager = new UIManager(this);
-        this.networkManager = new NetworkManager(this, this.SERVER_URL);
-        this.playerManager = new PlayerManager(this);
-        this.skillsManager = new SkillsManager(this);
-        this.karmaManager = new KarmaManager(this);
-        this.npcManager = new NPCManager(this);
+    async initializeManagers() {
+        console.log('Initializing game managers...');
         
-        // Setup multiplayer (same logic as original but through the NetworkManager)
-        this.networkManager.setupMultiplayer();
-        
-        // Create UI (same as original but through UIManager)
-        this.uiManager.createUI();
-        
-        // Load player (same as original but through PlayerManager)
-        this.playerManager.loadCharacterModel();
+        try {
+            // Create all manager instances in the correct order
+            this.uiManager = new UIManager(this);
+            console.log('UI Manager created');
+            
+            this.playerManager = new PlayerManager(this);
+            console.log('Player Manager created');
+            
+            this.networkManager = new NetworkManager(this, this.SERVER_URL);
+            console.log('Network Manager created');
+            
+            this.skillsManager = new SkillsManager(this);
+            this.karmaManager = new KarmaManager(this);
+            this.npcManager = new NPCManager(this);
+            console.log('All managers created');
+            
+            // Initialize managers in order with await to ensure they're ready
+            console.log('Initializing Player Manager...');
+            await this.playerManager.init();
+            console.log('Player Manager initialized');
+            
+            console.log('Initializing Network Manager...');
+            const networkInitialized = await this.networkManager.init();
+            console.log('Network Manager initialized, connected:', networkInitialized);
+            
+            // Store the socket reference from NetworkManager
+            if (this.networkManager.socket) {
+                this.socket = this.networkManager.socket;
+                console.log('Socket reference stored in Game:', this.socket.id);
+            }
+            
+            // Create UI
+            console.log('Creating UI...');
+            this.uiManager.createUI();
+            console.log('UI created');
+            
+            return true;
+        } catch (error) {
+            console.error('Error initializing managers:', error);
+            return false;
+        }
     }
     
     // Setup event listeners just like in the original
@@ -744,10 +752,53 @@ export class Game {
     }
     
     startGameLoop() {
-        console.log('Starting game loop');
-        this.lastTime = Date.now();
+        // Initialize the animation loop
         this.isRunning = true;
-        this.animate();
+        console.log('Starting game loop');
+        
+        // Set a flag to track if we've logged initialization issues
+        let initIssuesLogged = false;
+        
+        // Start the animation loop
+        const animate = () => {
+            if (!this.isRunning) return;
+            
+            requestAnimationFrame(animate);
+            
+            try {
+                // Get timing
+                const delta = this.clock.getDelta();
+                const elapsedTime = this.clock.getElapsedTime();
+                
+                // Skip the first few frames to ensure everything is loaded
+                if (elapsedTime < 0.5) {
+                    this.renderer.render(this.scene, this.camera);
+                    return;
+                }
+                
+                // Check if we're ready to update
+                const isReadyToUpdate = this.scene && this.camera;
+                
+                if (!isReadyToUpdate) {
+                    if (!initIssuesLogged) {
+                        console.warn('Game not fully initialized yet, waiting...');
+                        initIssuesLogged = true;
+                    }
+                    return;
+                }
+                
+                // Update the world
+                this.update(delta);
+                
+                // Render the scene
+                this.renderer.render(this.scene, this.camera);
+            } catch (error) {
+                console.error('Error in animation loop:', error);
+            }
+        };
+        
+        // Start the animation loop
+        animate();
     }
     
     cleanup() {
@@ -1102,9 +1153,10 @@ export class Game {
             this._lastDebugLog = now;
         }
 
-        // Skip update if player doesn't exist
+        // Skip update if player doesn't exist, but try to recover
         if (!this.localPlayer) {
-            console.warn("Cannot update player: localPlayer does not exist");
+            // Try to recover by creating a local player
+            this.createLocalPlayerIfMissing();
             return;
         }
         
@@ -1531,36 +1583,40 @@ export class Game {
         npcModel.interactionSprite = sprite;
     }
     
+    // Update the sendPlayerState method to properly handle missing local player
     sendPlayerState() {
-        if (!this.socket?.connected || !this.localPlayer) {
-            // Don't log this every time - it's too spammy
+        if (!this.networkManager || !this.networkManager.socket) {
+            // Not connected to network, no need to send state
             return;
         }
         
-        // Send player position, rotation, and stats to server without logging
-        this.socket.emit('playerMovement', {
-            position: {
-                x: this.localPlayer.position.x,
-                y: this.localPlayer.position.y,
-                z: this.localPlayer.position.z
-            },
-            rotation: {
-                y: this.localPlayer.rotation.y
-            },
-            path: this.playerStats.path,
-            karma: this.playerStats.currentKarma,
-            maxKarma: this.playerStats.maxKarma,
-            life: this.playerStats.currentLife,
-            maxLife: this.playerStats.maxLife,
-            mana: this.playerStats.currentMana,
-            maxMana: this.playerStats.maxMana
-        });
+        if (!this.localPlayer) {
+            // No local player, try to create one
+            this.createLocalPlayerIfMissing();
+            return;
+        }
         
-        // Occasionally log position for debugging - at most once per 5 seconds
-        const now = Date.now();
-        if (now - this.lastPositionLog > this.logFrequency) {
-            console.log(`Player position: (${this.localPlayer.position.x.toFixed(2)}, ${this.localPlayer.position.y.toFixed(2)}, ${this.localPlayer.position.z.toFixed(2)})`);
-            this.lastPositionLog = now;
+        try {
+            // Send player state to the server via NetworkManager
+            this.networkManager.sendPlayerState({
+                position: {
+                    x: this.localPlayer.position.x,
+                    y: this.localPlayer.position.y,
+                    z: this.localPlayer.position.z
+                },
+                rotation: {
+                    y: this.localPlayer.rotation.y
+                },
+                life: this.playerStats.currentLife,
+                maxLife: this.playerStats.maxLife,
+                mana: this.playerStats.currentMana,
+                maxMana: this.playerStats.maxMana,
+                karma: this.playerStats.currentKarma,
+                maxKarma: this.playerStats.maxKarma,
+                path: this.playerStats.path
+            });
+        } catch (error) {
+            console.error('Error sending player state:', error);
         }
     }
     
@@ -2197,6 +2253,151 @@ export class Game {
         // Check if we're clicking on an NPC or interactive element
         if (this.npcProximity) {
             this.handleInteraction();
+        }
+    }
+
+    // Update the updatePlayerPosition method to handle missing localPlayer gracefully
+    updatePlayerPosition() {
+        const now = Date.now();
+        
+        // Debug logging at reasonable intervals
+        if (now - (this._lastDebugLog || 0) > 5000) {
+            console.log(
+                "Game state:", 
+                { 
+                    localPlayerExists: this.localPlayer !== null,
+                    isAlive: this.isAlive,
+                    playerCount: this.players.size,
+                    networkConnected: this.networkManager ? this.networkManager.isConnected : false
+                } 
+            );
+            this._lastDebugLog = now;
+        }
+
+        // Skip update if player doesn't exist, but no longer warn every frame
+        if (!this.localPlayer) {
+            // Attempt to create the local player if it doesn't exist yet
+            this.createLocalPlayerIfMissing();
+            return;
+        }
+        
+        // ... rest of the existing updatePlayerPosition method ...
+    }
+    
+    // Add a helper method to create local player if it's missing
+    createLocalPlayerIfMissing() {
+        // Only attempt to create if we have the necessary managers initialized
+        if (!this.playerManager || !this.networkManager) {
+            return;
+        }
+        
+        // Don't spam creation attempts
+        const now = Date.now();
+        if (now - (this._lastPlayerCreationAttempt || 0) < 2000) {
+            return;
+        }
+        this._lastPlayerCreationAttempt = now;
+        
+        console.log("Attempting to create missing local player...");
+        
+        // If in network mode, use network player creation
+        if (this.networkManager.socket && this.networkManager.socket.connected) {
+            console.log("Using network mode player creation");
+            this.networkManager.createLocalPlayer()
+                .then(player => {
+                    if (player) {
+                        console.log("Successfully created local player via network");
+                    }
+                })
+                .catch(err => console.error("Failed to create network player:", err));
+        } else {
+            // Otherwise use direct local creation
+            console.log("Using offline mode player creation");
+            this.playerManager.createLocalPlayer()
+                .then(player => {
+                    if (player) {
+                        // Set as local player and add to scene if not already there
+                        this.localPlayer = player;
+                        this.isAlive = true;
+                        
+                        if (!this.scene.getObjectById(player.id)) {
+                            this.scene.add(player);
+                        }
+                        
+                        // Also update players map
+                        const playerId = player.userData?.id || 'local';
+                        this.players.set(playerId, player);
+                        
+                        console.log("Successfully created offline local player");
+                    }
+                })
+                .catch(err => console.error("Failed to create offline player:", err));
+        }
+    }
+
+    // Add the missing update method that's called from the animation loop
+    update(deltaTime) {
+        // No need to calculate delta time here since it's passed in
+        const now = Date.now();
+        
+        try {
+            // Update status bars at a lower frequency (every 100ms)
+            if (!this.lastStatusUpdate || now - this.lastStatusUpdate >= 100) {
+                // Update all players' status bars
+                this.players.forEach((playerMesh) => {
+                    if (playerMesh.userData && playerMesh.userData.stats) {
+                        this.updatePlayerStatus(playerMesh, playerMesh.userData.stats, true);
+                    }
+                });
+                
+                // Update local player status
+                if (this.localPlayer && this.playerStats) {
+                    this.updatePlayerStatus(this.localPlayer, {
+                        life: this.playerStats.currentLife,
+                        maxLife: this.playerStats.maxLife,
+                        mana: this.playerStats.currentMana,
+                        maxMana: this.playerStats.maxMana,
+                        karma: this.playerStats.currentKarma,
+                        maxKarma: this.playerStats.maxKarma
+                    }, true);
+                }
+                
+                // Update UI status bars
+                this.updateStatusBars();
+                
+                this.lastStatusUpdate = now;
+            }
+            
+            // Update camera to follow player
+            this.updateCamera();
+            
+            // Update player movement
+            this.updatePlayer();
+            
+            // Update status bar positions
+            this.updateStatusBarPositions();
+            
+            // Update network state if connected
+            if (this.networkManager) {
+                try {
+                    this.networkManager.update(deltaTime);
+                } catch (error) {
+                    console.error('Error updating network state:', error);
+                }
+            }
+            
+            // Update NPC interaction text if it exists
+            if (this.darkNPC && this.darkNPC.userData.interactionText) {
+                this.darkNPC.userData.interactionText.lookAt(this.camera.position);
+            }
+            if (this.lightNPC && this.lightNPC.userData.interactionText) {
+                this.lightNPC.userData.interactionText.lookAt(this.camera.position);
+            }
+            
+            // Check for temple proximity for NPC interaction
+            this.checkTempleProximity();
+        } catch (error) {
+            console.error('Error in update method:', error);
         }
     }
 } 
