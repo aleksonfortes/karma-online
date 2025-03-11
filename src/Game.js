@@ -115,20 +115,13 @@ export class Game {
         await this.uiManager.init();
         this.uiManager.showLoadingScreen('Connecting to server...');
         
-        try {
-            // Initialize network first to determine if we're online
-            const networkInitialized = await this.networkManager.init();
-            
-            if (!networkInitialized) {
-                console.log('Network initialization failed, continuing in offline mode');
-                this.uiManager.showNotification('Playing in offline mode', 'warning');
-            }
-        } catch (error) {
-            console.warn('Network initialization failed:', error);
-            this.uiManager.showNotification('Network error - playing in offline mode', 'warning');
+        // Initialize network first - required for game to work
+        const networkInitialized = await this.networkManager.init();
+        if (!networkInitialized) {
+            throw new Error('Failed to connect to server');
         }
         
-        // Initialize player (with or without network)
+        // Initialize player
         await this.playerManager.init();
         await this.playerManager.loadCharacterModel();
         
@@ -149,11 +142,6 @@ export class Game {
         console.log(`Network event: ${eventName}`, data);
         
         switch (eventName) {
-            case 'offlineMode':
-                // Show offline mode notification
-                this.uiManager.showNotification('Playing in offline mode', 'yellow');
-                break;
-                
             case 'gameUpdate':
                 // Handle game state update from server
                 this.handleGameUpdate(data);
@@ -716,8 +704,13 @@ export class Game {
                     this.controls.right = true;
                     break;
                 case 'Space':
-                    if (this.skillsManager) {
+                    if (this.isAlive) {
                         this.skillsManager.useMartialArts();
+                    }
+                    break;
+                case 'KeyE':
+                    if (this.isAlive) {
+                        this.handleInteraction();
                     }
                     break;
             }
@@ -744,10 +737,10 @@ export class Game {
         
         // Mouse wheel for zoom
         window.addEventListener('wheel', (event) => {
-            const zoomAmount = event.deltaY * 0.001;
             this.currentZoom = Math.max(
                 this.minZoom,
-                Math.min(this.maxZoom, this.currentZoom + zoomAmount)
+                Math.min(this.maxZoom,
+                    this.currentZoom + event.deltaY * 0.01 * this.zoomSpeed)
             );
         });
         
@@ -785,82 +778,29 @@ export class Game {
     update(delta) {
         // Update player movement if we have a local player
         if (this.localPlayer && this.isAlive) {
-            this.updatePlayerMovement(delta);
+            this.playerManager.updatePlayerMovement(delta);
         }
         
         // Update camera position
-        if (this.cameraTarget && this.localPlayer) {
+        if (this.localPlayer) {
             this.updateCamera();
         }
         
         // Update managers
         if (this.networkManager) this.networkManager.update(delta);
-        if (this.playerManager) this.playerManager.update(delta);
         if (this.karmaManager) this.karmaManager.update(delta);
         if (this.npcManager) this.npcManager.update(delta);
     }
 
-    updatePlayerMovement(delta) {
+    updateCamera() {
         if (!this.localPlayer) return;
 
-        const moveSpeed = 5 * delta;
-        const rotateSpeed = 2 * delta;
-        
-        // Store current position for collision check
-        const previousPosition = this.localPlayer.position.clone();
-        
-        // Apply movement based on controls
-        if (this.controls.forward) this.localPlayer.translateZ(-moveSpeed);
-        if (this.controls.backward) this.localPlayer.translateZ(moveSpeed);
-        if (this.controls.left) this.localPlayer.rotation.y += rotateSpeed;
-        if (this.controls.right) this.localPlayer.rotation.y -= rotateSpeed;
-        
-        // Get new position after movement
-        const newPosition = this.localPlayer.position.clone();
-        
-        // Check if new position is valid (not colliding with statues or NPCs)
-        let collision = false;
-        
-        // Check statue collisions
-        if (this.statueColliders) {
-            for (const collider of this.statueColliders) {
-                const dx = newPosition.x - collider.position.x;
-                const dz = newPosition.z - collider.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                if (distance < collider.radius + 0.5) { // 0.5 is player radius
-                    collision = true;
-                    break;
-                }
-            }
-        }
-        
-        // Check world boundaries (water)
-        const maxDistance = 200; // Distance from center before hitting water
-        if (Math.abs(newPosition.x) > maxDistance || Math.abs(newPosition.z) > maxDistance) {
-            collision = true;
-        }
-        
-        // If collision detected, revert to previous position
-        if (collision) {
-            this.localPlayer.position.copy(previousPosition);
-        } else {
-            // Update height based on temple platform
-            this.isOnTemplePlatform(newPosition);
-            this.localPlayer.position.y = newPosition.y;
-        }
-    }
-
-    updateCamera() {
-        // Update camera position based on player
-        const targetPosition = new THREE.Vector3();
-        this.localPlayer.getWorldPosition(targetPosition);
-        
-        // Add offset based on zoom level
+        // Calculate target camera position
+        const targetPosition = this.localPlayer.position.clone();
         targetPosition.y += this.cameraOffset.y * (this.currentZoom / 15);
         targetPosition.z += this.cameraOffset.z * (this.currentZoom / 15);
-        
-        // Smoothly move camera
+
+        // Smoothly move camera to target position
         this.camera.position.lerp(targetPosition, 0.1);
         this.camera.lookAt(this.localPlayer.position);
     }

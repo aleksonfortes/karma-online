@@ -11,6 +11,10 @@ export class PlayerManager {
         this.lightPathColor = 0x3366ff; // Blue for light path
         this.darkPathColor = 0x990000; // Red for dark path
         this.respawnDelay = 5000; // 5 seconds
+        this.moveSpeed = 10;
+        this.rotateSpeed = 3;
+        this.lastPositionUpdate = 0;
+        this.updateInterval = 50; // 20 updates per second
         
         // Initialize players Map - exactly like original game
         this.players = new Map();
@@ -131,54 +135,47 @@ export class PlayerManager {
     }
     
     async createLocalPlayer() {
-        // Get socket ID if available
-        const socketId = this.game.networkManager?.socket?.id;
+        // Get socket ID - must have socket connection
+        const socketId = this.game.networkManager.socket.id;
+        if (!socketId) {
+            console.error('Cannot create local player without socket connection');
+            return null;
+        }
         
         // Create player at temple center - exactly like original
         const position = { x: 0, y: 3, z: 0 };
         const rotation = { y: 0 };
         
-        // Create player using socket ID or generate temporary ID
-        const playerId = socketId || 'temp-' + Math.random().toString(36).substr(2, 9);
-        const player = await this.createPlayer(playerId, position, rotation, true);
+        const player = await this.createPlayer(socketId, position, rotation, true);
         
         if (player) {
             this.game.localPlayer = player;
             this.game.scene.add(player);
-            this.players.set(playerId, player);
+            this.players.set(socketId, player);
             
-            // Send initial state if connected
-            if (socketId && this.game.networkManager) {
-                this.game.networkManager.sendPlayerState();
-            }
+            // Send initial state
+            this.game.networkManager.sendPlayerState();
         }
         
         return player;
     }
     
     async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
-        console.log('Creating player mesh for ID:', id);
-        console.log('Position:', position);
-        console.log('Rotation:', rotation);
-        console.log('Is local player:', isLocal);
-        
-        // Check if player already exists - don't create duplicates
-        if (this.game.players.has(id)) {
-            console.warn(`Player ${id} already exists, not creating another instance`);
-            return this.game.players.get(id);
+        // Check if player already exists
+        if (this.players.has(id)) {
+            console.warn(`Player ${id} already exists`);
+            return this.players.get(id);
         }
         
-        // Load detailed model for all players
+        // Load model for player
         let playerModel;
         try {
             playerModel = await this.loadCharacterModel();
             
-            // Use provided position for existing players, temple center for new local player
+            // Set position
             if (isLocal) {
-                console.log('Setting local player position to temple center (0, 3, 0)');
                 playerModel.position.set(0, 3, 0); // Start at temple height
             } else {
-                console.log(`Setting remote player position to (${position.x}, ${position.y}, ${position.z})`);
                 playerModel.position.set(
                     position.x,
                     position.y,
@@ -250,15 +247,21 @@ export class PlayerManager {
             });
             
             // Store status bars and group in player model's userData
-            playerModel.userData = playerModel.userData || {};
-            playerModel.userData.statusBars = bars;
-            playerModel.userData.statusGroup = statusGroup;
-            playerModel.userData.isPlayer = true;
-            playerModel.userData.id = id;
-            playerModel.userData.createdAt = Date.now(); // Track when this player was created
-            
-            // Set the internal movement speed to match original
-            playerModel.userData.movementSpeed = 0.1;
+            playerModel.userData = {
+                statusBars: bars,
+                statusGroup: statusGroup,
+                isPlayer: true,
+                id: id,
+                stats: {
+                    currentLife: 100,
+                    maxLife: 100,
+                    currentMana: 100,
+                    maxMana: 100,
+                    currentKarma: 50,
+                    maxKarma: 100,
+                    path: null
+                }
+            };
 
             // Add status group to scene
             this.game.scene.add(statusGroup);
@@ -271,14 +274,10 @@ export class PlayerManager {
                 }
             });
             
-            // Add debug info for tracking player instances
-            console.log(`Created player ${id} at position:`, playerModel.position);
-            console.log(`Total players after creation: ${this.game.players.size + 1}`);
-            
             return playerModel;
         } catch (error) {
             console.error('Failed to create player:', error);
-            return this.createFallbackCharacterModel();
+            return null;
         }
     }
     
@@ -561,5 +560,136 @@ export class PlayerManager {
         };
         
         return barGroup;
+    }
+
+    updatePlayerMovement(delta) {
+        if (!this.game.localPlayer || !this.game.isAlive) return;
+
+        const moveSpeed = this.moveSpeed * delta;
+        let moved = false;
+
+        // Store previous position for collision detection
+        const previousPosition = this.game.localPlayer.position.clone();
+        
+        // Calculate forward direction based on player's current rotation
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(this.game.localPlayer.quaternion);
+        
+        // Calculate right direction (perpendicular to forward)
+        const right = new THREE.Vector3(1, 0, 0);
+        right.applyQuaternion(this.game.localPlayer.quaternion);
+
+        // Calculate movement vector
+        const movement = new THREE.Vector3(0, 0, 0);
+        
+        if (this.game.controls.forward) movement.add(forward.multiplyScalar(moveSpeed));
+        if (this.game.controls.backward) movement.sub(forward.multiplyScalar(moveSpeed));
+        if (this.game.controls.left) this.game.localPlayer.rotation.y += this.rotateSpeed * delta;
+        if (this.game.controls.right) this.game.localPlayer.rotation.y -= this.rotateSpeed * delta;
+
+        // Apply movement if any movement keys are pressed
+        if (this.game.controls.forward || this.game.controls.backward) {
+            moved = true;
+            const newPosition = this.game.localPlayer.position.clone().add(movement);
+
+            // Check collisions and boundaries
+            if (this.checkCollision(newPosition, previousPosition)) {
+                // Update position if no collision
+                this.game.localPlayer.position.copy(newPosition);
+
+                // Send position update to server if enough time has passed
+                const now = Date.now();
+                if (now - this.lastPositionUpdate >= this.updateInterval) {
+                    this.lastPositionUpdate = now;
+                    if (this.game.networkManager && this.game.networkManager.socket) {
+                        this.game.networkManager.sendPlayerState();
+                    }
+                }
+            }
+        }
+
+        // Update status bars to follow player
+        this.updateStatusBars();
+    }
+
+    checkCollision(newPosition, previousPosition) {
+        // Check world boundaries
+        const worldBounds = 100;
+        if (Math.abs(newPosition.x) > worldBounds || Math.abs(newPosition.z) > worldBounds) {
+            return false;
+        }
+
+        // Check temple collision
+        if (this.game.temple) {
+            const templePos = this.game.temple.position;
+            const baseHalfWidth = 15; // Half width of temple base
+
+            // Simple AABB collision check with temple base
+            if (newPosition.x >= templePos.x - baseHalfWidth && 
+                newPosition.x <= templePos.x + baseHalfWidth &&
+                newPosition.z >= templePos.z - baseHalfWidth && 
+                newPosition.z <= templePos.z + baseHalfWidth) {
+                
+                // Allow movement if player is already on temple platform
+                if (this.isOnTemplePlatform(previousPosition)) {
+                    return true;
+                }
+                return false;
+            }
+        }
+
+        // Check statue collisions
+        if (this.game.statueColliders) {
+            for (const collider of this.game.statueColliders) {
+                const dx = newPosition.x - collider.position.x;
+                const dz = newPosition.z - collider.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < collider.radius + 0.5) { // 0.5 is player radius
+                    return false;
+                }
+            }
+        }
+
+        // Update player height based on temple platform
+        this.updatePlayerHeight(newPosition);
+        return true;
+    }
+
+    isOnTemplePlatform(position) {
+        if (!this.game.temple) return false;
+
+        const templePos = this.game.temple.position;
+        const baseHalfWidth = 15;
+        const crossVerticalHalfWidth = 4;
+        const crossHorizontalHalfWidth = 12;
+        const crossVerticalHalfLength = 12;
+        const crossHorizontalHalfLength = 4;
+
+        // Check if position is within base platform bounds
+        const isOnBase = Math.abs(position.x - templePos.x) <= baseHalfWidth && 
+                        Math.abs(position.z - templePos.z) <= baseHalfWidth;
+
+        // Check if position is within cross vertical part
+        const isOnVertical = Math.abs(position.x - templePos.x) <= crossVerticalHalfWidth && 
+                            Math.abs(position.z - templePos.z) <= crossVerticalHalfLength;
+
+        // Check if position is within cross horizontal part
+        const isOnHorizontal = Math.abs(position.x - templePos.x) <= crossHorizontalHalfWidth && 
+                              Math.abs(position.z - templePos.z) <= crossHorizontalHalfLength;
+
+        return isOnBase || isOnVertical || isOnHorizontal;
+    }
+
+    updatePlayerHeight(position) {
+        if (this.isOnTemplePlatform(position)) {
+            position.y = 3; // Temple platform height
+        } else {
+            position.y = 1.5; // Ground level height
+        }
+    }
+
+    updateStatusBars() {
+        // Implementation of updateStatusBars method
     }
 }
