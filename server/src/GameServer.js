@@ -35,59 +35,112 @@ export class GameServer {
         }
     }
     
+    // Create a utility logging function
+    log(message, level = 'info', throttle = false, throttleKey = null, throttleTime = 30000) {
+        // If throttling is requested, check if we should log based on time
+        if (throttle && throttleKey) {
+            const now = Date.now();
+            if (!this._lastLogs) this._lastLogs = {};
+            
+            // If we haven't logged this message recently, or it's the first time
+            if (!this._lastLogs[throttleKey] || now - this._lastLogs[throttleKey] > throttleTime) {
+                this._lastLogs[throttleKey] = now;
+                console[level](`[GameServer] ${message}`);
+            }
+        } else {
+            // Regular non-throttled logging
+            console[level](`[GameServer] ${message}`);
+        }
+    }
+
     setupSocketHandlers() {
         this.io.on('connection', (socket) => {
-            console.log(`Player connected: ${socket.id}`);
+            // Check if this socket.id is already connected
+            const existingPlayerIds = Array.from(this.players.keys());
+            const reconnection = existingPlayerIds.some(id => {
+                const player = this.players.get(id);
+                return player && player.ip === socket.handshake.address;
+            });
+
+            if (reconnection) {
+                this.log(`Player reconnected with new socket ID: ${socket.id} from IP: ${socket.handshake.address}`, 'info', true, 'reconnect');
+            } else {
+                this.log(`Player connected: ${socket.id} from IP: ${socket.handshake.address}`);
+            }
+
+            // Create a new player instance
+            const newPlayer = this.createPlayer(socket.id);
             
-            // Create new player
-            const player = this.createPlayer(socket.id);
-            this.players.set(socket.id, player);
-            this.gameState.players.set(socket.id, player); // Also add to gameState.players to match original
+            // Set the IP address for reconnection detection
+            newPlayer.ip = socket.handshake.address;
             
-            // Send current players to new player
+            // Store the player in our maps
+            this.players.set(socket.id, newPlayer);
+            this.gameState.players.set(socket.id, newPlayer);
+
+            // Send the current players to the new client
             socket.emit('currentPlayers', Array.from(this.players.values()));
-            
-            // Broadcast new player to others
-            socket.broadcast.emit('newPlayer', player);
+
+            // Send the new player to all other players
+            socket.broadcast.emit('newPlayer', newPlayer);
 
             // Handle player movement with rate limiting
-            socket.on('playerMovement', (data) => {
+            let lastMovementUpdate = 0;
+            const movementUpdateInterval = 50; // Minimum 50ms between updates (20 updates per second max)
+            
+            socket.on('playerMovement', (movementData) => {
+                const now = Date.now();
+                // Rate limit movement updates
+                if (now - lastMovementUpdate < movementUpdateInterval) return;
+                lastMovementUpdate = now;
+                
                 const player = this.players.get(socket.id);
+                if (!player) return;
+                
+                // Update player position
+                player.position = movementData.position;
+                player.rotation = movementData.rotation;
+                
+                // Send the movement to all other players
+                socket.broadcast.emit('playerPosition', {
+                    id: socket.id,
+                    position: player.position,
+                    rotation: player.rotation
+                });
+            });
+
+            // Handle disconnect event
+            socket.on('disconnect', () => {
+                const player = this.players.get(socket.id);
+                
                 if (player) {
-                    const now = Date.now();
-                    const lastUpdate = this.lastUpdateTime.get(socket.id) || 0;
+                    this.log(`Player disconnected: ${socket.id}`);
                     
-                    // Only update if at least 50ms has passed since last update
-                    if (now - lastUpdate >= 50) {
-                        player.position = data.position;
-                        player.rotation = data.rotation;
-                        player.path = data.path;
-                        player.karma = data.karma;
-                        player.maxKarma = data.maxKarma;
-                        
-                        // Don't update life from client movement updates
-                        // This prevents client-side life regeneration
-                        player.mana = data.mana;
-                        player.maxMana = data.maxMana;
-                        this.lastUpdateTime.set(socket.id, now);
-                        
-                        // Broadcast movement to other players
-                        socket.broadcast.emit('playerMoved', {
-                            id: socket.id,
-                            position: data.position,
-                            rotation: data.rotation,
-                            path: data.path,
-                            karma: data.karma,
-                            maxKarma: data.maxKarma,
-                            life: player.life, // Send server's life value
-                            maxLife: player.maxLife,
-                            mana: data.mana,
-                            maxMana: data.maxMana
-                        });
-                    }
+                    // Mark as disconnected but keep for a short time
+                    player.connected = false;
+                    player.disconnectedAt = Date.now();
+                    
+                    // Set a timeout to remove player after a delay (allow for short disconnects)
+                    setTimeout(() => {
+                        // Check if player is still disconnected and hasn't reconnected with a new socket
+                        const currentPlayer = this.players.get(socket.id);
+                        if (currentPlayer && !currentPlayer.connected) {
+                            // Now actually remove the player
+                            this.players.delete(socket.id);
+                            this.gameState.players.delete(socket.id);
+                            
+                            this.log(`Player removed after disconnect timeout: ${socket.id}`);
+                            
+                            // Notify all clients
+                            this.io.emit('playerLeft', socket.id);
+                        }
+                    }, 30000); // 30 second grace period for reconnection
+                    
+                    // Notify all clients immediately about the disconnect
+                    socket.broadcast.emit('playerDisconnected', socket.id);
                 }
             });
-            
+
             // Handle player state updates
             socket.on('playerState', (data) => {
                 const player = this.players.get(socket.id);
@@ -279,18 +332,6 @@ export class GameServer {
                     console.log(`Player died and left: ${socket.id} (Total Players: ${this.players.size})`);
                 }
             });
-
-            // Handle disconnection - exactly as in the original
-            socket.on('disconnect', () => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    this.players.delete(socket.id);
-                    this.gameState.players.delete(socket.id);
-                    this.lastUpdateTime.delete(socket.id);
-                    this.io.emit('playerLeft', socket.id);
-                    console.log(`Player left: ${socket.id} (Total Players: ${this.players.size})`);
-                }
-            });
         });
     }
 
@@ -305,17 +346,20 @@ export class GameServer {
             rotation: {
                 y: 0
             },
-            path: null,
-            karma: 50,
-            maxKarma: 100,
             life: 100,
             maxLife: 100,
             mana: 100,
             maxMana: 100,
-            color: `hsl(${Math.random() * 360}, 70%, 50%)`,
-            displayName: `Player ${socketId.slice(0, 4)}`,
+            karma: 50,
+            maxKarma: 100,
+            path: "neutral",
             effects: [],
-            lastKarmaAction: 0
+            lastAction: 0,
+            lastKarmaAction: 0,
+            lastLifeUpdate: 0,
+            connected: true, // New field to track connection status
+            ip: null, // New field to track IP address
+            disconnectedAt: null // New field to track disconnection time
         };
     }
 
@@ -329,20 +373,59 @@ export class GameServer {
     }
 
     update() {
-        // Update game state
-        this.gameState.lastUpdate = Date.now();
-
-        // Process any time-based effects
-        for (const [_, player] of this.gameState.players) {
-            this.updatePlayerEffects(player);
-        }
-
-        // Broadcast game state if needed
-        if (this.gameState.players.size > 0) {
+        // Update the game state
+        this.gameState.timestamp = Date.now();
+        
+        // Update time-based effects for each player
+        this.players.forEach(player => {
+            if (player.effects) {
+                for (const [effectId, effect] of Object.entries(player.effects)) {
+                    if (effect.duration && effect.startTime) {
+                        const elapsedTime = Date.now() - effect.startTime;
+                        if (elapsedTime >= effect.duration) {
+                            delete player.effects[effectId];
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Sync player maps to ensure consistency
+        this.syncPlayerMaps();
+        
+        // Broadcast the game state update if we have players
+        if (this.players.size > 0) {
+            this.updateCount = (this.updateCount || 0) + 1;
+            
+            // Log player count at a reduced frequency (every 300 updates instead of 60)
+            if (this.updateCount % 300 === 0) {
+                this.log(`Game update: Broadcasting ${this.players.size} players`, 'info', true, 'broadcast');
+            }
+            
+            // Emit the full state update - includes all players and timestamp
             this.io.emit('gameStateUpdate', {
-                players: Array.from(this.gameState.players.values()),
-                timestamp: this.gameState.lastUpdate
+                players: Array.from(this.players.values()),
+                timestamp: this.gameState.timestamp
             });
+        }
+    }
+    
+    // New method to ensure player maps are in sync
+    syncPlayerMaps() {
+        // Check for players in the main map that are not in the game state
+        for (const [playerId, player] of this.players.entries()) {
+            if (!this.gameState.players.has(playerId)) {
+                this.gameState.players.set(playerId, player);
+                this.log(`Sync: Added missing player ${playerId} to game state`, 'warn');
+            }
+        }
+        
+        // Check for players in the game state that are not in the main map
+        for (const [playerId, player] of this.gameState.players.entries()) {
+            if (!this.players.has(playerId)) {
+                this.players.set(playerId, player);
+                this.log(`Sync: Added missing player ${playerId} to main player map`, 'warn');
+            }
         }
     }
 
