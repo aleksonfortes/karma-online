@@ -133,10 +133,22 @@ export class NetworkManager {
                                 currentKarma: player.karma ?? 50,
                                 maxKarma: player.maxKarma ?? 100
                             };
+                            
+                            // Force update of local player status bars
+                            if (this.game.updatePlayerStatus) {
+                                this.game.updatePlayerStatus(localPlayer, {
+                                    life: this.game.playerStats.currentLife,
+                                    maxLife: this.game.playerStats.maxLife,
+                                    mana: this.game.playerStats.currentMana,
+                                    maxMana: this.game.playerStats.maxMana,
+                                    karma: this.game.playerStats.currentKarma,
+                                    maxKarma: this.game.playerStats.maxKarma
+                                });
+                            }
                         }
                     }
-                } else {
-                    // Create other players
+                } else if (!this.game.playerManager.players.has(player.id)) {
+                    // Only create other players if they don't exist yet
                     const playerMesh = await this.game.playerManager.createPlayer(
                         player.id,
                         player.position || { x: 0, y: 3, z: 0 },
@@ -145,10 +157,8 @@ export class NetworkManager {
                     
                     if (playerMesh) {
                         this.game.scene.add(playerMesh);
-                        this.game.playerManager.players.set(player.id, playerMesh);
                         
-                        // Update player stats
-                        playerMesh.userData.stats = {
+                        const stats = {
                             life: player.life ?? 100,
                             maxLife: player.maxLife ?? 100,
                             mana: player.mana ?? 100,
@@ -156,6 +166,17 @@ export class NetworkManager {
                             karma: player.karma ?? 50,
                             maxKarma: player.maxKarma ?? 100
                         };
+                        
+                        // Force creation and update of status bars
+                        if (this.game.updatePlayerStatus) {
+                            this.game.updatePlayerStatus(playerMesh, stats);
+                        }
+                        
+                        // Store stats in userData
+                        playerMesh.userData.stats = stats;
+                        
+                        // Add to players Map
+                        this.game.playerManager.players.set(player.id, playerMesh);
                     }
                 }
             }
@@ -598,10 +619,18 @@ export class NetworkManager {
             }
             this.game.scene.remove(player);
             this.game.playerManager.players.delete(playerId);
+
+            // If this was our player, also clear local player reference
+            if (playerId === this.socket?.id) {
+                this.game.localPlayer = null;
+            }
         }
     }
 
     cleanup() {
+        // Reset connection state
+        this.isConnected = false;
+        
         // Clear all players
         this.game.playerManager.players.forEach((player) => {
             if (player.userData.statusGroup) {
@@ -620,9 +649,35 @@ export class NetworkManager {
             this.game.localPlayer = null;
         }
 
+        // Reset game controls
+        if (this.game.controls) {
+            this.game.controls = {
+                forward: false,
+                backward: false,
+                left: false,
+                right: false
+            };
+        }
+
+        // Reset player state
+        if (this.game.playerStats) {
+            this.game.playerStats = {
+                currentLife: 100,
+                maxLife: 100,
+                currentMana: 100,
+                maxMana: 100,
+                currentKarma: 50,
+                maxKarma: 100
+            };
+        }
+
         // Reset game state
         if (this.game.cleanup) {
             this.game.cleanup();
         }
+
+        // Remove any UI elements
+        const uiElements = document.querySelectorAll('div[style*="position: fixed"]');
+        uiElements.forEach(element => element.remove());
     }
 } 
