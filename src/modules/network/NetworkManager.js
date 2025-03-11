@@ -93,7 +93,7 @@ export class NetworkManager {
             this.enterOfflineMode();
         });
 
-        // Handle current players
+        // Handle current players - exactly like original
         this.socket.on('currentPlayers', async (players) => {
             console.log('\n=== Received Current Players ===');
             console.log('Players:', players);
@@ -114,25 +114,15 @@ export class NetworkManager {
                     if (!this.game.localPlayer) {
                         const localPlayer = await this.game.playerManager.createPlayer(
                             player.id,
-                            player.position || { x: 0, y: 3, z: 0 },
-                            { y: player.rotation?.y || 0 },
-                            true
+                            player.position,
+                            { y: player.rotation.y || 0 },
+                            true // isLocal
                         );
                         
                         if (localPlayer) {
                             this.game.localPlayer = localPlayer;
                             this.game.scene.add(localPlayer);
                             this.game.playerManager.players.set(player.id, localPlayer);
-                            
-                            // Update player stats
-                            this.game.playerStats = {
-                                currentLife: player.life ?? 100,
-                                maxLife: player.maxLife ?? 100,
-                                currentMana: player.mana ?? 100,
-                                maxMana: player.maxMana ?? 100,
-                                currentKarma: player.karma ?? 50,
-                                maxKarma: player.maxKarma ?? 100
-                            };
                             
                             // Force update of local player status bars
                             if (this.game.updatePlayerStatus) {
@@ -147,12 +137,13 @@ export class NetworkManager {
                             }
                         }
                     }
-                } else if (!this.game.playerManager.players.has(player.id)) {
-                    // Only create other players if they don't exist yet
+                } else {
+                    // Create other players
                     const playerMesh = await this.game.playerManager.createPlayer(
                         player.id,
-                        player.position || { x: 0, y: 3, z: 0 },
-                        { y: player.rotation?.y || 0 }
+                        player.position,
+                        { y: player.rotation.y || 0 },
+                        false // not local
                     );
                     
                     if (playerMesh) {
@@ -171,12 +162,9 @@ export class NetworkManager {
                         if (this.game.updatePlayerStatus) {
                             this.game.updatePlayerStatus(playerMesh, stats);
                         }
-                        
-                        // Store stats in userData
-                        playerMesh.userData.stats = stats;
-                        
-                        // Add to players Map
                         this.game.playerManager.players.set(player.id, playerMesh);
+                        
+                        console.log(`Added player ${player.id} with status bars:`, stats);
                     }
                 }
             }
@@ -197,7 +185,7 @@ export class NetworkManager {
             }
         });
 
-        // Handle new player
+        // Handle new player - exactly like original
         this.socket.on('newPlayer', async (player) => {
             if (player.id === this.socket.id) {
                 // If this is us, make sure we're in the players Map
@@ -210,16 +198,15 @@ export class NetworkManager {
             console.log('Creating new player:', player.id);
             const playerMesh = await this.game.playerManager.createPlayer(
                 player.id,
-                player.position || { x: 0, y: 3, z: 0 },
-                { y: player.rotation?.y || 0 }
+                player.position,
+                { y: player.rotation.y || 0 },
+                false // not local
             );
             
             if (playerMesh) {
                 this.game.scene.add(playerMesh);
-                this.game.playerManager.players.set(player.id, playerMesh);
                 
-                // Update player stats
-                playerMesh.userData.stats = {
+                const stats = {
                     life: player.life ?? 100,
                     maxLife: player.maxLife ?? 100,
                     mana: player.mana ?? 100,
@@ -227,40 +214,23 @@ export class NetworkManager {
                     karma: player.karma ?? 50,
                     maxKarma: player.maxKarma ?? 100
                 };
+                
+                // Force creation and update of status bars
+                if (this.game.updatePlayerStatus) {
+                    this.game.updatePlayerStatus(playerMesh, stats);
+                }
+                this.game.playerManager.players.set(player.id, playerMesh);
+                
+                console.log(`Added new player ${player.id} with status bars`);
+            }
+            
+            // Send our current state to the new player
+            if (this.game.localPlayer) {
+                this.sendPlayerState();
             }
         });
 
-        // Handle player left/disconnection
-        this.socket.on('playerLeft', (playerId) => {
-            console.log('\n=== Player Left ===');
-            console.log('Player ID:', playerId);
-            this.removePlayer(playerId);
-        });
-
-        // Handle player disconnected (temporary)
-        this.socket.on('playerDisconnected', (playerId) => {
-            console.log('\n=== Player Temporarily Disconnected ===');
-            console.log('Player ID:', playerId);
-            const player = this.game.playerManager.players.get(playerId);
-            if (player) {
-                // Visual indication of disconnected state
-                player.traverse((child) => {
-                    if (child.isMesh && child.material) {
-                        child.material.transparent = true;
-                        child.material.opacity = 0.5;
-                    }
-                });
-            }
-        });
-
-        // Handle disconnect
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            this.isConnected = false;
-            this.cleanup();
-        });
-
-        // Handle player movement
+        // Handle player movement - exactly like original
         this.socket.on('playerMoved', (player) => {
             if (player.id === this.socket.id) return;
             
@@ -296,7 +266,21 @@ export class NetworkManager {
             }
         });
 
-        // Handle game state update - exactly like original
+        // Handle player left
+        this.socket.on('playerLeft', (playerId) => {
+            console.log('\n=== Player Left ===');
+            console.log('Player ID:', playerId);
+            this.removePlayer(playerId);
+        });
+
+        // Handle disconnect
+        this.socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            this.isConnected = false;
+            this.cleanup();
+        });
+
+        // Handle game state update
         this.socket.on('gameStateUpdate', (data) => {
             if (!data.players) return;
             
@@ -336,7 +320,7 @@ export class NetworkManager {
             });
         });
 
-        // Handle stats update - exactly like original
+        // Handle stats update
         this.socket.on('statsUpdate', (data) => {
             console.log('Received statsUpdate:', data);
             const playerMesh = this.game.playerManager.players.get(data.id);
@@ -384,7 +368,7 @@ export class NetworkManager {
             }
         });
 
-        // Handle life update - exactly like original
+        // Handle life update
         this.socket.on('lifeUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
@@ -431,7 +415,7 @@ export class NetworkManager {
             }
         });
 
-        // Handle mana update - exactly like original
+        // Handle mana update
         this.socket.on('manaUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
@@ -462,7 +446,7 @@ export class NetworkManager {
             }
         });
 
-        // Handle karma update - exactly like original
+        // Handle karma update
         this.socket.on('karmaUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
@@ -496,7 +480,7 @@ export class NetworkManager {
             }
         });
 
-        // Handle skill effect - exactly like original
+        // Handle skill effect
         this.socket.on('skillEffect', (data) => {
             const targetMesh = this.game.playerManager.players.get(data.targetId);
             if (!targetMesh) {
@@ -559,7 +543,7 @@ export class NetworkManager {
                 this.game.scene.add(player);
                 this.game.playerManager.players.set(this.socket.id, player);
                 
-                // Send initial state to server - exactly like original
+                // Send initial state to server
                 this.sendPlayerState();
             }
             
@@ -570,7 +554,6 @@ export class NetworkManager {
         }
     }
 
-    // Send player state - exactly like original
     sendPlayerState() {
         if (!this.socket?.connected || !this.game.localPlayer) return;
         
@@ -597,7 +580,6 @@ export class NetworkManager {
         this.socket.volatile.emit('playerMovement', playerState);
     }
 
-    // Update method - exactly like original game
     update() {
         // Skip if not connected or no local player
         if (!this.socket?.connected || !this.game.localPlayer) return;
@@ -611,73 +593,46 @@ export class NetworkManager {
     }
 
     removePlayer(playerId) {
-        const player = this.game.playerManager.players.get(playerId);
-        if (player) {
-            // Remove status group from scene
-            if (player.userData.statusGroup) {
-                this.game.scene.remove(player.userData.statusGroup);
+        const playerMesh = this.game.playerManager.players.get(playerId);
+        if (playerMesh) {
+            // Remove status bars if they exist
+            if (playerMesh.userData.statusGroup) {
+                this.game.scene.remove(playerMesh.userData.statusGroup);
             }
-            this.game.scene.remove(player);
+            
+            // Remove player mesh from scene
+            this.game.scene.remove(playerMesh);
+            
+            // Remove from players map
             this.game.playerManager.players.delete(playerId);
-
-            // If this was our player, also clear local player reference
-            if (playerId === this.socket?.id) {
-                this.game.localPlayer = null;
-            }
+            
+            console.log(`Removed player ${playerId}`);
         }
     }
 
     cleanup() {
-        // Reset connection state
-        this.isConnected = false;
-        
-        // Clear all players
-        this.game.playerManager.players.forEach((player) => {
-            if (player.userData.statusGroup) {
-                this.game.scene.remove(player.userData.statusGroup);
+        // Clear all players and their status bars
+        this.game.playerManager.players.forEach((playerMesh) => {
+            if (playerMesh.userData.statusGroup) {
+                this.game.scene.remove(playerMesh.userData.statusGroup);
             }
-            this.game.scene.remove(player);
+            this.game.scene.remove(playerMesh);
         });
         this.game.playerManager.players.clear();
-
-        // Clear local player
-        if (this.game.localPlayer) {
-            if (this.game.localPlayer.userData.statusGroup) {
-                this.game.scene.remove(this.game.localPlayer.userData.statusGroup);
-            }
-            this.game.scene.remove(this.game.localPlayer);
-            this.game.localPlayer = null;
-        }
-
-        // Reset game controls
+        
+        // Reset game controls to prevent stuck movement
         if (this.game.controls) {
-            this.game.controls = {
-                forward: false,
-                backward: false,
-                left: false,
-                right: false
-            };
+            this.game.controls.resetKeys();
         }
-
-        // Reset player state
+        
+        // Reset player stats
         if (this.game.playerStats) {
-            this.game.playerStats = {
-                currentLife: 100,
-                maxLife: 100,
-                currentMana: 100,
-                maxMana: 100,
-                currentKarma: 50,
-                maxKarma: 100
-            };
+            this.game.playerStats.reset();
         }
-
-        // Reset game state
-        if (this.game.cleanup) {
-            this.game.cleanup();
-        }
-
-        // Remove any UI elements
-        const uiElements = document.querySelectorAll('div[style*="position: fixed"]');
-        uiElements.forEach(element => element.remove());
+        
+        // Clear local player reference
+        this.game.localPlayer = null;
+        
+        console.log('Cleaned up network state');
     }
 } 
