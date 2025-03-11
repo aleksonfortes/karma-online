@@ -13,72 +13,36 @@ export class GameServer {
             transports: ['websocket', 'polling']
         });
 
-        // Store active players
+        // Store active players - using original simple structure
         this.players = new Map();
         this.gameState = {
             players: new Map(),
             lastUpdate: Date.now()
         };
         this.lastUpdateTime = new Map();
-        
-        // Reset server state on startup
-        this.players.clear();
-        this.gameState.players.clear();
-        this.lastUpdateTime.clear();
 
         this.setupSocketHandlers();
         this.startGameLoop();
         console.log('GameServer: Initialization complete');
-        
-        // Add periodic cleanup of disconnected players
-        setInterval(() => this.cleanupDisconnectedPlayers(), 15000);
     }
     
-    cleanupDisconnectedPlayers() {
-        // Get all currently connected socket IDs
-        const connectedSockets = Array.from(this.io.sockets.sockets.keys());
-        let removedCount = 0;
-        
-        // Check each player against connected sockets
-        for (const [socketId, player] of this.players.entries()) {
-            if (!connectedSockets.includes(socketId)) {
-                this.players.delete(socketId);
-                this.gameState.players.delete(socketId);
-                this.lastUpdateTime.delete(socketId);
-                removedCount++;
-            }
-        }
-        
-        if (removedCount > 0) {
-            console.log(`Cleaned up ${removedCount} disconnected players. Active players: ${this.players.size}`);
-            // Synchronize player list
-            this.broadcastPlayerList();
-        }
-    }
+    // Remove periodic cleanup that might cause desynchronization
+    // Rely on socket disconnect events for cleanup as in the original version
     
     broadcastPlayerList() {
-        // Send updated player list to all clients
-        const playerList = Array.from(this.players.values());
-        this.io.emit('currentPlayers', playerList);
+        if (this.players.size > 0) {
+            this.io.emit('fullPlayersSync', Array.from(this.players.values()));
+        }
     }
-
+    
     setupSocketHandlers() {
         this.io.on('connection', (socket) => {
             console.log(`Player connected: ${socket.id}`);
             
-            // Check if there's already a player with this ID (shouldn't happen, but handle it)
-            if (this.players.has(socket.id)) {
-                this.players.delete(socket.id);
-                this.gameState.players.delete(socket.id);
-                this.lastUpdateTime.delete(socket.id);
-                
-                // Broadcast to all clients to remove this player
-                this.io.emit('playerLeft', socket.id);
-            }
-            
             // Create new player
             const player = this.createPlayer(socket.id);
             this.players.set(socket.id, player);
+            this.gameState.players.set(socket.id, player); // Also add to gameState.players to match original
             
             // Send current players to new player
             socket.emit('currentPlayers', Array.from(this.players.values()));
@@ -121,6 +85,31 @@ export class GameServer {
                             maxMana: data.maxMana
                         });
                     }
+                }
+            });
+            
+            // Handle player state updates
+            socket.on('playerState', (data) => {
+                const player = this.players.get(socket.id);
+                if (player) {
+                    // Update stats that the server allows clients to update
+                    if (data.karma !== undefined) player.karma = data.karma;
+                    if (data.maxKarma !== undefined) player.maxKarma = data.maxKarma;
+                    if (data.mana !== undefined) player.mana = data.mana;
+                    if (data.maxMana !== undefined) player.maxMana = data.maxMana;
+                    if (data.path !== undefined) player.path = data.path;
+                    
+                    // Broadcast the state update to other players
+                    socket.broadcast.emit('playerStateUpdate', {
+                        id: socket.id,
+                        karma: player.karma,
+                        maxKarma: player.maxKarma,
+                        life: player.life,
+                        maxLife: player.maxLife,
+                        mana: player.mana,
+                        maxMana: player.maxMana,
+                        path: player.path
+                    });
                 }
             });
 
@@ -178,66 +167,69 @@ export class GameServer {
                         
                         // Karma effects from combat - only on kills
                         if (target.life === 0) {
-                            // Killing a player increases karma by 10
-                            attacker.karma = Math.min(attacker.maxKarma, attacker.karma + 10);
+                            // Killing reduces karma toward darkness
+                            attacker.karma = Math.min(100, attacker.karma + 10);
+                            this.updatePlayerEffects(attacker);
                             
-                            // Broadcast the attacker's karma update
+                            // Emit karma update for attacker
                             this.io.emit('karmaUpdate', {
-                                id: socket.id,
+                                id: attacker.id,
                                 karma: attacker.karma,
-                                maxKarma: attacker.maxKarma
+                                maxKarma: attacker.maxKarma,
+                                effects: attacker.effects
                             });
                         }
-
-                        // Then emit the damage effect for visuals
+                        
+                        // Emit skill effect to all clients for visual feedback
                         this.io.emit('skillEffect', {
                             type: 'damage',
+                            attackerId: socket.id,
                             targetId: data.targetId,
                             damage: finalDamage,
                             skillName: data.skillName,
-                            attackerKarma: attacker.karma,
-                            targetKarma: target.karma,
-                            isCritical: finalDamage > data.damage
+                            isCritical: finalDamage > data.damage * 1.5
                         });
                     } else {
-                        // Emit immunity feedback
+                        // Emit immunity effect if no damage was dealt
                         this.io.emit('skillEffect', {
                             type: 'immune',
                             targetId: data.targetId,
-                            skillName: data.skillName,
                             reason: target.karma === 0 ? 'illuminated' : 'forsaken'
                         });
                     }
                 }
             });
-
-            // Handle karma actions
+            
+            // Add karmaAction handler - exactly as in the original
             socket.on('karmaAction', (data) => {
                 const player = this.players.get(socket.id);
                 const target = this.players.get(data.targetId);
                 
-                if (player && target) {
-                    const now = Date.now();
-                    if (now - player.lastKarmaAction >= 1000) { // 1 second cooldown
-                        const amount = data.action === 'give' ? 1 : -1;
-                        target.karma = Math.max(0, Math.min(target.maxKarma, target.karma + amount));
-                        player.lastKarmaAction = now;
+                if (!player || !target) return;
+                
+                // Rate limit karma actions to once every 5 seconds
+                const now = Date.now();
+                const lastAction = player.lastKarmaAction || 0;
+                
+                if (now - lastAction >= 5000) {
+                    const amount = data.action === 'give' ? 1 : -1;
+                    target.karma = Math.max(0, Math.min(target.maxKarma, target.karma + amount));
+                    player.lastKarmaAction = now;
 
-                        // Update effects
-                        this.updatePlayerEffects(target);
-                        
-                        // Broadcast karma update
-                        this.io.emit('karmaUpdate', {
-                            id: target.id,
-                            karma: target.karma,
-                            maxKarma: target.maxKarma,
-                            effects: target.effects
-                        });
-                    }
+                    // Update effects
+                    this.updatePlayerEffects(target);
+                    
+                    // Broadcast karma update
+                    this.io.emit('karmaUpdate', {
+                        id: target.id,
+                        karma: target.karma,
+                        maxKarma: target.maxKarma,
+                        effects: target.effects
+                    });
                 }
             });
 
-            // Handle karma updates
+            // Add karmaUpdate handler - exactly as in the original
             socket.on('karmaUpdate', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
@@ -258,7 +250,7 @@ export class GameServer {
                 }
             });
 
-            // Add new handler for mana updates
+            // Add manaUpdate handler - exactly as in the original
             socket.on('manaUpdate', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
@@ -273,7 +265,7 @@ export class GameServer {
                 }
             });
 
-            // Handle player death
+            // Add playerDied handler - exactly as in the original
             socket.on('playerDied', (data) => {
                 const player = this.players.get(socket.id);
                 if (player) {
@@ -284,22 +276,19 @@ export class GameServer {
                     
                     // Notify all clients that the player has died and should be removed
                     this.io.emit('playerLeft', socket.id);
-                    console.log(`Player died: ${socket.id}`);
+                    console.log(`Player died and left: ${socket.id} (Total Players: ${this.players.size})`);
                 }
             });
 
-            // Handle disconnection
+            // Handle disconnection - exactly as in the original
             socket.on('disconnect', () => {
                 const player = this.players.get(socket.id);
                 if (player) {
-                    // Remove from all server data structures
                     this.players.delete(socket.id);
                     this.gameState.players.delete(socket.id);
                     this.lastUpdateTime.delete(socket.id);
-                    
-                    // Notify all clients to remove this player
                     this.io.emit('playerLeft', socket.id);
-                    console.log(`Player left: ${socket.id}`);
+                    console.log(`Player left: ${socket.id} (Total Players: ${this.players.size})`);
                 }
             });
         });
@@ -331,9 +320,30 @@ export class GameServer {
     }
 
     startGameLoop() {
+        const tickRate = 60; // Updates per second
+        const tickInterval = 1000 / tickRate;
+
         setInterval(() => {
-            this.gameState.lastUpdate = Date.now();
-        }, 1000 / 60);
+            this.update();
+        }, tickInterval);
+    }
+
+    update() {
+        // Update game state
+        this.gameState.lastUpdate = Date.now();
+
+        // Process any time-based effects
+        for (const [_, player] of this.gameState.players) {
+            this.updatePlayerEffects(player);
+        }
+
+        // Broadcast game state if needed
+        if (this.gameState.players.size > 0) {
+            this.io.emit('gameStateUpdate', {
+                players: Array.from(this.gameState.players.values()),
+                timestamp: this.gameState.lastUpdate
+            });
+        }
     }
 
     updatePlayerEffects(player) {
