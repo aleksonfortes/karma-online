@@ -4,12 +4,39 @@ import * as THREE from 'three';
 export class NetworkManager {
     constructor(game, serverUrl) {
         this.game = game;
+        
+        // Determine the server URL based on environment
+        if (serverUrl) {
+            this.SERVER_URL = serverUrl;
+        } else {
+            // Check if we're in development or production
+            const isProduction = import.meta.env.PROD;
+            const port = window.location.port || (isProduction ? '3000' : '5173');
+            
+            // Try to detect the server port from the page URL first
+            const serverPort = isProduction ? port : '3000';
+            
+            // In development, connect to the Node.js server
+            this.SERVER_URL = isProduction 
+                ? window.location.origin
+                : `${window.location.protocol}//${window.location.hostname}:${serverPort}`;
+        }
+        
+        // Will store socket.io instance
         this.socket = null;
-        this.isConnected = false;
+        
+        // Track whether we're in offline mode
         this.isOffline = false;
+        
+        // Store movement targets for interpolation
+        this.movementTargets = new Map();
+        
+        // Store previous positions for smoothing
+        this.previousPositions = new Map();
+        
+        this.isConnected = false;
         this.retryCount = 0;
         this.maxRetries = 3;
-        this.SERVER_URL = serverUrl || 'http://localhost:3000'; // Default if not provided
         this.initialSyncComplete = false;
         this.lastUpdateTime = Date.now();
         
@@ -18,471 +45,213 @@ export class NetworkManager {
         this.logFrequency = 5000; // Log at most once every 5 seconds
         
         // Movement interpolation settings
-        this.lerpFactor = 0.15; // Smoothing factor - higher means more responsive
+        this.lerpFactor = 0.2; // Smoothing factor
         
         // New additions
-        this.verifiedPlayerIds = new Set(); // Track verified player IDs
         this.hasMovedSinceLogin = false; // Track first movement
         
         // Update tracking
         this.lastPositionUpdate = 0;
         this.lastStateUpdate = 0;
+        
+        // For last update times
+        this.lastPositionSend = 0;
+        this.lastStateSend = 0;
+    }
+    
+    // Try to detect the actual server port by making a test connection
+    async detectServerPort() {
+        // Start with the default port
+        let port = 3000;
+        const maxPort = port + 10; // Try up to 10 ports
+        
+        // Try each port until we find one that works
+        while (port <= maxPort) {
+            try {
+                const testUrl = `${window.location.protocol}//${window.location.hostname}:${port}`;
+                
+                // Try to fetch from this port
+                const response = await fetch(`${testUrl}/api/status`, { 
+                    method: 'HEAD',
+                    signal: AbortSignal.timeout(1000) // Timeout after 1 second
+                });
+                
+                if (response.ok) {
+                    return port;
+                }
+            } catch (err) {
+                // Connection failed, try next port
+            }
+            
+            port++;
+        }
+        
+        // If all ports failed, return default
+        return 3000;
     }
     
     async init() {
-        console.log('Initializing Network Manager');
-        
         try {
-            // Try to connect to server
-            await this.setupMultiplayer();
+            // Try to detect the actual server port
+            let serverUrl = this.SERVER_URL;
             
-            // Schedule an initial cleanup after the scene has fully loaded
-            setTimeout(() => {
-                console.log('Running initial scene cleanup...');
-                this.forceCleanAllPlayers();
-                this.socket?.emit('requestPlayersSync');
-            }, 5000); // Run 5 seconds after initialization
-            
-            return true;
-        } catch (error) {
-            console.warn('Failed to connect to server, using offline mode:', error.message);
-            this.isOffline = true;
-            
-            // Notify game about offline mode
-            if (this.game.onNetworkEvent) {
-                this.game.onNetworkEvent('offlineMode');
+            // If in development, try to detect the actual port
+            if (import.meta.env.DEV) {
+                try {
+                    const detectedPort = await this.detectServerPort();
+                    serverUrl = `${window.location.protocol}//${window.location.hostname}:${detectedPort}`;
+                } catch (err) {
+                    // Use default URL if detection fails
+                }
             }
             
-            // Initialize local player in offline mode
-            this.initializeLocalPlayerOffline();
+            if (serverUrl) {
+                // Import Socket.io client dynamically
+                const { io } = await import('socket.io-client');
+                
+                // Create the socket connection
+                this.socket = io(serverUrl, {
+                    transports: ['websocket', 'polling'],
+                    upgrade: true,
+                    reconnection: true,
+                    reconnectionAttempts: 5,
+                    reconnectionDelay: 1000,
+                    reconnectionDelayMax: 5000,
+                    timeout: 20000,
+                    autoConnect: true
+                });
+                
+                // Wait for connection to establish before proceeding
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        reject(new Error('Socket connection timeout'));
+                    }, 10000);
+                    
+                    this.socket.on('connect', () => {
+                        clearTimeout(timeout);
+                        console.log('Connected to server');
+                        resolve();
+                    });
+                    
+                    this.socket.on('connect_error', (error) => {
+                        console.error('Socket connection error:', error);
+                    });
+                });
+                
+                // Setup socket event handlers
+                this.setupSocketHandlers();
+                
+                // Initialize multiplayer with delay to ensure socket is ready
+                setTimeout(() => this.setupMultiplayer(), 500);
+            } else {
+                this.initializeLocalPlayerOffline();
+            }
+        } catch (error) {
+            console.error('Failed to initialize network connection:', error);
             
-            return true; // Still return true to continue game initialization
+            // Fall back to offline mode if connection fails
+            this.initializeLocalPlayerOffline();
         }
     }
     
     setupMultiplayer() {
-        console.log('Setting up multiplayer connection to:', this.SERVER_URL);
+        console.log('Setting up multiplayer...');
         
-        // Create socket connection
-        this.socket = io(this.SERVER_URL, {
-            transports: ['websocket'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000
-        });
-        
-        // Store socket in game for direct access
-        this.game.socket = this.socket;
-        
-        // Set up socket event handlers
-        this.socket.on('connect', () => {
-            console.log('Connected to server with ID:', this.socket.id);
-            this.isConnected = true;
-            
-            // Clear ALL existing players when reconnecting (more aggressive cleanup)
-            if (this.wasConnectedBefore) {
-                this.log('Reconnected to server, cleaning up ALL player data for fresh state');
+        try {
+            // Wait a bit to ensure everything is loaded
+            setTimeout(async () => {
+                // Clean up any existing players first
+                this.cleanupAllNonLocalPlayers();
                 
-                // Use our new force cleanup method
-                this.forceCleanAllPlayers();
-                
-                // Clear local player variable but save the reference
-                this.game.localPlayer = null;
-                this.game.playerManager.localPlayer = null;
-                
-                // Reset the camera position for reconnection
-                const defaultPosition = { x: 0, y: 8, z: 15 };
-                this.game.camera.position.set(
-                    defaultPosition.x,
-                    defaultPosition.y,
-                    defaultPosition.z
-                );
-                this.game.camera.lookAt(0, 3, 0); // Look at temple center
-                
-                console.log('Cleared all players for reconnection. Players map size:', this.game.players.size);
-            }
-            
-            this.wasConnectedBefore = true;
-            this.initialSyncComplete = false; // Force a full sync
-            this.hasMovedSinceLogin = false; // Reset movement flag
-            
-            // Send initial player data
-            this.socket.emit('playerJoin', {
-                id: this.socket.id,
-                position: { x: 0, y: 3, z: 0 },
-                rotation: { y: 0 },
-                stats: this.game.playerStats
-            });
-        });
-        
-        // Handle disconnect - mark as offline but don't clean up yet
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            this.isConnected = false;
-        });
-        
-        this.socket.on('connect_error', (err) => {
-            console.log('Connection error:', err.message);
-        });
-        
-        // Process current players when we first connect
-        this.socket.on('currentPlayers', (players) => {
-            this.log('Received current players list with ' + players.length + ' players');
-            
-            // Check for and log any potential duplicates in the server data
-            const playerIds = players.map(p => p.id);
-            const duplicateIds = playerIds.filter((id, index) => playerIds.indexOf(id) !== index);
-            
-            if (duplicateIds.length > 0) {
-                console.warn('Duplicate player IDs detected in server data:', duplicateIds);
-            }
-            
-            // Use force cleanup to ensure a clean slate
-            this.forceCleanAllPlayers();
-            
-            // Now that we've cleaned up, update with fresh data
-            this.updatePlayerList(players);
-            
-            // Run an additional orphan cleanup after processing to catch any stray models
-            setTimeout(() => {
-                this.cleanupOrphanedPlayers();
-            }, 1000); // Run cleanup after a short delay
-        });
-        
-        // Handle new player joining
-        this.socket.on('newPlayer', (player) => {
-            this.log('New player joined: ' + player.id.substring(0, 8));
-            this.updatePlayerList([player]);
-        });
-        
-        // Handle player leaving
-        this.socket.on('playerLeft', (playerId) => {
-            console.log('Player left:', playerId.substring(0, 8));
-            this.removePlayer(playerId);
-        });
-        
-        // Handle player movement updates - silently process without logging
-        this.socket.on('playerMoved', (playerData) => {
-            try {
-                // Check if playerData is valid
-                if (!playerData || !playerData.id) {
-                    console.error('Received invalid playerData in playerMoved event:', playerData);
-                    return;
+                // Create local player if socket is connected and doesn't exist
+                if (this.socket && this.socket.connected && !this.game.localPlayer) {
+                    console.log('Creating local player during multiplayer setup');
+                    await this.createLocalPlayer();
                 }
-                
-                // First verify this player ID exists in the server player list
-                if (!this.verifiedPlayerIds.has(playerData.id)) {
-                    this.log(`First movement from unverified player ${playerData.id.substring(0, 8)} - requesting sync`);
-                    this.socket.emit('requestPlayersSync');
-                    this.verifiedPlayerIds.add(playerData.id);
-                }
-                
-                // For debug logging - periodically log player movements
-                const now = Date.now();
-                if (now - (this._lastMovementLog || 0) > 5000) {
-                    this.log(`Movement update from player ${playerData.id.substring(0, 8)} at position: ${JSON.stringify(playerData.position)}`);
-                    this._lastMovementLog = now;
-                }
-                
-                // Update as normal
-                this.updatePlayerPosition(playerData);
-            } catch (error) {
-                console.error('Error handling playerMoved event:', error);
-            }
-        });
-        
-        // Handle player life updates
-        this.socket.on('lifeUpdate', (data) => {
-            this.log(`Life update for player ${data.id.substring(0, 8)}: ${data.life}/${data.maxLife}`);
-            
-            const playerMesh = this.game.players.get(data.id);
-            if (!playerMesh) {
-                this.log(`Player ${data.id} not found for life update`);
-                return;
-            }
-            
-            // Store previous life value for death detection
-            const previousLife = playerMesh.userData?.stats?.life;
-            
-            // Update player stats
-            this.updatePlayerStats(data.id, { 
-                life: data.life, 
-                maxLife: data.maxLife 
-            });
-            
-            // If this is the local player, update the game's player stats and check for death
-            if (data.id === this.socket.id) {
-                const localPreviousLife = this.game.playerStats.currentLife;
-                this.game.playerStats.currentLife = data.life;
-                this.game.playerStats.maxLife = data.maxLife;
-                
-                // Update UI
-                if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars();
-                }
-                
-                // Check for death
-                if (data.life === 0 && localPreviousLife > 0) {
-                    this.log('Player died, handling death');
-                    if (this.game.playerManager && this.game.playerManager.handlePlayerDeath) {
-                        this.game.playerManager.handlePlayerDeath(playerMesh);
-                    }
-                }
-                
-                this.log(`Life Updated: ${localPreviousLife} → ${data.life}/${data.maxLife} (died: ${data.life === 0})`);
-            }
-        });
-        
-        // Handle karma updates
-        this.socket.on('karmaUpdate', (data) => {
-            this.log(`Karma update for player ${data.id.substring(0, 8)}: ${data.karma}/${data.maxKarma}`);
-            this.updatePlayerStats(data.id, { 
-                karma: data.karma, 
-                maxKarma: data.maxKarma,
-                effects: data.effects
-            });
-        });
-        
-        // Handle mana updates
-        this.socket.on('manaUpdate', (data) => {
-            this.log(`Mana update for player ${data.id.substring(0, 8)}: ${data.mana}/${data.maxMana}`);
-            this.updatePlayerStats(data.id, { 
-                mana: data.mana, 
-                maxMana: data.maxMana 
-            });
-        });
-        
-        // Handle skill effects
-        this.socket.on('skillEffect', (data) => {
-            if (data.type === 'damage') {
-                this.log(`Skill damage: ${data.targetId.substring(0, 8)} took ${data.damage} damage from ${data.skillName}`);
-                
-                // Find the target in the game
-                const target = this.game.players.get(data.targetId);
-                if (!target) return;
-                
-                // Create visual damage effect
-                this.createDamageEffect(target.position);
-                
-                // Display damage number
-                this.createDamageText(target, data.damage, data.isCritical);
-                
-                // Flash target red to indicate damage
-                this.flashCharacter(target, 0xff0000);
-            } else if (data.type === 'immune') {
-                const target = this.game.players.get(data.targetId);
-                if (!target) return;
-                
-                // Display immunity text
-                this.createImmunityText(target, data.reason);
-                
-                // Flash target with immunity color
-                const immunityColor = data.reason === 'illuminated' ? 0xffff00 : 0x800080;
-                this.flashCharacter(target, immunityColor);
-            }
-        });
-        
-        // Handle full player sync from server
-        this.socket.on('fullPlayersSync', (players) => {
-            try {
-                this.log(`Received FULL players sync with ${players.length} players from request by player ${players.requestedBy || 'unknown'}`);
-                
-                // Force cleanup everything first
-                this.forceCleanAllPlayers();
-                
-                // Process the sync data
-                this.updatePlayerList(players);
-                
-                // Mark initial sync as complete
-                if (!this.initialSyncComplete) {
-                    this.log('Initial sync completed');
-                    this.initialSyncComplete = true;
-                }
-                
-                // Log players after sync
-                this.log(`After sync: ${this.game.players.size} players in scene`);
-                
-                // Debug output of all player positions
-                this.game.players.forEach((player, id) => {
-                    this.log(`Player ${id.substring(0, 8)} position: ${JSON.stringify({
-                        x: player.position.x.toFixed(2),
-                        y: player.position.y.toFixed(2),
-                        z: player.position.z.toFixed(2)
-                    })}`);
-                });
-                
-                // If our local player exists, log its position
-                if (this.game.localPlayer) {
-                    this.log(`Local player position after sync: ${JSON.stringify({
-                        x: this.game.localPlayer.position.x.toFixed(2),
-                        y: this.game.localPlayer.position.y.toFixed(2),
-                        z: this.game.localPlayer.position.z.toFixed(2)
-                    })}`);
-                }
-            } catch (error) {
-                console.error('Error handling fullPlayersSync event:', error);
-            }
-        });
-        
-        // Handle sync request from another client
-        this.socket.on('syncPlayers', () => {
-            this.log('Received sync request from server, requesting full player list');
-            
-            // Request current players from server
-            this.socket.emit('requestPlayersSync');
-            
-            // Also clean up any orphaned players
-            this.cleanupOrphanedPlayers();
-        });
-        
-        return new Promise((resolve, reject) => {
-            // Set timeout for connection
-            const connectionTimeout = setTimeout(() => {
-                if (!this.isConnected) {
-                    reject(new Error('Connection timeout'));
-                }
-            }, 5000);
-            
-            // Handle connection success
-            this.socket.once('connect', () => {
-                clearTimeout(connectionTimeout);
-                resolve(true);
-            });
-            
-            // Handle connection error
-            this.socket.once('connect_error', (err) => {
-                clearTimeout(connectionTimeout);
-                reject(err);
-            });
-        });
+            }, 1000);
+        } catch (error) {
+            console.error('Error setting up multiplayer:', error);
+        }
     }
     
-    updatePlayerList(playerList) {
-        this.log('Processing player list: ' + playerList.length + ' players');
+    async updatePlayerList(playerList) {
+        // Check for duplicate players in the scene (log once)
+        const playerCount = {};
+        let duplicatesFound = false;
+        this.game.scene.children.forEach(obj => {
+            if (obj.userData && obj.userData.isPlayer) {
+                const playerId = obj.userData.id;
+                playerCount[playerId] = (playerCount[playerId] || 0) + 1;
+                if (playerCount[playerId] > 1) {
+                    duplicatesFound = true;
+                }
+            }
+        });
         
-        // Track created or updated players in this cycle
-        const processedPlayerIds = new Set();
+        if (duplicatesFound) {
+            console.warn(`Duplicate players detected in scene. This may cause issues.`);
+        }
         
-        // Process all players in the list
-        playerList.forEach(async (player) => {
-            // Skip undefined players
-            if (!player || !player.id) {
-                console.warn('Received invalid player data:', player);
-                return;
+        try {
+            // First, identify and remove any players not in the new list (except local player)
+            const newPlayerIds = new Set(playerList.map(p => p.id));
+            const currentPlayers = Array.from(this.game.players.keys());
+            const localPlayerId = this.socket?.id;
+            
+            for (const playerId of currentPlayers) {
+                // Don't remove the local player
+                if (playerId === localPlayerId) continue;
+                
+                // If a player is not in the new list, remove it
+                if (!newPlayerIds.has(playerId)) {
+                    this.removePlayer(playerId, false); // Don't broadcast removal
+                }
             }
             
-            // Keep track of processed IDs
-            processedPlayerIds.add(player.id);
-            
-            try {
+            // Process all players from the server
+            for (const player of playerList) {
                 if (player.id === this.socket?.id) {
-                    // This is the local player - make sure it exists
+                    // This is our local player
                     if (!this.game.localPlayer) {
-                        console.log('Creating local player:', player.id);
-                        
-                        // Create the local player through PlayerManager
+                        // Create the local player at temple center
                         const localPlayer = await this.game.playerManager.createPlayer(
                             player.id, 
-                            player.position || { x: 0, y: 3, z: 0 },
+                            { x: 0, y: 3, z: 0 }, // Always spawn at temple center
                             { y: player.rotation?.y || 0 }
                         );
                         
-                        // Set as local player in both Game and PlayerManager
+                        // Set as local player in Game
                         this.game.localPlayer = localPlayer;
-                        this.game.playerManager.localPlayer = localPlayer;
                         this.game.isAlive = true;
                         
                         // Add to scene and players map
-                        if (!this.game.scene.children.includes(localPlayer)) {
-                            this.game.scene.add(localPlayer);
-                        }
-                        
-                        // Ensure we have only one entry for local player
-                        if (this.game.players.has(player.id)) {
-                            const existingPlayer = this.game.players.get(player.id);
-                            if (existingPlayer !== localPlayer) {
-                                // Remove duplicates
-                                this.log(`Removing duplicate local player for ID ${player.id}`);
-                                this.game.scene.remove(existingPlayer);
-                                if (existingPlayer.userData?.statusGroup) {
-                                    this.game.scene.remove(existingPlayer.userData.statusGroup);
-                                }
-                            }
-                        }
-                        
-                        // Set in players map
+                        this.game.scene.add(localPlayer);
                         this.game.players.set(player.id, localPlayer);
                         
-                        // Update stats if they exist
-                        const stats = {
+                        // Update status with server-provided values
+                        this.updatePlayerStats(player.id, {
                             life: player.life || 100,
                             maxLife: player.maxLife || 100,
                             mana: player.mana || 100,
                             maxMana: player.maxMana || 100,
                             karma: player.karma || 50,
                             maxKarma: player.maxKarma || 100
-                        };
-                        
-                        this.game.updatePlayerStatus(localPlayer, stats);
-                        console.log('Local player created successfully at:', localPlayer.position);
-                    } else {
-                        // Update existing local player
-                        const existingPlayer = this.game.localPlayer;
-                        
-                        if (player.position) {
-                            // Always update position from server during sync requests
-                            // This ensures that the server's position is authoritative
-                            existingPlayer.position.set(
-                                player.position.x,
-                                player.position.y,
-                                player.position.z
-                            );
-                            
-                            // Log the position update for debugging
-                            this.log(`Updated local player position from sync: ${JSON.stringify(player.position)}`);
-                        }
-                        
-                        // Update stats if they've changed
-                        const stats = {
-                            life: player.life !== undefined ? player.life : this.game.playerStats.currentLife,
-                            maxLife: player.maxLife !== undefined ? player.maxLife : this.game.playerStats.maxLife,
-                            mana: player.mana !== undefined ? player.mana : this.game.playerStats.currentMana,
-                            maxMana: player.maxMana !== undefined ? player.maxMana : this.game.playerStats.maxMana,
-                            karma: player.karma !== undefined ? player.karma : this.game.playerStats.currentKarma,
-                            maxKarma: player.maxKarma !== undefined ? player.maxKarma : this.game.playerStats.maxKarma
-                        };
-                        
-                        this.game.updatePlayerStatus(existingPlayer, stats);
-                        
-                        // Make sure we're using the same reference in players map
-                        if (this.game.players.get(player.id) !== existingPlayer) {
-                            this.log(`Updating local player reference in players map for ${player.id}`);
-                            this.game.players.set(player.id, existingPlayer);
-                        }
+                        });
                     }
                 } else {
-                    // Handle other players
-                    const existingPlayer = this.game.players.get(player.id);
-                    
-                    if (!existingPlayer) {
-                        console.log('Creating remote player:', player.id);
-                        
-                        // Create a new player if they don't exist
-                        const otherPlayer = await this.game.playerManager.createPlayer(
+                    // This is another player
+                    if (!this.game.players.has(player.id)) {
+                        // Create remote player
+                        const playerMesh = await this.game.playerManager.createPlayer(
                             player.id,
-                            player.position || { x: 0, y: 3, z: 0 },
+                            player.position,
                             { y: player.rotation?.y || 0 }
                         );
                         
-                        // Add to scene if not already there
-                        if (!this.game.scene.children.includes(otherPlayer)) {
-                            this.game.scene.add(otherPlayer);
-                        }
+                        this.game.scene.add(playerMesh);
+                        this.game.players.set(player.id, playerMesh);
                         
-                        // Add to players map
-                        this.game.players.set(player.id, otherPlayer);
-                        
-                        // Update stats
+                        // Update stats for this player
                         const stats = {
                             life: player.life || 100,
                             maxLife: player.maxLife || 100,
@@ -492,74 +261,18 @@ export class NetworkManager {
                             maxKarma: player.maxKarma || 100
                         };
                         
-                        this.game.updatePlayerStatus(otherPlayer, stats);
-                    } else {
-                        // Update existing remote player
-                        
-                        // Update position
-                        if (player.position) {
-                            existingPlayer.position.set(
-                                player.position.x,
-                                player.position.y,
-                                player.position.z
-                            );
-                        }
-                        
-                        // Update rotation
-                        if (player.rotation) {
-                            existingPlayer.rotation.y = player.rotation.y;
-                        }
-                        
-                        // Update stats
-                        const stats = {
-                            life: player.life !== undefined ? player.life : (existingPlayer.userData?.stats?.life || 100),
-                            maxLife: player.maxLife !== undefined ? player.maxLife : (existingPlayer.userData?.stats?.maxLife || 100),
-                            mana: player.mana !== undefined ? player.mana : (existingPlayer.userData?.stats?.mana || 100),
-                            maxMana: player.maxMana !== undefined ? player.maxMana : (existingPlayer.userData?.stats?.maxMana || 100),
-                            karma: player.karma !== undefined ? player.karma : (existingPlayer.userData?.stats?.karma || 50),
-                            maxKarma: player.maxKarma !== undefined ? player.maxKarma : (existingPlayer.userData?.stats?.maxKarma || 100)
-                        };
-                        
-                        this.game.updatePlayerStatus(existingPlayer, stats);
+                        this.updatePlayerStats(player.id, stats);
                     }
                 }
-            } catch (error) {
-                console.error(`Error processing player ${player.id}:`, error);
             }
-        });
-        
-        // After processing all players in the current list, set initialSyncComplete
-        if (!this.initialSyncComplete) {
-            this.initialSyncComplete = true;
-            console.log('Initial player sync complete');
+        } catch (error) {
+            console.error('Error updating player list:', error);
         }
-        
-        // More aggressive cleanup of players that aren't in the current list
-        // (except local player)
-        const playersToRemove = [];
-        
-        this.game.players.forEach((player, id) => {
-            if (!processedPlayerIds.has(id) && id !== this.socket?.id && id !== 'local') {
-                this.log(`Player ${id} not in current player list, marking for removal`);
-                playersToRemove.push(id);
-            }
-        });
-        
-        // Remove players in a separate loop to avoid issues with modifying the map during iteration
-        if (playersToRemove.length > 0) {
-            this.log(`Removing ${playersToRemove.length} stale players`);
-            playersToRemove.forEach(id => {
-                this.removePlayer(id, false); // Don't broadcast removal
-            });
-        }
-        
-        // Log the current player count
-        this.log(`Current player count after update: ${this.game.players.size}`);
     }
     
     updatePlayerPosition(playerData) {
         if (!playerData || !playerData.id) {
-            console.warn('Received invalid player data for position update:', playerData);
+            console.warn('Received invalid player data for position update');
             return;
         }
         
@@ -570,71 +283,31 @@ export class NetworkManager {
             // Get player from map
             const player = this.game.players.get(playerData.id);
             
-            // If player doesn't exist, request a sync
-            if (!player) {
-                this.log(`Received position update for unknown player ${playerData.id.substring(0, 8)} - requesting sync`);
-                this.socket?.emit('requestPlayersSync');
-                return;
-            }
-            
-            // If this is the first movement for this player, verify the scene is clean
-            if (!player.userData.hasMoved) {
-                this.log(`First movement for player ${playerData.id.substring(0, 8)} - checking for duplicates`);
-                player.userData.hasMoved = true;
-                
-                // Check for duplicate player models with similar positions
-                let duplicatesFound = false;
-                this.game.scene.traverse(object => {
-                    // Skip self and the local player
-                    if (object === player || object === this.game.localPlayer) {
-                        return;
-                    }
-                    
-                    // Look for objects near this player that might be duplicates
-                    if (object.isMesh && object.position && object.userData) {
-                        const distance = object.position.distanceTo(player.position);
-                        if (distance < 2 && object !== player) {
-                            this.log(`Found potential duplicate of player ${playerData.id.substring(0, 8)} at distance ${distance.toFixed(2)}`);
-                            duplicatesFound = true;
-                        }
-                    }
-                });
-                
-                if (duplicatesFound) {
-                    this.log('Duplicates found - running cleanup');
-                    this.cleanupOrphanedPlayers();
-                }
-            }
+            // If player doesn't exist, silently return
+            if (!player) return;
             
             // Store previous position for interpolation
             const previousPosition = player.position.clone();
             
             // Create target position for smooth interpolation
             if (!player.userData) player.userData = {};
+            
             player.userData.targetPosition = new THREE.Vector3(
                 playerData.position.x,
                 playerData.position.y,
                 playerData.position.z
             );
             
-            // For large jumps, update position immediately
-            if (previousPosition.distanceTo(player.userData.targetPosition) > 5) {
+            // For large jumps (teleporting), update position immediately
+            const distanceToTarget = previousPosition.distanceTo(player.userData.targetPosition);
+            if (distanceToTarget > 10) {
+                console.log(`Player ${playerData.id} teleported - distance: ${distanceToTarget}`);
                 player.position.copy(player.userData.targetPosition);
             }
             
             // Update target rotation
             if (playerData.rotation !== undefined) {
                 player.userData.targetRotation = playerData.rotation.y;
-                
-                // For large rotation changes, update immediately
-                const currentRotation = player.rotation.y;
-                const targetRotation = playerData.rotation.y;
-                let rotationDiff = Math.abs(targetRotation - currentRotation);
-                if (rotationDiff > Math.PI) rotationDiff = Math.PI * 2 - rotationDiff;
-                
-                if (rotationDiff > Math.PI / 2) {
-                    player.rotation.y = targetRotation;
-                }
             }
             
             // Update player stats if provided
@@ -651,20 +324,8 @@ export class NetworkManager {
             
             // Update player status if there are stats changes
             if (Object.keys(statsToUpdate).length > 0) {
-                this.game.updatePlayerStatus(player, statsToUpdate);
+                this.updatePlayerStats(playerData.id, statsToUpdate);
             }
-            
-            // Update status bars position to match player
-            if (player.userData.statusGroup) {
-                const worldPosition = new THREE.Vector3();
-                player.getWorldPosition(worldPosition);
-                player.userData.statusGroup.position.set(
-                    worldPosition.x,
-                    worldPosition.y + 2.0,
-                    worldPosition.z
-                );
-            }
-            
         } catch (error) {
             console.error('Error updating player position:', error);
         }
@@ -736,22 +397,14 @@ export class NetworkManager {
         }
     }
     
+    // Send player position to server
     sendPlayerPosition() {
+        // Skip if socket is not connected or player doesn't exist
         if (!this.socket?.connected || !this.game.localPlayer) {
             return;
         }
         
-        // First movement - trigger a ghost cleanup
-        if (!this.hasMovedSinceLogin) {
-            this.log('First player movement detected - triggering cleanup');
-            this.cleanupOrphanedPlayers();
-            this.hasMovedSinceLogin = true;
-            
-            // Request a synchronization of all players
-            this.socket.emit('requestPlayersSync');
-        }
-        
-        // Send complete player state to server (position, rotation, stats)
+        // Send player position and rotation to server
         this.socket.emit('playerMovement', {
             position: {
                 x: this.game.localPlayer.position.x,
@@ -761,13 +414,12 @@ export class NetworkManager {
             rotation: {
                 y: this.game.localPlayer.rotation.y
             },
-            path: this.game.playerStats ? this.game.playerStats.path : null,
-            karma: this.game.playerStats ? this.game.playerStats.currentKarma : 50,
-            maxKarma: this.game.playerStats ? this.game.playerStats.maxKarma : 100,
-            life: this.game.playerStats ? this.game.playerStats.currentLife : 100,
-            maxLife: this.game.playerStats ? this.game.playerStats.maxLife : 100,
-            mana: this.game.playerStats ? this.game.playerStats.currentMana : 100,
-            maxMana: this.game.playerStats ? this.game.playerStats.maxMana : 100
+            // Include other player stats
+            path: this.game.playerStats.path,
+            karma: this.game.playerStats.currentKarma,
+            maxKarma: this.game.playerStats.maxKarma,
+            mana: this.game.playerStats.currentMana,
+            maxMana: this.game.playerStats.maxMana
         });
     }
     
@@ -842,42 +494,56 @@ export class NetworkManager {
     }
     
     removePlayer(playerId, broadcast = true) {
-        console.log(`Removing player: ${playerId.substring(0, 8)}`);
-        
         // Get the player before removing from map
         const player = this.game.players.get(playerId);
         if (!player) {
-            console.warn(`Cannot remove player ${playerId}: player not found in map`);
             return;
         }
         
         try {
+            // Skip if this is local player
+            if (player === this.game.localPlayer) {
+                return;
+            }
+            
+            // Check if player is already being removed
+            if (player.userData && player.userData.isBeingRemoved) {
+                return;
+            }
+            
+            // Mark as being removed
+            if (player.userData) player.userData.isBeingRemoved = true;
+            
             // Remove status group from scene
             if (player.userData && player.userData.statusGroup) {
                 this.game.scene.remove(player.userData.statusGroup);
+                player.userData.statusGroup = null;
             }
             
             // Remove player mesh from scene
             this.game.scene.remove(player);
             
-            // Clean up any associated resources
-            if (player.geometry) player.geometry.dispose();
-            if (player.material) {
-                if (Array.isArray(player.material)) {
-                    player.material.forEach(mat => mat.dispose());
-                } else {
-                    player.material.dispose();
+            // Traverse all children and dispose resources
+            player.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(mat => {
+                            if (mat.map) mat.map.dispose();
+                            mat.dispose();
+                        });
+                    } else if (child.material.map) {
+                        child.material.map.dispose();
+                        child.material.dispose();
+                    }
                 }
-            }
+            });
             
-            // Remove from game's player map
+            // Remove from player map
             this.game.players.delete(playerId);
             
-            console.log(`Player ${playerId} removed`);
-            
-            // Only notify server about player removal if broadcast is true
-            // This is false during reconnection cleanup to avoid duplicate removal events
-            if (broadcast && this.socket && this.isConnected) {
+            // Broadcast to server if needed
+            if (broadcast && this.socket && this.socket.connected) {
                 this.socket.emit('playerLeft', playerId);
             }
         } catch (error) {
@@ -887,190 +553,143 @@ export class NetworkManager {
     
     // New method to scan scene for orphaned player models
     cleanupOrphanedPlayers() {
-        this.log('Scanning scene for orphaned player models...');
-        let removedCount = 0;
+        // Find and remove any orphaned player models in the scene
+        let removed = 0;
         
-        // Find all mesh objects that look like players
+        // Look for objects with isPlayer flag that are not in our players map
         this.game.scene.traverse(object => {
-            // Skip the local player
-            if (object === this.game.localPlayer) {
-                return;
-            }
-            
-            // Look for objects that have model or player-like properties
-            if (object.isMesh && object.userData && 
-                (object.userData.isPlayer || 
-                 object.userData.stats || 
-                 object.userData.statusGroup ||
-                 (object.name && object.name.includes('player')))) {
+            if (object.userData && object.userData.isPlayer) {
+                // Check if this object corresponds to a player in our map
+                let isOrphaned = true;
                 
-                // Check if this object is in our players map
-                let isTracked = false;
-                this.game.players.forEach((player) => {
-                    if (player === object) {
-                        isTracked = true;
+                // Check if this object is in the players map
+                for (const playerObj of this.game.players.values()) {
+                    if (object === playerObj) {
+                        isOrphaned = false;
+                        break;
                     }
-                });
+                }
                 
-                // If not tracked, remove it
-                if (!isTracked) {
-                    this.log(`Found orphaned player model: ${object.name || 'unnamed'}`);
+                // If it's orphaned, remove it
+                if (isOrphaned) {
+                    console.log('Removing orphaned player model:', object.uuid);
+                    this.game.scene.remove(object);
                     
-                    // Remove status group if it exists
-                    if (object.userData && object.userData.statusGroup) {
+                    // Clean up associated status group if it exists
+                    if (object.userData.statusGroup) {
                         this.game.scene.remove(object.userData.statusGroup);
                     }
                     
-                    // Remove the object
-                    this.game.scene.remove(object);
-                    
-                    // Clean up resources
-                    if (object.geometry) object.geometry.dispose();
-                    if (object.material) {
-                        if (Array.isArray(object.material)) {
-                            object.material.forEach(mat => mat.dispose());
-                        } else {
-                            object.material.dispose();
-                        }
-                    }
-                    
-                    removedCount++;
+                    removed++;
                 }
             }
         });
         
-        if (removedCount > 0) {
-            this.log(`Removed ${removedCount} orphaned player models from scene`);
-        } else {
-            this.log('No orphaned player models found in scene');
+        if (removed > 0) {
+            console.log(`Removed ${removed} orphaned player models from scene`);
         }
         
-        return removedCount;
+        return removed;
     }
     
     // New method to force remove all players except local player
     forceCleanAllPlayers() {
-        this.log('FORCE CLEANING ALL PLAYERS EXCEPT LOCAL PLAYER');
+        console.log('Force cleaning ALL players from scene');
         
         // Get count of players before cleanup
         const beforeCount = this.game.players.size;
         
-        // Store local player reference and ID
-        const localPlayer = this.game.localPlayer;
-        const localPlayerId = this.socket?.id;
-        
-        // Get all player IDs except local player
-        const playerIds = [];
-        this.game.players.forEach((player, id) => {
-            if (id !== localPlayerId && player !== localPlayer) {
-                playerIds.push(id);
+        // First, remove all players from the map
+        const playerIds = Array.from(this.game.players.keys());
+        for (const playerId of playerIds) {
+            // Skip the local player if we want to preserve it
+            if (playerId === this.socket?.id && this.game.localPlayer) {
+                continue;
             }
-        });
+            
+            // Get the player
+            const player = this.game.players.get(playerId);
+            if (!player) continue;
+            
+            // Remove from scene
+            if (this.game.scene && this.game.scene.children.includes(player)) {
+                this.game.scene.remove(player);
+            }
+            
+            // Remove from players map
+            this.game.players.delete(playerId);
+            
+            console.log(`Removed player ${playerId}`);
+        }
         
-        // Remove all those players
-        playerIds.forEach(id => {
-            this.removePlayer(id, false);
-        });
+        // Double check for any orphaned character models in the scene
+        this.cleanupOrphanedPlayers();
         
-        // Clean up any orphaned models
-        const orphansRemoved = this.cleanupOrphanedPlayers();
-        
-        this.log(`Force cleanup complete. Removed ${beforeCount - this.game.players.size} tracked players and ${orphansRemoved} orphaned models.`);
+        console.log(`Force cleanup complete. Removed ${beforeCount - this.game.players.size} players.`);
     }
     
     cleanup() {
+        console.log('NetworkManager: Cleaning up connection and players');
+        
+        // Disconnect socket
         if (this.socket) {
+            console.log('Disconnecting from server');
+            
+            // Remove all event listeners first
+            this.socket.off();
+            
+            // Then disconnect
             this.socket.disconnect();
             this.socket = null;
         }
         
-        this.isConnected = false;
+        // Remove all players except the local player
+        const localPlayerId = this.game.localPlayer ? this.game.localPlayer.userData?.id : null;
+        
+        // Get a list of all player IDs to avoid modifying while iterating
+        const playerIds = Array.from(this.game.players.keys());
+        
+        // Remove each player that isn't the local player
+        for (const playerId of playerIds) {
+            if (playerId !== localPlayerId) {
+                console.log(`Removing player during cleanup: ${playerId}`);
+                this.removePlayer(playerId, false);
+            }
+        }
+        
+        console.log('NetworkManager cleanup complete');
     }
     
-    // Add a new update method to interpolate player positions
-    update() {
-        const now = Date.now();
-        const deltaTime = (now - this.lastUpdateTime) / 1000;
-        this.lastUpdateTime = now;
-        
-        // Don't process if we're not connected or in offline mode
-        if (!this.isConnected || this.isOffline) {
-            return;
-        }
-        
-        // Periodic orphaned player check (every 30 seconds)
-        if (!this.lastOrphanCheck || now - this.lastOrphanCheck > 30000) {
-            this.cleanupOrphanedPlayers();
-            this.lastOrphanCheck = now;
-        }
-        
-        // Safety check - players need to be an instance of Map
-        if (!this.game.players || !(this.game.players instanceof Map)) {
-            return;
-        }
-        
-        // Verify local player state
-        if (this.socket && this.game.localPlayer) {
-            // Check for excessive player count - trigger cleanup if needed
-            if (this.game.players.size > 2) {
-                this.log(`Player count (${this.game.players.size}) seems high, running cleanup check`);
-                // Run a cleanup every 10 seconds if player count seems too high
-                if (!this.lastExcessiveCleanup || now - this.lastExcessiveCleanup > 10000) {
-                    this.cleanupOrphanedPlayers();
-                    this.lastExcessiveCleanup = now;
-                }
-            }
-            
-            // Only send position updates if we have a valid local player
-            try {
-                if (now - this.lastPositionUpdate > 50) { // 20 times per second max
-                    this.sendPlayerPosition();
-                    this.lastPositionUpdate = now;
-                }
-                
-                if (now - this.lastStateUpdate > 500) { // 2 times per second max
-                    this.sendPlayerState();
-                    this.lastStateUpdate = now;
-                }
-            } catch (error) {
-                console.error('Error sending player updates:', error);
-            }
-        }
+    // Called during the game animation loop to interpolate player movements
+    update(deltaTime) {
+        // Skip if game is paused or there are no players
+        if (!this.game.players || this.game.players.size === 0) return;
         
         try {
-            // Interpolate positions and rotations for all remote players
-            this.game.players.forEach((player, playerId) => {
-                // Skip null players or the local player
-                if (!player || playerId === this.socket?.id || playerId === 'local' || playerId === 'local-temp') {
-                    return;
-                }
+            // Update all players with interpolation
+            this.game.players.forEach(player => {
+                // Skip the local player (controlled directly)
+                if (player === this.game.localPlayer) return;
                 
-                // Make sure player has position and rotation
-                if (!player.position || !player.rotation) {
-                    return;
-                }
-                
-                // Check if the player has target position/rotation
+                // Handle position interpolation for remote players
                 if (player.userData && player.userData.targetPosition) {
-                    // Calculate distance to target
-                    const targetPos = player.userData.targetPosition;
                     const currentPos = player.position;
+                    const targetPos = player.userData.targetPosition;
                     
-                    // Lerp position (with safety checks)
-                    if (currentPos && targetPos && typeof currentPos.lerp === 'function') {
-                        currentPos.lerp(targetPos, this.lerpFactor);
-                        
-                        // If we're close enough, remove the target
-                        if (typeof currentPos.distanceTo === 'function' && 
-                            currentPos.distanceTo(targetPos) < 0.01) {
-                            delete player.userData.targetPosition;
-                        }
+                    // Use a smaller interpolation factor for smoother movement (0.05 - 0.1)
+                    const lerpFactor = 0.08;
+                    
+                    // Calculate interpolated position
+                    currentPos.lerp(targetPos, lerpFactor);
+                    
+                    // If we're close enough to target, remove the target
+                    if (currentPos.distanceTo(targetPos) < 0.1) {
+                        delete player.userData.targetPosition;
                     }
                 }
                 
-                // Interpolate rotation (with safety checks)
-                if (player.userData && player.userData.targetRotation !== undefined && 
-                    player.rotation && typeof player.rotation.y !== 'undefined') {
+                // Handle rotation interpolation
+                if (player.userData && player.userData.targetRotation !== undefined) {
                     const targetRot = player.userData.targetRotation;
                     const currentRot = player.rotation.y;
                     
@@ -1079,35 +698,37 @@ export class NetworkManager {
                     if (diff > Math.PI) diff -= Math.PI * 2;
                     if (diff < -Math.PI) diff += Math.PI * 2;
                     
+                    // Use a smaller interpolation factor for smoother rotation
+                    const rotationLerpFactor = 0.08;
+                    
                     // Lerp rotation
-                    player.rotation.y += diff * this.lerpFactor;
+                    player.rotation.y += diff * rotationLerpFactor;
                     
                     // If we're close enough, remove the target
-                    if (Math.abs(diff) < 0.01) {
+                    if (Math.abs(diff) < 0.05) {
                         delete player.userData.targetRotation;
                     }
                 }
                 
-                // Update status bar positions for the player (with safety checks)
+                // Update status bar positions to match player position
                 if (player.userData && player.userData.statusGroup) {
                     const worldPosition = new THREE.Vector3();
+                    player.getWorldPosition(worldPosition);
                     
-                    // Only call getWorldPosition if it exists
-                    if (typeof player.getWorldPosition === 'function') {
-                        player.getWorldPosition(worldPosition);
-                        
-                        if (player.userData.statusGroup.position) {
-                            player.userData.statusGroup.position.set(
-                                worldPosition.x, 
-                                worldPosition.y + 3.0, 
-                                worldPosition.z
-                            );
-                        }
+                    player.userData.statusGroup.position.set(
+                        worldPosition.x,
+                        worldPosition.y + 2.0,
+                        worldPosition.z
+                    );
+                    
+                    // Make status group face the camera
+                    if (this.game.camera) {
+                        player.userData.statusGroup.quaternion.copy(this.game.camera.quaternion);
                     }
                 }
             });
-        } catch (err) {
-            console.error('Error in NetworkManager.update:', err);
+        } catch (error) {
+            console.error('Error in NetworkManager.update:', error);
         }
     }
     
@@ -1123,17 +744,50 @@ export class NetworkManager {
 
     setupSocketHandlers() {
         if (!this.socket) {
-            console.error('Cannot setup handlers: Socket not initialized');
+            console.error('Socket not initialized');
             return;
         }
         
-        // Handle connection events
+        console.log('Setting up socket handlers');
+        
+        // Force cleanup players on reconnection to prevent ghosts
         this.socket.on('connect', () => {
-            this.log(`Connected to server with ID: ${this.socket.id}`);
-            this.isConnected = true;
+            console.log('Connected to server');
+            
+            // Clean up any existing players except local player on reconnect
+            this.cleanupAllNonLocalPlayers();
+            
+            // Then create or update the local player
+            if (!this.game.localPlayer || !this.game.players.has(this.socket.id)) {
+                console.log('Creating local player after connection');
+                this.game.playerManager.createLocalPlayer();
+            } else if (this.game.localPlayer) {
+                // Update the ID if needed
+                const oldId = this.game.localPlayer.userData.id;
+                if (oldId !== this.socket.id) {
+                    console.log(`Updating local player ID from ${oldId} to ${this.socket.id}`);
+                    this.game.localPlayer.userData.id = this.socket.id;
+                    
+                    // Update players map
+                    this.game.players.delete(oldId);
+                    this.game.players.set(this.socket.id, this.game.localPlayer);
+                }
+            }
         });
         
-        // ... rest of the existing socket handlers ...
+        // Handle disconnection
+        this.socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+        });
+        
+        // Handle current players list from server
+        this.socket.on('currentPlayers', (players) => {
+            console.log('Received current players list from server:', players.length, 'players');
+            // This is the initial player list from server - replace all existing players
+            this.updatePlayerList(players);
+        });
+        
+        this.setupRemainingHandlers();
     }
 
     // Add method to create damage text display
@@ -1412,5 +1066,208 @@ export class NetworkManager {
         } catch (error) {
             console.error('Error creating damage effect:', error);
         }
+    }
+
+    setupRemainingHandlers() {
+        if (!this.socket) return;
+        
+        // Handle new player joining
+        this.socket.on('newPlayer', (player) => {
+            console.log('New player joined:', player.id);
+            
+            // Skip if it's us (we already have our player)
+            if (player.id === this.socket.id) {
+                console.log('Skipping self player creation');
+                return;
+            }
+            
+            // Create and add new player
+            this.game.playerManager.createPlayer(
+                player.id, 
+                player.position || { x: 0, y: 0, z: 0 },
+                { y: player.rotation?.y || 0 }
+            ).then(playerModel => {
+                // Add to scene and players map
+                this.game.scene.add(playerModel);
+                this.game.players.set(player.id, playerModel);
+                
+                // Initialize stats
+                const stats = {
+                    life: player.life || 100,
+                    maxLife: player.maxLife || 100,
+                    mana: player.mana || 100,
+                    maxMana: player.maxMana || 100,
+                    karma: player.karma || 50,
+                    maxKarma: player.maxKarma || 100
+                };
+                
+                this.updatePlayerStats(player.id, stats);
+            });
+        });
+        
+        // Handle player disconnection
+        this.socket.on('playerLeft', (playerId) => {
+            console.log('Player left:', playerId);
+            this.removePlayer(playerId);
+        });
+        
+        // Handle player movement updates
+        this.socket.on('playerMoved', (playerData) => {
+            this.updatePlayerPosition(playerData);
+        });
+        
+        // Handle life updates
+        this.socket.on('lifeUpdate', (data) => {
+            this.updatePlayerStats(data.id, {
+                life: data.life,
+                maxLife: data.maxLife
+            });
+        });
+        
+        // Handle karma updates
+        this.socket.on('karmaUpdate', (data) => {
+            this.updatePlayerStats(data.id, {
+                karma: data.karma,
+                maxKarma: data.maxKarma,
+                effects: data.effects
+            });
+        });
+        
+        // Handle mana updates
+        this.socket.on('manaUpdate', (data) => {
+            this.updatePlayerStats(data.id, {
+                mana: data.mana,
+                maxMana: data.maxMana
+            });
+        });
+        
+        // Handle skill effect visualizations
+        this.socket.on('skillEffect', (data) => {
+            if (data.type === 'damage') {
+                const targetMesh = this.game.players.get(data.targetId);
+                if (targetMesh) {
+                    this.createDamageText(targetMesh, data.damage, data.isCritical);
+                    this.createDamageEffect(targetMesh.position.clone());
+                    
+                    // Add flash effect to the target
+                    this.flashCharacter(targetMesh, 0xff0000);
+                }
+            } else if (data.type === 'immune') {
+                const targetMesh = this.game.players.get(data.targetId);
+                if (targetMesh) {
+                    this.createImmunityText(targetMesh, data.reason);
+                }
+            }
+        });
+        
+        // Handle full player sync response - but don't setup a loop
+        this.socket.on('fullPlayersSync', (players) => {
+            console.log('Received full players sync:', players.length, 'players');
+            this.updatePlayerList(players);
+        });
+    }
+
+    // Add a new remote network player
+    async addNetworkPlayer(playerId, playerData) {
+        console.log(`Adding network player: ${playerId}`);
+        
+        // Skip if this is the local player
+        if (playerId === this.socket.id) {
+            console.log(`Skipping local player creation in addNetworkPlayer`);
+            return;
+        }
+        
+        // Skip if player already exists
+        if (this.game.players.has(playerId)) {
+            console.log(`Player ${playerId} already exists, not creating again`);
+            return this.game.players.get(playerId);
+        }
+        
+        try {
+            // Create player at the position specified in the data
+            const position = playerData.position || { x: 0, y: 3, z: 0 };
+            const rotation = playerData.rotation || { y: 0 };
+            
+            // Create the player using the PlayerManager
+            const player = await this.game.playerManager.createPlayer(playerId, position, rotation);
+            
+            // Update player stats with the data from server
+            if (player) {
+                this.updatePlayerStats(playerId, {
+                    life: playerData.life || 100,
+                    maxLife: playerData.maxLife || 100,
+                    mana: playerData.mana || 100,
+                    maxMana: playerData.maxMana || 100,
+                    karma: playerData.karma || 50,
+                    maxKarma: playerData.maxKarma || 100
+                });
+                
+                // Add path if available
+                if (playerData.path) {
+                    player.userData.path = playerData.path;
+                }
+                
+                console.log(`Network player ${playerId} added successfully`);
+                return player;
+            }
+        } catch (error) {
+            console.error(`Error adding network player ${playerId}:`, error);
+        }
+        
+        return null;
+    }
+
+    cleanupAllNonLocalPlayers() {
+        console.log("Force cleaning all non-local players");
+        
+        // Get the local player ID
+        const localPlayerId = this.socket?.id;
+        const playersToRemove = [];
+        
+        // Find all players that aren't the local player
+        this.game.players.forEach((player, id) => {
+            if (id !== localPlayerId) {
+                playersToRemove.push(id);
+            }
+        });
+        
+        // Remove all non-local players
+        let removedCount = 0;
+        for (const id of playersToRemove) {
+            if (this.removePlayer(id, false)) {
+                removedCount++;
+            }
+        }
+        
+        // Check for orphaned players in scene
+        let orphanCount = 0;
+        this.game.scene.children.forEach(obj => {
+            if (obj.userData && obj.userData.isPlayer) {
+                if (!this.game.players.has(obj.userData.id)) {
+                    console.warn(`Found orphaned player in scene: ${obj.userData.id}`);
+                    this.game.scene.remove(obj);
+                    orphanCount++;
+                }
+            }
+        });
+        
+        console.log(`Cleanup complete. Removed ${removedCount} players. Found ${orphanCount} orphans.`);
+    }
+
+    async createLocalPlayer() {
+        // Only proceed if socket is connected
+        if (!this.socket || !this.socket.connected) {
+            console.log('Cannot create local player: Socket not connected');
+            return null;
+        }
+        
+        if (!this.socket.id) {
+            console.log('Cannot create local player: No socket ID available');
+            return null;
+        }
+        
+        // Create local player
+        console.log(`Creating local player with ID: ${this.socket.id}`);
+        return await this.game.playerManager.createLocalPlayer();
     }
 } 

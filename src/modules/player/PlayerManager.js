@@ -32,14 +32,11 @@ export class PlayerManager {
     
     async loadCharacterModel() {
         try {
-            console.log('Starting to load character model...');
-            
+            // Load the character model
             return new Promise((resolve, reject) => {
                 this.loader.load(
                     this.characterModelPath,
                     (gltf) => {
-                        console.log('Model loaded successfully:', gltf);
-                        
                         // Create a group to hold the model
                         const modelGroup = new THREE.Group();
                         modelGroup.add(gltf.scene);
@@ -49,102 +46,114 @@ export class PlayerManager {
                         gltf.scene.position.y = 0;
                         gltf.scene.rotation.y = 0;
                         
-                        console.log('Model setup complete');
+                        // Fix materials if needed
+                        gltf.scene.traverse((child) => {
+                            if (child.isMesh) {
+                                // Convert any incompatible materials
+                                if (child.material && child.material.type === 'MeshPhongMaterial' && child.material.roughness !== undefined) {
+                                    const color = child.material.color ? child.material.color.clone() : new THREE.Color(0xffffff);
+                                    const newMaterial = new THREE.MeshStandardMaterial({
+                                        color: color,
+                                        metalness: 0.1,
+                                        roughness: 0.8
+                                    });
+                                    child.material = newMaterial;
+                                }
+                                
+                                // Add shadows
+                                child.castShadow = true;
+                                child.receiveShadow = true;
+                            }
+                        });
+                        
                         resolve(modelGroup);
                     },
-                    (progress) => console.log('Loading progress:', (progress.loaded / progress.total * 100) + '%'),
+                    // Use a simple progress callback to prevent excessive logging
+                    (progress) => {
+                        // Only log every 25%
+                        if (progress.loaded / progress.total > 0.25 && progress.loaded / progress.total < 0.3) {
+                            console.log('Character model 25% loaded');
+                        } else if (progress.loaded / progress.total > 0.5 && progress.loaded / progress.total < 0.55) {
+                            console.log('Character model 50% loaded');
+                        } else if (progress.loaded / progress.total > 0.75 && progress.loaded / progress.total < 0.8) {
+                            console.log('Character model 75% loaded');
+                        } else if (progress.loaded / progress.total === 1) {
+                            console.log('Character model 100% loaded');
+                        }
+                    },
                     (error) => {
-                        console.error('Error loading model:', error);
+                        console.error('Error loading model, falling back to basic character');
                         reject(error);
                     }
                 );
             });
         } catch (error) {
-            console.error('Error in loadCharacterModel:', error);
+            console.error('Error in loadCharacterModel, using fallback');
             // Fallback to basic character if loading fails
             return this.createFallbackCharacterModel();
         }
     }
     
     createFallbackCharacterModel() {
-        console.log('Creating fallback character model');
-        const playerGroup = new THREE.Group();
+        // Create a simple cylinder as fallback character model
+        const group = new THREE.Group();
         
-        // Create shared geometries if they don't exist
-        if (!this.game.sharedGeometries) {
-            this.game.sharedGeometries = {
-                playerBase: new THREE.BoxGeometry(0.8, 1.2, 0.5),
-                playerHead: new THREE.SphereGeometry(0.3, 16, 16)
-            };
-        }
+        // Body
+        const geometry = new THREE.CylinderGeometry(0.5, 0.5, 3, 16);
+        const material = new THREE.MeshStandardMaterial({ 
+            color: 0x00aa00,
+            metalness: 0.1,
+            roughness: 0.8
+        });
+        const cylinder = new THREE.Mesh(geometry, material);
+        cylinder.position.y = 1.5;
+        cylinder.castShadow = true;
+        cylinder.receiveShadow = true;
+        group.add(cylinder);
         
-        // Create shared materials if they don't exist
-        if (!this.game.sharedMaterials) {
-            this.game.sharedMaterials = {
-                playerBody: new THREE.MeshPhongMaterial({
-                    color: this.defaultPlayerColor,
-                    shininess: 10
-                })
-            };
-        }
-        
-        // Use shared geometries and materials
-        const body = new THREE.Mesh(
-            this.game.sharedGeometries.playerBase, 
-            this.game.sharedMaterials.playerBody.clone()
-        );
-        body.castShadow = true;
-        body.receiveShadow = true;
-        playerGroup.add(body);
-
-        const head = new THREE.Mesh(
-            this.game.sharedGeometries.playerHead, 
-            this.game.sharedMaterials.playerBody.clone()
-        );
-        head.position.y = 0.75;
+        // Head
+        const headGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        const headMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffcc99,
+            metalness: 0.1,
+            roughness: 0.8
+        });
+        const head = new THREE.Mesh(headGeometry, headMaterial);
+        head.position.y = 3.5;
         head.castShadow = true;
         head.receiveShadow = true;
-        playerGroup.add(head);
-
-        return playerGroup;
+        group.add(head);
+        
+        return group;
     }
     
     async createLocalPlayer() {
-        // Create player model
-        let playerModel;
-        
-        if (this.characterModel) {
-            // Clone the preloaded model
-            playerModel = this.characterModel.clone();
-        } else {
-            // Create fallback model if no model is loaded
-            playerModel = this.createFallbackCharacterModel();
+        // Check if there's a socket connection
+        if (!this.game.networkManager?.socket?.id) {
+            const localPlayer = await this.createOfflinePlayer();
+            this.game.localPlayer = localPlayer;
+            this.game.isAlive = true;
+            return localPlayer;
         }
         
-        // Set initial position
-        playerModel.position.set(0, 0, 0);
+        // Get socket ID
+        const socketId = this.game.networkManager.socket.id;
         
-        // Add to scene
-        this.game.scene.add(playerModel);
+        // Create player at temple center
+        const position = { x: 0, y: 3, z: 0 };
+        const rotation = { y: 0 };
         
-        // Store reference to local player
-        this.game.localPlayer = playerModel;
+        // Create player using socket ID
+        return this.createPlayer(socketId, position, rotation);
+    }
+    
+    async createOfflinePlayer() {
+        // For offline mode, create a player with a random ID
+        const randomId = 'offline-' + Math.floor(Math.random() * 1000000);
+        const position = { x: 0, y: 3, z: 0 };
+        const rotation = { y: 0 };
         
-        // Add to players map with socket ID as key (if connected)
-        if (this.game.socket && this.game.socket.id) {
-            this.game.players.set(this.game.socket.id, playerModel);
-        }
-        
-        // Add shadow casting
-        playerModel.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-            }
-        });
-        
-        console.log('Local player created');
-        return playerModel;
+        return this.createPlayer(randomId, position, rotation);
     }
     
     async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }) {
@@ -153,143 +162,124 @@ export class PlayerManager {
         console.log('Rotation:', rotation);
         console.log('Is local player:', id === this.game.socket?.id);
         
-        // Load detailed model for all players - this now returns a Group with scene inside
-        let playerModel = await this.loadCharacterModel();
-        console.log('Player model loaded:', playerModel);
-
-        // Use provided position for existing players, temple center for new local player
-        if (id === this.game.socket?.id) {
-            // Don't override position for local player, use the provided position
-            playerModel.position.set(
-                position.x,
-                position.y,
-                position.z
-            );
-        } else {
-            playerModel.position.set(
-                position.x,
-                position.y,
-                position.z
-            );
+        // Check if player already exists - don't create duplicates
+        if (this.game.players.has(id)) {
+            console.warn(`Player ${id} already exists, not creating another instance`);
+            return this.game.players.get(id);
         }
         
-        playerModel.rotation.y = rotation.y || 0;
-
-        // Add shadow casting to all meshes in the model
-        playerModel.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
+        // Load detailed model for all players
+        let playerModel;
+        try {
+            playerModel = await this.loadCharacterModel();
+            
+            // Use provided position for existing players, temple center for new local player
+            if (id === this.game.socket?.id) {
+                console.log('Setting local player position to temple center (0, 3, 0)');
+                playerModel.position.set(0, 3, 0); // Start at temple height
+            } else {
+                console.log(`Setting remote player position to (${position.x}, ${position.y}, ${position.z})`);
+                playerModel.position.set(
+                    position.x,
+                    position.y,
+                    position.z
+                );
             }
-        });
+            
+            playerModel.rotation.y = rotation.y || 0;
+            
+            // Create status bars group that will not inherit rotation
+            const statusGroup = new THREE.Group();
+            statusGroup.position.y = 2.0; // Position above player's head
+            
+            const barWidth = 1;
+            const barHeight = 0.1;
+            const barSpacing = 0.05;
+            const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
 
-        // Create status bars group that will not inherit rotation
-        const statusGroup = new THREE.Group();
-        statusGroup.position.y = 2.0; // Position above player's head
-        
-        const barWidth = 1;
-        const barHeight = 0.1;
-        const barSpacing = 0.05;
-        const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-
-        // Create background bars
-        const backgroundMaterial = new THREE.MeshBasicMaterial({
-            color: 0x333333,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.7
-        });
-
-        // Create three status bars (life, mana, karma)
-        const bars = ['life', 'mana', 'karma'].map((type, index) => {
-            const background = new THREE.Mesh(barGeometry, backgroundMaterial.clone());
-            const fillMaterial = new THREE.MeshBasicMaterial({
+            // Create background bars
+            const backgroundMaterial = new THREE.MeshBasicMaterial({
+                color: 0x333333,
                 side: THREE.DoubleSide,
                 transparent: true,
-                opacity: 0.9
+                opacity: 0.7
             });
-            const fill = new THREE.Mesh(barGeometry, fillMaterial);
+
+            // Create three status bars (life, mana, karma)
+            const bars = ['life', 'mana', 'karma'].map((type, index) => {
+                const background = new THREE.Mesh(barGeometry, backgroundMaterial.clone());
+                const fillMaterial = new THREE.MeshBasicMaterial({
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                const fill = new THREE.Mesh(barGeometry, fillMaterial);
+                
+                // Set colors based on type
+                if (type === 'life') {
+                    fillMaterial.color = new THREE.Color(0xff0000); // Red for life
+                } else if (type === 'mana') {
+                    fillMaterial.color = new THREE.Color(0x0000ff); // Blue for mana
+                } else if (type === 'karma') {
+                    background.material.color = new THREE.Color(0xffffff); // White bg for karma
+                    fillMaterial.color = new THREE.Color(0xffcc00); // Gold for karma
+                }
+                
+                // Position bars vertically stacked with smaller spacing
+                const yOffset = (barHeight + barSpacing) * (2 - index);
+                background.position.y = yOffset;
+                fill.position.y = yOffset;
+                fill.position.z = 0.001; // Slightly in front
+                
+                // Set initial scale
+                fill.scale.x = 1.0;
+                
+                // Center bars horizontally
+                background.position.x = 0;
+                fill.position.x = 0;
+
+                statusGroup.add(background);
+                statusGroup.add(fill);
+
+                return {
+                    background,
+                    fill,
+                    width: barWidth,
+                    type
+                };
+            });
             
-            // Set colors based on type
-            if (type === 'life') {
-                fillMaterial.color = new THREE.Color(0xff0000); // Red for life
-            } else if (type === 'mana') {
-                fillMaterial.color = new THREE.Color(0x0000ff); // Blue for mana
-            } else if (type === 'karma') {
-                background.material.color = new THREE.Color(0xffffff); // White bg for karma
-                fillMaterial.color = new THREE.Color(0xffcc00); // Gold for karma
-            }
+            // Store status bars and group in player model's userData
+            playerModel.userData = playerModel.userData || {};
+            playerModel.userData.statusBars = bars;
+            playerModel.userData.statusGroup = statusGroup;
+            playerModel.userData.isPlayer = true;
+            playerModel.userData.id = id;
+            playerModel.userData.createdAt = Date.now(); // Track when this player was created
             
-            // Position bars vertically stacked with smaller spacing
-            const yOffset = (barHeight + barSpacing) * (2 - index);
-            background.position.y = yOffset;
-            fill.position.y = yOffset;
-            fill.position.z = 0.001; // Slightly in front
+            // Set the internal movement speed to match original
+            playerModel.userData.movementSpeed = 0.1;
+
+            // Add status group to scene
+            this.game.scene.add(statusGroup);
             
-            // Set initial scale
-            fill.scale.x = 1.0;
+            // Add shadow casting to all meshes in the model
+            playerModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                }
+            });
             
-            // Center bars horizontally
-            background.position.x = 0;
-            fill.position.x = 0;
-
-            statusGroup.add(background);
-            statusGroup.add(fill);
-
-            return {
-                background,
-                fill,
-                width: barWidth,
-                type
-            };
-        });
-
-        // Store status bars and group in player model's userData
-        playerModel.userData = playerModel.userData || {};
-        playerModel.userData.statusBars = bars;
-        playerModel.userData.statusGroup = statusGroup;
-        playerModel.userData.isPlayer = true;
-
-        // Add status group to scene
-        this.game.scene.add(statusGroup);
-
-        // Set initial values and update status bars immediately
-        const initialStats = id === this.game.socket?.id ? {
-            life: this.game.playerStats.currentLife || 100,
-            maxLife: this.game.playerStats.maxLife || 100,
-            mana: this.game.playerStats.currentMana || 100,
-            maxMana: this.game.playerStats.maxMana || 100,
-            karma: this.game.playerStats.currentKarma || 50,
-            maxKarma: this.game.playerStats.maxKarma || 100
-        } : {
-            life: 100,
-            maxLife: 100,
-            mana: 100,
-            maxMana: 100,
-            karma: 50,
-            maxKarma: 100
-        };
-
-        // Store initial stats in userData
-        playerModel.userData.stats = initialStats;
-        
-        // Add player to scene
-        this.game.scene.add(playerModel);
-        
-        // Store in players map
-        this.game.players.set(id, playerModel);
-        
-        // If this is the local player, store the reference
-        if (id === this.game.socket?.id) {
-            this.game.localPlayer = playerModel;
-            this.localPlayer = playerModel;
-            this.game.isAlive = true;
+            // Add debug info for tracking player instances
+            console.log(`Created player ${id} at position:`, playerModel.position);
+            console.log(`Total players after creation: ${this.game.players.size + 1}`);
+            
+            return playerModel;
+        } catch (error) {
+            console.error('Failed to create player:', error);
+            return this.createFallbackCharacterModel();
         }
-        
-        // Force immediate update of status bars
-        this.game.updatePlayerStatus(playerModel, initialStats);
-
-        return playerModel;
     }
     
     async createNetworkPlayer(id, position, stats) {
@@ -308,7 +298,7 @@ export class PlayerManager {
         if (position) {
             playerModel.position.set(position.x, position.y, position.z);
         } else {
-            playerModel.position.set(0, 0, 0);
+            playerModel.position.set(0, 3, 0); // Default to temple center
         }
         
         // Add to scene
@@ -421,8 +411,8 @@ export class PlayerManager {
             }
         });
         
-        // Reset position
-        player.position.set(0, 0, 0);
+        // Reset position to temple center
+        player.position.set(0, 3, 0);
         
         // Reset rotation
         player.rotation.set(0, 0, 0);
@@ -511,5 +501,65 @@ export class PlayerManager {
                 );
             }
         });
+    }
+    
+    // Add a proper cleanup method
+    cleanup() {
+        console.log('PlayerManager: Cleaning up player references');
+        
+        // Remove any temporary local player
+        if (this.localPlayer) {
+            console.log('Removing local player model');
+            if (this.game.scene && this.game.scene.children.includes(this.localPlayer)) {
+                this.game.scene.remove(this.localPlayer);
+            }
+            this.localPlayer = null;
+        }
+        
+        // Clear character model references
+        this.characterModel = null;
+        
+        console.log('PlayerManager cleanup complete');
+    }
+    
+    // Helper method to create a status bar
+    createStatusBar(color) {
+        // Create a group for the status bar
+        const barGroup = new THREE.Group();
+        
+        // Create background (dark gray)
+        const barWidth = 1;
+        const barHeight = 0.1;
+        const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
+        const backgroundMaterial = new THREE.MeshBasicMaterial({
+            color: 0x333333,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.7
+        });
+        const background = new THREE.Mesh(barGeometry, backgroundMaterial);
+        
+        // Create foreground (colored fill)
+        const fillMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            side: THREE.DoubleSide,
+            transparent: true,
+            opacity: 0.9
+        });
+        const fill = new THREE.Mesh(barGeometry, fillMaterial);
+        fill.position.z = 0.001; // Slightly in front
+        
+        // Add to group
+        barGroup.add(background);
+        barGroup.add(fill);
+        
+        // Store references
+        barGroup.userData = {
+            background: background,
+            fill: fill,
+            width: barWidth
+        };
+        
+        return barGroup;
     }
 }
