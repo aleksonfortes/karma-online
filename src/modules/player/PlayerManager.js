@@ -565,37 +565,52 @@ export class PlayerManager {
     updatePlayerMovement(delta) {
         if (!this.game.localPlayer || !this.game.isAlive) return;
 
-        const moveSpeed = this.moveSpeed * delta;
-        let moved = false;
+        const speed = 0.2;
+        let moveX = 0;
+        let moveZ = 0;
 
         // Store previous position for collision detection
         const previousPosition = this.game.localPlayer.position.clone();
         
-        // Calculate forward direction based on player's current rotation
-        const forward = new THREE.Vector3(0, 0, -1);
-        forward.applyQuaternion(this.game.localPlayer.quaternion);
-        
-        // Calculate right direction (perpendicular to forward)
-        const right = new THREE.Vector3(1, 0, 0);
-        right.applyQuaternion(this.game.localPlayer.quaternion);
+        // Calculate movement direction based on key combinations
+        if (this.game.controls.forward) moveZ = -1;  // W moves north (negative Z)
+        if (this.game.controls.backward) moveZ = 1;  // S moves south (positive Z)
+        if (this.game.controls.left) moveX = -1;    // A moves west (negative X)
+        if (this.game.controls.right) moveX = 1;    // D moves east (positive X)
 
-        // Calculate movement vector
-        const movement = new THREE.Vector3(0, 0, 0);
-        
-        if (this.game.controls.forward) movement.add(forward.multiplyScalar(moveSpeed));
-        if (this.game.controls.backward) movement.sub(forward.multiplyScalar(moveSpeed));
-        if (this.game.controls.left) this.game.localPlayer.rotation.y += this.rotateSpeed * delta;
-        if (this.game.controls.right) this.game.localPlayer.rotation.y -= this.rotateSpeed * delta;
+        // Apply movement if any keys are pressed
+        if (moveX !== 0 || moveZ !== 0) {
+            // Normalize diagonal movement
+            const magnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
+            moveX = (moveX / magnitude) * speed;
+            moveZ = (moveZ / magnitude) * speed;
+            
+            // Calculate next position
+            const nextPosition = this.game.localPlayer.position.clone();
+            nextPosition.x += moveX;
+            nextPosition.z += moveZ;
 
-        // Apply movement if any movement keys are pressed
-        if (this.game.controls.forward || this.game.controls.backward) {
-            moved = true;
-            const newPosition = this.game.localPlayer.position.clone().add(movement);
-
-            // Check collisions and boundaries
-            if (this.checkCollision(newPosition, previousPosition)) {
+            // Check collisions
+            if (this.checkCollision(nextPosition, previousPosition)) {
                 // Update position if no collision
-                this.game.localPlayer.position.copy(newPosition);
+                this.game.localPlayer.position.copy(nextPosition);
+                
+                // Update height based on temple platform
+                this.updatePlayerHeight(this.game.localPlayer.position);
+
+                // Update rotation to face movement direction - matching original game
+                const targetRotation = Math.atan2(moveX, moveZ);
+                let currentRotation = this.game.localPlayer.rotation.y;
+                const rotationDiff = targetRotation - currentRotation;
+                
+                // Normalize rotation difference to [-PI, PI]
+                let normalizedDiff = rotationDiff;
+                while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
+                while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
+                
+                // Apply smooth rotation
+                this.game.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
+                    Math.min(Math.abs(normalizedDiff), 0.15);
 
                 // Send position update to server if enough time has passed
                 const now = Date.now();
@@ -624,16 +639,16 @@ export class PlayerManager {
             const templePos = this.game.temple.position;
             const baseHalfWidth = 15; // Half width of temple base
 
-            // Simple AABB collision check with temple base
-            if (newPosition.x >= templePos.x - baseHalfWidth && 
+            // Check if player is within temple bounds
+            const isInTemple = (
+                newPosition.x >= templePos.x - baseHalfWidth && 
                 newPosition.x <= templePos.x + baseHalfWidth &&
                 newPosition.z >= templePos.z - baseHalfWidth && 
-                newPosition.z <= templePos.z + baseHalfWidth) {
-                
-                // Allow movement if player is already on temple platform
-                if (this.isOnTemplePlatform(previousPosition)) {
-                    return true;
-                }
+                newPosition.z <= templePos.z + baseHalfWidth
+            );
+
+            // If in temple area, only allow if already on platform
+            if (isInTemple && !this.isOnTemplePlatform(previousPosition)) {
                 return false;
             }
         }
@@ -645,15 +660,13 @@ export class PlayerManager {
                 const dz = newPosition.z - collider.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                if (distance < collider.radius + 0.5) { // 0.5 is player radius
+                if (distance < collider.radius + 1.0) { // Increased collision radius
                     return false;
                 }
             }
         }
 
-        // Update player height based on temple platform
-        this.updatePlayerHeight(newPosition);
-        return true;
+        return true; // No collisions found
     }
 
     isOnTemplePlatform(position) {
