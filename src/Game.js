@@ -5,6 +5,7 @@ import { PlayerManager } from './modules/player/PlayerManager.js';
 import { SkillsManager } from './modules/skills/SkillsManager.js';
 import { KarmaManager } from './modules/karma/KarmaManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
 export class Game {
     constructor(serverUrl) {
@@ -446,12 +447,144 @@ export class Game {
         templeLight.position.set(0, baseHeight + 4, 0); // Adjust light height
         templeGroup.add(templeLight);
 
+        // Add NPC to the temple
+        this.loadNPC(templeGroup, baseHeight);
+
         // Position the entire temple
         templeGroup.position.set(0, 0, 0);
         this.scene.add(templeGroup);
         
         // Store temple reference
         this.temple = templeGroup;
+    }
+
+    async loadNPC(templeGroup, baseHeight) {
+        try {
+            const loader = new GLTFLoader();
+            
+            // Load both NPC models
+            const [darkNPC, lightNPC] = await Promise.all([
+                new Promise((resolve, reject) => {
+                    loader.load(
+                        '/models/dark_npc.glb',
+                        (gltf) => resolve(gltf),
+                        undefined,
+                        (error) => reject(error)
+                    );
+                }),
+                new Promise((resolve, reject) => {
+                    loader.load(
+                        '/models/light_npc.glb',
+                        (gltf) => resolve(gltf),
+                        undefined,
+                        (error) => reject(error)
+                    );
+                })
+            ]);
+
+            // Set up the dark NPC model (right side)
+            const darkModel = darkNPC.scene;
+            darkModel.scale.set(3.5, 3.5, 3.5);
+            darkModel.position.set(7, 5.5, -9);
+            darkModel.rotation.y = -Math.PI / 4;
+            
+            // Set up the light NPC model (left side)
+            const lightModel = lightNPC.scene;
+            lightModel.scale.set(6, 6, 6);
+            lightModel.position.set(-7, 2.0, -9);
+            lightModel.rotation.y = Math.PI / 4;
+            
+            // Add shadows to both NPCs
+            [darkModel, lightModel].forEach(model => {
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+            });
+
+            // Add interaction text to both NPCs with adjusted y-offsets
+            this.addInteractionText(darkModel, 1.2);
+            this.addInteractionText(lightModel, 1.1);  // Lower light NPC's text position
+
+            // Add both NPCs to temple group
+            templeGroup.add(darkModel);
+            templeGroup.add(lightModel);
+
+            // Store NPC references
+            this.darkNPC = darkModel;
+            this.lightNPC = lightModel;
+
+            // Create colliders for both NPCs
+            if (!this.statueColliders) {
+                this.statueColliders = [];
+            }
+
+            // Add colliders for both NPCs
+            this.statueColliders.push(
+                {
+                    position: new THREE.Vector3(7, 0, -9),
+                    radius: 2.0
+                },
+                {
+                    position: new THREE.Vector3(-7, 0, -9),
+                    radius: 2.0
+                }
+            );
+
+        } catch (error) {
+            console.error('Error loading NPC models:', error);
+        }
+    }
+
+    addInteractionText(npcModel, yOffset) {
+        // Create a canvas for the text
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.width = 256;
+        canvas.height = 64;
+
+        // Set text style with slightly larger font
+        context.font = 'bold 36px Arial';
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+
+        // Create gradient for text
+        const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+        gradient.addColorStop(0, '#4a9eff');
+        gradient.addColorStop(1, '#00ff88');
+
+        // Draw text with gradient and outline
+        const text = 'Press E';
+        context.fillStyle = gradient;
+        context.strokeStyle = '#000000';
+        context.lineWidth = 2;
+        context.strokeText(text, canvas.width / 2, canvas.height / 2);
+        context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+
+        // Create sprite material with adjusted renderOrder
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            depthTest: false
+        });
+
+        // Create sprite and add to NPC
+        const sprite = new THREE.Sprite(spriteMaterial);
+        sprite.scale.set(0.4, 0.1, 1);
+        sprite.position.y = yOffset;
+        sprite.renderOrder = 999;
+        
+        // Add sprite as child of NPC model
+        npcModel.add(sprite);
+
+        // Store sprite reference
+        npcModel.interactionSprite = sprite;
     }
 
     createAmbientParticles() {
@@ -668,13 +801,54 @@ export class Game {
     }
 
     updatePlayerMovement(delta) {
+        if (!this.localPlayer) return;
+
         const moveSpeed = 5 * delta;
         const rotateSpeed = 2 * delta;
         
+        // Store current position for collision check
+        const previousPosition = this.localPlayer.position.clone();
+        
+        // Apply movement based on controls
         if (this.controls.forward) this.localPlayer.translateZ(-moveSpeed);
         if (this.controls.backward) this.localPlayer.translateZ(moveSpeed);
         if (this.controls.left) this.localPlayer.rotation.y += rotateSpeed;
         if (this.controls.right) this.localPlayer.rotation.y -= rotateSpeed;
+        
+        // Get new position after movement
+        const newPosition = this.localPlayer.position.clone();
+        
+        // Check if new position is valid (not colliding with statues or NPCs)
+        let collision = false;
+        
+        // Check statue collisions
+        if (this.statueColliders) {
+            for (const collider of this.statueColliders) {
+                const dx = newPosition.x - collider.position.x;
+                const dz = newPosition.z - collider.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < collider.radius + 0.5) { // 0.5 is player radius
+                    collision = true;
+                    break;
+                }
+            }
+        }
+        
+        // Check world boundaries (water)
+        const maxDistance = 200; // Distance from center before hitting water
+        if (Math.abs(newPosition.x) > maxDistance || Math.abs(newPosition.z) > maxDistance) {
+            collision = true;
+        }
+        
+        // If collision detected, revert to previous position
+        if (collision) {
+            this.localPlayer.position.copy(previousPosition);
+        } else {
+            // Update height based on temple platform
+            this.isOnTemplePlatform(newPosition);
+            this.localPlayer.position.y = newPosition.y;
+        }
     }
 
     updateCamera() {
