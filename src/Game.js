@@ -295,35 +295,163 @@ export class Game {
     }
 
     createTemple() {
-        // Create a simple temple structure
-        const templeGeometry = new THREE.BoxGeometry(10, 15, 10);
-        const templeMaterial = new THREE.MeshStandardMaterial({
-            color: 0xcccccc,
-            roughness: 0.7,
-            metalness: 0.2
+        const templeGroup = new THREE.Group();
+        
+        // Create a custom temple floor texture pattern (chess style)
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = 512;
+        canvas.height = 512;
+        
+        // Fill background
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Create chess pattern
+        const tileSize = 64;
+        const tiles = canvas.width / tileSize;
+        
+        for (let i = 0; i < tiles; i++) {
+            for (let j = 0; j < tiles; j++) {
+                // Chess pattern colors
+                const isEven = (i + j) % 2 === 0;
+                ctx.fillStyle = isEven ? '#2a2a2a' : '#1a1a1a';
+                
+                // Draw chess tile
+                ctx.fillRect(
+                    i * tileSize,
+                    j * tileSize,
+                    tileSize,
+                    tileSize
+                );
+                
+                // Add subtle border to tiles
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(
+                    i * tileSize,
+                    j * tileSize,
+                    tileSize,
+                    tileSize
+                );
+            }
+        }
+        
+        // Create texture from canvas
+        const floorTexture = new THREE.CanvasTexture(canvas);
+        floorTexture.wrapS = THREE.RepeatWrapping;
+        floorTexture.wrapT = THREE.RepeatWrapping;
+        floorTexture.repeat.set(4, 4);
+        
+        // Create floor material with the custom texture
+        const floorMaterial = new THREE.MeshPhongMaterial({
+            map: floorTexture,
+            color: 0x666666,
+            shininess: 30,
+            bumpMap: floorTexture,
+            bumpScale: 0.2,
         });
-        
-        const temple = new THREE.Mesh(templeGeometry, templeMaterial);
-        temple.position.set(0, 7.5, 0);
-        temple.castShadow = true;
-        temple.receiveShadow = true;
-        this.scene.add(temple);
-        temple.userData.isTemple = true; // Mark this as the temple for proximity checks
-        this.temple = temple; // Store reference to temple
-        
-        // Add temple steps
-        const stepsGeometry = new THREE.BoxGeometry(15, 2, 15);
-        const stepsMaterial = new THREE.MeshStandardMaterial({
-            color: 0xaaaaaa,
+
+        // Create elevated platform
+        const baseHeight = 1.5;
+        const baseGeometry = new THREE.BoxGeometry(30, baseHeight, 30);
+        const basePlatform = new THREE.Mesh(baseGeometry, floorMaterial);
+        basePlatform.position.y = baseHeight / 2; // Position at half height
+        basePlatform.receiveShadow = true;
+        templeGroup.add(basePlatform);
+
+        // Add corner statues - adjusted positions for new height
+        const statuePositions = [
+            { x: 13, z: 13 },  // Northeast
+            { x: -13, z: 13 }, // Northwest
+            { x: 13, z: -13 }, // Southeast
+            { x: -13, z: -13 } // Southwest
+        ];
+
+        // Create statue material
+        const statueMaterial = new THREE.MeshPhongMaterial({
+            color: 0x808080,
+            shininess: 10,
             roughness: 0.8,
-            metalness: 0.1
         });
+
+        this.statueColliders = [];
+
+        statuePositions.forEach((pos, index) => {
+            // Create statue base
+            const baseStatueHeight = 3;
+            const baseWidth = 2;
+            const statueBase = new THREE.Mesh(
+                new THREE.BoxGeometry(baseWidth, baseStatueHeight, baseWidth),
+                statueMaterial
+            );
+            statueBase.position.set(pos.x, baseHeight + baseStatueHeight/2, pos.z);
+            statueBase.castShadow = true;
+            statueBase.receiveShadow = true;
+
+            // Create statue body
+            const bodyHeight = 4;
+            const bodyWidth = 1.5;
+            const statueBody = new THREE.Mesh(
+                new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyWidth),
+                statueMaterial
+            );
+            statueBody.position.set(pos.x, baseHeight + baseStatueHeight + bodyHeight/2, pos.z);
+            statueBody.castShadow = true;
+            statueBody.receiveShadow = true;
+
+            // Create statue head
+            const headSize = 1;
+            const statueHead = new THREE.Mesh(
+                new THREE.BoxGeometry(headSize, headSize, headSize),
+                statueMaterial
+            );
+            statueHead.position.set(pos.x, baseHeight + baseStatueHeight + bodyHeight + headSize/2, pos.z);
+            statueHead.castShadow = true;
+            statueHead.receiveShadow = true;
+
+            // Add to temple group
+            templeGroup.add(statueBase);
+            templeGroup.add(statueBody);
+            templeGroup.add(statueHead);
+
+            // Create collider for the statue
+            this.statueColliders.push({
+                position: new THREE.Vector3(pos.x, 0, pos.z),
+                radius: baseWidth // Changed from baseWidth / 1.5 to baseWidth for larger collision area
+            });
+        });
+
+        // Create cross-shaped upper platform
+        const floorGroup = new THREE.Group();
         
-        const steps = new THREE.Mesh(stepsGeometry, stepsMaterial);
-        steps.position.set(0, 1, 0);
-        steps.castShadow = true;
-        steps.receiveShadow = true;
-        this.scene.add(steps);
+        // Vertical part of cross
+        const verticalGeometry = new THREE.BoxGeometry(8, 0.5, 24);
+        const verticalFloor = new THREE.Mesh(verticalGeometry, floorMaterial);
+        verticalFloor.position.y = baseHeight + 0.25; // Position above base
+        verticalFloor.receiveShadow = true;
+        floorGroup.add(verticalFloor);
+        
+        // Horizontal part of cross
+        const horizontalGeometry = new THREE.BoxGeometry(24, 0.5, 8);
+        const horizontalFloor = new THREE.Mesh(horizontalGeometry, floorMaterial);
+        horizontalFloor.position.y = baseHeight + 0.25; // Position above base
+        horizontalFloor.receiveShadow = true;
+        floorGroup.add(horizontalFloor);
+        
+        templeGroup.add(floorGroup);
+
+        // Add temple light
+        const templeLight = new THREE.PointLight(0xffd700, 0.8, 30);
+        templeLight.position.set(0, baseHeight + 4, 0); // Adjust light height
+        templeGroup.add(templeLight);
+
+        // Position the entire temple
+        templeGroup.position.set(0, 0, 0);
+        this.scene.add(templeGroup);
+        
+        // Store temple reference
+        this.temple = templeGroup;
     }
 
     createAmbientParticles() {
@@ -354,31 +482,48 @@ export class Game {
 
     // Add temple proximity checking
     checkTempleProximity() {
-        if (!this.temple || !this.localPlayer) return false;
-        const templePosition = this.temple.position;
-        const playerPosition = this.localPlayer.position;
-        const distance = templePosition.distanceTo(playerPosition);
-        return distance < 20; // 20 units radius around temple
+        if (!this.localPlayer || !this.temple) return false;
+        
+        const playerPos = this.localPlayer.position;
+        const templePos = this.temple.position;
+        
+        // Check if player is within the temple base platform bounds
+        const baseHalfWidth = 15; // 30/2 for base platform
+        return Math.abs(playerPos.x - templePos.x) <= baseHalfWidth && 
+               Math.abs(playerPos.z - templePos.z) <= baseHalfWidth;
     }
 
-    // Add method to check if player is inside temple
-    isInsideTemple() {
-        if (!this.temple || !this.localPlayer) return false;
-        const templePosition = this.temple.position;
-        const playerPosition = this.localPlayer.position;
+    // Add method to check if player is on temple platform
+    isOnTemplePlatform(position) {
+        if (!this.temple) return false;
         
-        // Define temple bounds (adjust these values based on your temple size)
-        const templeBounds = {
-            minX: templePosition.x - 10,
-            maxX: templePosition.x + 10,
-            minZ: templePosition.z - 10,
-            maxZ: templePosition.z + 10
-        };
-        
-        return playerPosition.x >= templeBounds.minX &&
-               playerPosition.x <= templeBounds.maxX &&
-               playerPosition.z >= templeBounds.minZ &&
-               playerPosition.z <= templeBounds.maxZ;
+        // Get temple dimensions
+        const baseHalfWidth = 15; // 30/2 for base platform
+        const crossVerticalHalfWidth = 4; // 8/2 for vertical part
+        const crossHorizontalHalfWidth = 12; // 24/2 for horizontal part
+        const crossVerticalHalfLength = 12; // 24/2 for vertical part
+        const crossHorizontalHalfLength = 4; // 8/2 for horizontal part
+
+        // Check if position is within base platform bounds
+        const isOnBase = Math.abs(position.x) <= baseHalfWidth && 
+                        Math.abs(position.z) <= baseHalfWidth;
+
+        // Check if position is within cross vertical part
+        const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && 
+                            Math.abs(position.z) <= crossVerticalHalfLength;
+
+        // Check if position is within cross horizontal part
+        const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
+                              Math.abs(position.z) <= crossHorizontalHalfLength;
+
+        // If on any part of the temple platform, player should be at temple height
+        if (isOnBase || isOnVertical || isOnHorizontal) {
+            position.y = 3; // Temple height (1.5 base height + 1.5 character height)
+        } else {
+            position.y = 1.5; // Ground level height
+        }
+
+        return isOnBase || isOnVertical || isOnHorizontal;
     }
 
     adjustKarma(amount) {
