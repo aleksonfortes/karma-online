@@ -13,68 +13,23 @@ export class GameServer {
             transports: ['websocket', 'polling']
         });
 
-        // Store active players
         this.players = new Map();
         this.gameState = {
             players: new Map(),
             lastUpdate: Date.now()
         };
         this.lastUpdateTime = new Map();
-        
-        // Reset server state on startup
-        this.players.clear();
-        this.gameState.players.clear();
-        this.lastUpdateTime.clear();
 
         this.setupSocketHandlers();
         this.startGameLoop();
         console.log('GameServer: Initialization complete');
-        
-        // Add periodic cleanup of disconnected players
-        setInterval(() => this.cleanupDisconnectedPlayers(), 15000);
-    }
-    
-    cleanupDisconnectedPlayers() {
-        // Get all currently connected socket IDs
-        const connectedSockets = Array.from(this.io.sockets.sockets.keys());
-        let removedCount = 0;
-        
-        // Check each player against connected sockets
-        for (const [socketId, player] of this.players.entries()) {
-            if (!connectedSockets.includes(socketId)) {
-                this.players.delete(socketId);
-                this.gameState.players.delete(socketId);
-                this.lastUpdateTime.delete(socketId);
-                removedCount++;
-            }
-        }
-        
-        if (removedCount > 0) {
-            console.log(`Cleaned up ${removedCount} disconnected players. Active players: ${this.players.size}`);
-            // Synchronize player list
-            this.broadcastPlayerList();
-        }
-    }
-    
-    broadcastPlayerList() {
-        // Send updated player list to all clients
-        const playerList = Array.from(this.players.values());
-        this.io.emit('currentPlayers', playerList);
     }
 
     setupSocketHandlers() {
+        console.log('GameServer: Setting up socket handlers');
+        
         this.io.on('connection', (socket) => {
             console.log(`Player connected: ${socket.id}`);
-            
-            // Check if there's already a player with this ID (shouldn't happen, but handle it)
-            if (this.players.has(socket.id)) {
-                this.players.delete(socket.id);
-                this.gameState.players.delete(socket.id);
-                this.lastUpdateTime.delete(socket.id);
-                
-                // Broadcast to all clients to remove this player
-                this.io.emit('playerLeft', socket.id);
-            }
             
             // Create new player
             const player = this.createPlayer(socket.id);
@@ -131,8 +86,18 @@ export class GameServer {
                 
                 if (!attacker || !target) return;
                 
+                console.log('Skill damage:', {
+                    attackerId: socket.id,
+                    attackerPath: attacker.path,
+                    attackerKarma: attacker.karma,
+                    targetId: data.targetId,
+                    skillName: data.skillName,
+                    damage: data.damage
+                });
+
                 // Prevent Illuminated players from dealing damage
                 if (attacker.karma === 0) {
+                    console.log('Illuminated attacker cannot deal damage');
                     return;
                 }
                 
@@ -164,6 +129,13 @@ export class GameServer {
                     
                     // Round the final damage
                     finalDamage = Math.round(finalDamage);
+                    
+                    console.log('Calculated damage:', {
+                        attackerKarma: attacker.karma,
+                        targetKarma: target.karma,
+                        baseDamage: data.damage,
+                        finalDamage: finalDamage
+                    });
                     
                     if (finalDamage > 0) {
                         // Apply damage
@@ -208,6 +180,12 @@ export class GameServer {
                             reason: target.karma === 0 ? 'illuminated' : 'forsaken'
                         });
                     }
+                } else {
+                    console.log('Skill use failed:', {
+                        reason: attacker.path !== 'light' ? 'wrong path' : 'unknown skill',
+                        attackerPath: attacker.path,
+                        skillName: data.skillName
+                    });
                 }
             });
 
@@ -284,7 +262,7 @@ export class GameServer {
                     
                     // Notify all clients that the player has died and should be removed
                     this.io.emit('playerLeft', socket.id);
-                    console.log(`Player died: ${socket.id}`);
+                    console.log(`Player died and left: ${player.displayName} (Total Players: ${this.players.size})`);
                 }
             });
 
@@ -292,14 +270,11 @@ export class GameServer {
             socket.on('disconnect', () => {
                 const player = this.players.get(socket.id);
                 if (player) {
-                    // Remove from all server data structures
                     this.players.delete(socket.id);
                     this.gameState.players.delete(socket.id);
                     this.lastUpdateTime.delete(socket.id);
-                    
-                    // Notify all clients to remove this player
                     this.io.emit('playerLeft', socket.id);
-                    console.log(`Player left: ${socket.id}`);
+                    console.log(`Player left: ${player.displayName} (Total Players: ${this.players.size})`);
                 }
             });
         });
@@ -330,10 +305,107 @@ export class GameServer {
         };
     }
 
+    validateMovement(data) {
+        // Implement movement validation logic
+        // Check for speed hacks, teleporting, etc.
+        const maxSpeed = 10; // units per second
+        const timeDelta = (Date.now() - this.gameState.lastUpdate) / 1000;
+        
+        if (!data.position || !data.rotation) return false;
+        
+        // Basic position validation
+        if (Math.abs(data.position.x) > 1000 || 
+            Math.abs(data.position.y) > 1000 || 
+            Math.abs(data.position.z) > 1000) {
+            return false;
+        }
+
+        // Speed validation
+        const speed = Math.sqrt(
+            Math.pow(data.position.x, 2) + 
+            Math.pow(data.position.z, 2)
+        ) / timeDelta;
+
+        return speed <= maxSpeed;
+    }
+
+    validateKarmaAction(data) {
+        // Implement karma action validation
+        const player = this.players.get(data.playerId);
+        if (!player) return false;
+
+        // Check cooldown
+        const cooldown = 1000; // 1 second
+        if (Date.now() - player.lastKarmaAction < cooldown) {
+            return false;
+        }
+
+        // Validate action type and target
+        return ['give', 'take'].includes(data.action) && 
+               this.gameState.players.has(data.targetId);
+    }
+
+    processKarmaAction(player, data) {
+        const target = this.gameState.players.get(data.targetId);
+        if (!target) return { success: false };
+
+        const amount = data.action === 'give' ? 1 : -1;
+        target.karma += amount;
+        player.lastKarmaAction = Date.now();
+
+        // Calculate and apply effects
+        const effects = this.calculateKarmaEffects(target.karma);
+        target.effects = effects;
+
+        return {
+            success: true,
+            effect: {
+                type: data.action,
+                amount,
+                effects
+            }
+        };
+    }
+
+    calculateKarmaEffects(karma) {
+        // Implement karma effects calculation
+        const effects = [];
+        
+        if (karma >= 10) effects.push('enlightened');
+        else if (karma <= -10) effects.push('cursed');
+        
+        if (Math.abs(karma) >= 5) {
+            effects.push(karma > 0 ? 'blessed' : 'haunted');
+        }
+
+        return effects;
+    }
+
     startGameLoop() {
+        const tickRate = 60; // Updates per second
+        const tickInterval = 1000 / tickRate;
+
         setInterval(() => {
-            this.gameState.lastUpdate = Date.now();
-        }, 1000 / 60);
+            this.update();
+        }, tickInterval);
+    }
+
+    update() {
+        // Update game state
+        this.gameState.lastUpdate = Date.now();
+
+        // Process any time-based effects
+        for (const [_, player] of this.gameState.players) {
+            this.updatePlayerEffects(player);
+        }
+
+        // Broadcast game state if needed
+        if (this.gameState.players.size > 0) {
+            this.io.emit('gameStateUpdate', {
+                players: Array.from(this.gameState.players.values()),
+                timestamp: this.gameState.lastUpdate
+            });
+        }
     }
 
     updatePlayerEffects(player) {
