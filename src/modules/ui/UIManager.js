@@ -999,58 +999,60 @@ export class UIManager {
     
     // Methods for loading screen and error handling
     showLoadingScreen(message = 'Loading...') {
-        // Create loading screen if it doesn't exist
+        // Create or update loading screen
         if (!this.loadingScreen) {
             this.loadingScreen = document.createElement('div');
-            this.loadingScreen.style.position = 'fixed';
-            this.loadingScreen.style.top = '0';
-            this.loadingScreen.style.left = '0';
-            this.loadingScreen.style.width = '100%';
-            this.loadingScreen.style.height = '100%';
-            this.loadingScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            this.loadingScreen.style.display = 'flex';
-            this.loadingScreen.style.flexDirection = 'column';
-            this.loadingScreen.style.alignItems = 'center';
-            this.loadingScreen.style.justifyContent = 'center';
-            this.loadingScreen.style.color = '#ffffff';
-            this.loadingScreen.style.fontFamily = 'Arial, sans-serif';
-            this.loadingScreen.style.fontSize = '24px';
-            this.loadingScreen.style.zIndex = '9999';
-            
-            // Add spinner
-            const spinner = document.createElement('div');
-            spinner.style.width = '50px';
-            spinner.style.height = '50px';
-            spinner.style.border = '5px solid rgba(255, 255, 255, 0.3)';
-            spinner.style.borderTop = '5px solid #ffffff';
-            spinner.style.borderRadius = '50%';
-            spinner.style.marginBottom = '20px';
-            spinner.style.animation = 'spin 1s linear infinite';
-            
-            // Add keyframes for spinner
-            const style = document.createElement('style');
-            style.innerHTML = `
-                @keyframes spin {
-                    0% { transform: rotate(0deg); }
-                    100% { transform: rotate(360deg); }
-                }
-            `;
-            document.head.appendChild(style);
-            
-            // Loading text
-            const text = document.createElement('div');
-            
-            this.loadingScreen.appendChild(spinner);
-            this.loadingScreen.appendChild(text);
+            this.loadingScreen.className = 'loading-screen';
             document.body.appendChild(this.loadingScreen);
         }
         
-        // Update the message
-        this.loadingScreen.children[1].textContent = message;
+        // Create or update loading container with spinner and message
+        if (!this.loadingContainer) {
+            this.loadingContainer = document.createElement('div');
+            this.loadingContainer.className = 'loading-container';
+            this.loadingScreen.appendChild(this.loadingContainer);
+            
+            // Add spinner
+            const spinner = document.createElement('div');
+            spinner.className = 'spinner';
+            this.loadingContainer.appendChild(spinner);
+            
+            // Add message element
+            this.loadingMessage = document.createElement('div');
+            this.loadingMessage.className = 'loading-message';
+            this.loadingContainer.appendChild(this.loadingMessage);
+            
+            // Add fallback message for long loading times
+            this.fallbackMessage = document.createElement('div');
+            this.fallbackMessage.className = 'fallback-message';
+            this.fallbackMessage.textContent = 'Taking longer than expected? The game will start in offline mode shortly.';
+            this.fallbackMessage.style.display = 'none';
+            this.loadingContainer.appendChild(this.fallbackMessage);
+            
+            // Show fallback message if loading takes too long
+            this.fallbackTimer = setTimeout(() => {
+                if (this.fallbackMessage) {
+                    this.fallbackMessage.style.display = 'block';
+                }
+            }, 5000); // Show after 5 seconds
+        }
+        
+        // Update loading message
+        if (this.loadingMessage) {
+            this.loadingMessage.textContent = message;
+        }
+        
+        // Make sure loading screen is visible
         this.loadingScreen.style.display = 'flex';
     }
     
     hideLoadingScreen() {
+        // Clear fallback timer if it exists
+        if (this.fallbackTimer) {
+            clearTimeout(this.fallbackTimer);
+            this.fallbackTimer = null;
+        }
+        
         if (this.loadingScreen) {
             this.loadingScreen.style.display = 'none';
         }

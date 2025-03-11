@@ -40,9 +40,31 @@ async initializeManagers() {
     try {
         // Initialize network first to determine if we're online
         await this.networkManager.init();
+        
+        // Try to connect with a timeout
+        let isConnected = false;
+        const connectionTimeout = 10000; // 10 seconds
+        const startTime = Date.now();
+        
+        while (!isConnected && Date.now() - startTime < connectionTimeout) {
+            if (this.networkManager.isConnected) {
+                isConnected = true;
+                break;
+            }
+            
+            // Wait a short time before checking again
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        if (!isConnected) {
+            console.warn('Connection timeout, continuing in offline mode');
+            this.networkManager.enterOfflineMode();
+            this.uiManager.showNotification('Failed to connect to server - playing in offline mode', 'warning');
+        }
     } catch (error) {
         console.warn('Network initialization failed, continuing in offline mode:', error);
-        // UI will be updated by the NetworkManager's offline mode handling
+        this.networkManager.enterOfflineMode();
+        this.uiManager.showNotification('Network error - playing in offline mode', 'warning');
     }
     
     // Initialize player (with or without network)
