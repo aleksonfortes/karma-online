@@ -114,7 +114,7 @@ export class PlayerManager {
             roughness: 0.8
         });
         const cylinder = new THREE.Mesh(geometry, material);
-        cylinder.position.y = 1.5;
+        cylinder.position.y = 1.0; // Adjusted to be at ground level
         cylinder.castShadow = true;
         cylinder.receiveShadow = true;
         group.add(cylinder);
@@ -127,7 +127,7 @@ export class PlayerManager {
             roughness: 0.8
         });
         const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 3.5;
+        head.position.y = 3.0; // Adjusted to match the new body position
         head.castShadow = true;
         head.receiveShadow = true;
         group.add(head);
@@ -146,7 +146,7 @@ export class PlayerManager {
             return this.game.localPlayer;
         }
         // Create player at temple center
-        const position = { x: 0, y: 3, z: 0 };
+        const position = { x: 0, y: 0.5, z: 0 };
         const rotation = { y: 0 };
         const player = await this.createPlayer(socketId, position, rotation, true);
         if (player) {
@@ -157,7 +157,7 @@ export class PlayerManager {
         return player;
     }
     
-    async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
+    async createPlayer(id, position = { x: 0, y: 0.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
         if (this.players.has(id)) {
             console.warn(`Player with ID ${id} already exists.`);
             return this.players.get(id);
@@ -224,7 +224,7 @@ export class PlayerManager {
         if (position) {
             playerModel.position.set(position.x, position.y, position.z);
         } else {
-            playerModel.position.set(0, 3, 0); // Default to temple center
+            playerModel.position.set(0, 0.5, 0); // Default to temple center at ground level
         }
         
         // Add to scene
@@ -441,8 +441,8 @@ export class PlayerManager {
             }
         });
         
-        // Reset position to temple center
-        player.position.set(0, 3, 0);
+        // Reset position to temple center (at ground level)
+        player.position.set(0, 0.5, 0);
         
         // Reset rotation
         player.rotation.set(0, 0, 0);
