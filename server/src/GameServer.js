@@ -1,5 +1,36 @@
 import { Server } from 'socket.io';
 import { v4 as uuidv4 } from 'uuid';
+import ModelScales from '../../src/config/ModelScales.js';
+
+// Game constants - centralized server-side configuration
+const GAME_CONSTANTS = {
+    PLAYER: {
+        SPAWN_POSITION: { x: 0, y: 0, z: 0 }, // Set player at ground level to match NPCs and client-side
+        DEFAULT_ROTATION: { y: 0 },
+        DEFAULT_LIFE: 100,
+        DEFAULT_MAX_LIFE: 100,
+        DEFAULT_MANA: 100,
+        DEFAULT_MAX_MANA: 100,
+        DEFAULT_KARMA: 50,
+        DEFAULT_MAX_KARMA: 100,
+        DEFAULT_PATH: "neutral",
+        MODEL_SCALE: ModelScales.PLAYER.DEFAULT // Use the centralized scale value
+    },
+    MOVEMENT: {
+        RATE_LIMIT_MS: 100, // Minimum time between movement updates
+        MAX_SPEED: 10 // Maximum units per second a player can move
+    },
+    NPC: {
+        DARK: {
+            SCALE: ModelScales.NPC.DARK.SCALE,
+            COLLISION_RADIUS: ModelScales.NPC.DARK.COLLISION_RADIUS
+        },
+        LIGHT: {
+            SCALE: ModelScales.NPC.LIGHT.SCALE,
+            COLLISION_RADIUS: ModelScales.NPC.LIGHT.COLLISION_RADIUS
+        }
+    }
+};
 
 export class GameServer {
     constructor(httpServer) {
@@ -20,6 +51,7 @@ export class GameServer {
             lastUpdate: Date.now()
         };
         this.lastUpdateTime = new Map();
+        this.playerLastPositions = new Map(); // Store last valid positions for anti-cheat
 
         this.setupSocketHandlers();
         this.startGameLoop();
@@ -78,7 +110,7 @@ export class GameServer {
     rateLimitMovement(socketId) {
         const now = Date.now();
         const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
-        if (now - lastUpdate < 100) {
+        if (now - lastUpdate < GAME_CONSTANTS.MOVEMENT.RATE_LIMIT_MS) {
             this.logSecurityEvent(`Rate limit exceeded for player ${socketId}`, socketId);
             return false;
         }
@@ -207,16 +239,17 @@ export class GameServer {
     createPlayer(socketId) {
         return {
             id: socketId,
-            position: { x: 0, y: 3, z: 0 },
-            rotation: { y: 0 },
-            life: 100,
-            maxLife: 100,
-            mana: 100,
-            maxMana: 100,
-            karma: 50,
-            maxKarma: 100,
-            path: "neutral",
-            effects: []
+            position: { ...GAME_CONSTANTS.PLAYER.SPAWN_POSITION },
+            rotation: { ...GAME_CONSTANTS.PLAYER.DEFAULT_ROTATION },
+            life: GAME_CONSTANTS.PLAYER.DEFAULT_LIFE,
+            maxLife: GAME_CONSTANTS.PLAYER.DEFAULT_MAX_LIFE,
+            mana: GAME_CONSTANTS.PLAYER.DEFAULT_MANA,
+            maxMana: GAME_CONSTANTS.PLAYER.DEFAULT_MAX_MANA,
+            karma: GAME_CONSTANTS.PLAYER.DEFAULT_KARMA,
+            maxKarma: GAME_CONSTANTS.PLAYER.DEFAULT_MAX_KARMA,
+            path: GAME_CONSTANTS.PLAYER.DEFAULT_PATH,
+            effects: [],
+            modelScale: GAME_CONSTANTS.PLAYER.MODEL_SCALE // Use the centralized scale value
         };
     }
 
