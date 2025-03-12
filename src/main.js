@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './Game.js';
+import { getServerUrl } from './config.js';
 
 // Create a variable to track initialization attempts
 let initializationAttempts = 0;
@@ -18,9 +19,7 @@ async function initGame() {
     
     try {
         // Create the game instance with development server URL
-        const serverUrl = import.meta.env.DEV 
-            ? `${window.location.protocol}//${window.location.hostname}:3000`
-            : `${window.location.protocol}//${window.location.hostname}`;
+        const serverUrl = getServerUrl();
         
         window.game = new Game(serverUrl);
     } catch (error) {

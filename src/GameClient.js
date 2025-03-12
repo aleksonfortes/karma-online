@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { io } from 'socket.io-client';
+import { getServerUrl } from './config.js';
 
 export class GameClient {
     constructor() {
         console.log('GameClient: Initializing...');
-        this.socket = io(import.meta.env.PROD ? '/' : 'http://localhost:3000');
+        this.socket = io(getServerUrl());
         this.players = new Map();
         this.localPlayer = null;
         

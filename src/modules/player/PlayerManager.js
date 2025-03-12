@@ -135,150 +135,118 @@ export class PlayerManager {
     }
     
     async createLocalPlayer() {
-        // Get socket ID - must have socket connection
         const socketId = this.game.networkManager.socket.id;
         if (!socketId) {
             console.error('Cannot create local player without socket connection');
             return null;
         }
-        
-        // Create player at temple center - exactly like original
+        if (this.game.localPlayer) {
+            console.warn('Local player already exists');
+            return this.game.localPlayer;
+        }
+        // Create player at temple center
         const position = { x: 0, y: 3, z: 0 };
         const rotation = { y: 0 };
-        
         const player = await this.createPlayer(socketId, position, rotation, true);
-        
         if (player) {
             this.game.localPlayer = player;
             this.game.scene.add(player);
             this.players.set(socketId, player);
-            
-            // Send initial state
+            // Attach status bar to player
+            const statusGroup = new THREE.Group();
+            statusGroup.position.set(0, 2.0, 0); // Adjusted height
+            player.add(statusGroup);
+            this.game.updatePlayerStatus(player, {
+                life: this.game.playerStats.currentLife,
+                maxLife: this.game.playerStats.maxLife,
+                mana: this.game.playerStats.currentMana,
+                maxMana: this.game.playerStats.maxMana,
+                karma: this.game.playerStats.currentKarma,
+                maxKarma: this.game.playerStats.maxKarma
+            });
             this.game.networkManager.sendPlayerState();
         }
-        
         return player;
     }
     
     async createPlayer(id, position = { x: 0, y: 1.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
-        // Check if player already exists
         if (this.players.has(id)) {
-            console.warn(`Player ${id} already exists`);
+            console.warn(`Player with ID ${id} already exists.`);
             return this.players.get(id);
         }
-        
+        const player = await this.createPlayerMesh(id, position, rotation);
+        if (player) {
+            this.players.set(id, player);
+            this.game.scene.add(player);
+            if (isLocal) {
+                this.game.localPlayer = player;
+            }
+            // Attach status bar to player
+            const statusGroup = new THREE.Group();
+            statusGroup.position.set(0, 2.0, 0); // Adjusted height
+            player.add(statusGroup);
+            this.game.updatePlayerStatus(player, {
+                life: this.game.playerStats.currentLife,
+                maxLife: this.game.playerStats.maxLife,
+                mana: this.game.playerStats.currentMana,
+                maxMana: this.game.playerStats.maxMana,
+                karma: this.game.playerStats.currentKarma,
+                maxKarma: this.game.playerStats.maxKarma
+            });
+        }
+        return player;
+    }
+    
+    async createPlayerMesh(id, position, rotation) {
         // Load model for player
         let playerModel;
-        try {
-            playerModel = await this.loadCharacterModel();
-            
-            // Set position
-            if (isLocal) {
-                playerModel.position.set(0, 3, 0); // Start at temple height
-            } else {
-                playerModel.position.set(
-                    position.x,
-                    position.y,
-                    position.z
-                );
-            }
-            
-            playerModel.rotation.y = rotation.y || 0;
-            
-            // Create status bars group that will not inherit rotation
-            const statusGroup = new THREE.Group();
-            statusGroup.position.y = 2.0; // Position above player's head
-            
-            const barWidth = 1;
-            const barHeight = 0.1;
-            const barSpacing = 0.05;
-            const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-
-            // Create background bars
-            const backgroundMaterial = new THREE.MeshBasicMaterial({
-                color: 0x333333,
-                side: THREE.DoubleSide,
-                transparent: true,
-                opacity: 0.7
-            });
-
-            // Create three status bars (life, mana, karma)
-            const bars = ['life', 'mana', 'karma'].map((type, index) => {
-                const background = new THREE.Mesh(barGeometry, backgroundMaterial.clone());
-                const fillMaterial = new THREE.MeshBasicMaterial({
-                    side: THREE.DoubleSide,
-                    transparent: true,
-                    opacity: 0.9
-                });
-                const fill = new THREE.Mesh(barGeometry, fillMaterial);
-                
-                // Set colors based on type
-                if (type === 'life') {
-                    fillMaterial.color = new THREE.Color(0xff0000); // Red for life
-                } else if (type === 'mana') {
-                    fillMaterial.color = new THREE.Color(0x0000ff); // Blue for mana
-                } else if (type === 'karma') {
-                    background.material.color = new THREE.Color(0xffffff); // White bg for karma
-                    fillMaterial.color = new THREE.Color(0xffcc00); // Gold for karma
-                }
-                
-                // Position bars vertically stacked with smaller spacing
-                const yOffset = (barHeight + barSpacing) * (2 - index);
-                background.position.y = yOffset;
-                fill.position.y = yOffset;
-                fill.position.z = 0.001; // Slightly in front
-                
-                // Set initial scale
-                fill.scale.x = 1.0;
-                
-                // Center bars horizontally
-                background.position.x = 0;
-                fill.position.x = 0;
-
-                statusGroup.add(background);
-                statusGroup.add(fill);
-
-                return {
-                    background,
-                    fill,
-                    width: barWidth,
-                    type
-                };
-            });
-            
-            // Store status bars and group in player model's userData
-            playerModel.userData = {
-                statusBars: bars,
-                statusGroup: statusGroup,
-                isPlayer: true,
-                id: id,
-                stats: {
-                    currentLife: 100,
-                    maxLife: 100,
-                    currentMana: 100,
-                    maxMana: 100,
-                    currentKarma: 50,
-                    maxKarma: 100,
-                    path: null
-                }
-            };
-
-            // Add status group to scene
-            this.game.scene.add(statusGroup);
-            
-            // Add shadow casting to all meshes in the model
-            playerModel.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
-            
-            return playerModel;
-        } catch (error) {
-            console.error('Failed to create player:', error);
-            return null;
+        
+        if (this.characterModel) {
+            // Clone the preloaded model
+            playerModel = this.characterModel.clone();
+        } else {
+            // Create fallback model if no model is loaded
+            playerModel = this.createFallbackCharacterModel();
         }
+        
+        // Set position
+        if (position) {
+            playerModel.position.set(position.x, position.y, position.z);
+        } else {
+            playerModel.position.set(0, 3, 0); // Default to temple center
+        }
+        
+        // Add to scene
+        this.game.scene.add(playerModel);
+        
+        // Store reference to player
+        this.game.players.set(id, playerModel);
+        
+        // Add shadow casting
+        playerModel.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+            }
+        });
+        
+        // Store player stats
+        playerModel.userData = {
+            id: id,
+            stats: {
+                currentLife: 100,
+                maxLife: 100,
+                currentMana: 100,
+                maxMana: 100,
+                currentKarma: 50,
+                maxKarma: 100,
+                path: null
+            },
+            isDead: false
+        };
+        
+        console.log('Player created:', id);
+        return playerModel;
     }
     
     async createNetworkPlayer(id, position, stats) {

@@ -98,8 +98,8 @@ export class NetworkManager {
             console.log('\n=== Received Current Players ===');
             console.log('Players:', players);
             
-            // Clear existing players and their status bars
-            this.game.playerManager.players.forEach((playerMesh) => {
+            // Clear all existing player models
+            this.game.playerManager.players.forEach((playerMesh, playerId) => {
                 if (playerMesh.userData.statusGroup) {
                     this.game.scene.remove(playerMesh.userData.statusGroup);
                 }
@@ -109,41 +109,13 @@ export class NetworkManager {
             
             // Add all players
             for (const player of players) {
-                if (player.id === this.socket.id) {
-                    // Create local player if it doesn't exist
-                    if (!this.game.localPlayer) {
-                        const localPlayer = await this.game.playerManager.createPlayer(
-                            player.id,
-                            player.position,
-                            { y: player.rotation.y || 0 },
-                            true // isLocal
-                        );
-                        
-                        if (localPlayer) {
-                            this.game.localPlayer = localPlayer;
-                            this.game.scene.add(localPlayer);
-                            this.game.playerManager.players.set(player.id, localPlayer);
-                            
-                            // Force update of local player status bars
-                            if (this.game.updatePlayerStatus) {
-                                this.game.updatePlayerStatus(localPlayer, {
-                                    life: this.game.playerStats.currentLife,
-                                    maxLife: this.game.playerStats.maxLife,
-                                    mana: this.game.playerStats.currentMana,
-                                    maxMana: this.game.playerStats.maxMana,
-                                    karma: this.game.playerStats.currentKarma,
-                                    maxKarma: this.game.playerStats.maxKarma
-                                });
-                            }
-                        }
-                    }
-                } else {
-                    // Create other players
+                // Ensure player is only added if it doesn't already exist
+                if (!this.game.playerManager.players.has(player.id)) {
                     const playerMesh = await this.game.playerManager.createPlayer(
                         player.id,
                         player.position,
                         { y: player.rotation.y || 0 },
-                        false // not local
+                        player.id === this.socket.id // isLocal
                     );
                     
                     if (playerMesh) {
@@ -276,8 +248,23 @@ export class NetworkManager {
         // Handle disconnect
         this.socket.on('disconnect', () => {
             console.log('Disconnected from server');
-            this.isConnected = false;
-            this.cleanup();
+            // Disable player controls
+            this.game.controls.forward = false;
+            this.game.controls.backward = false;
+            this.game.controls.left = false;
+            this.game.controls.right = false;
+            
+            // Optionally, display a message to the user
+            alert('Disconnected from server. Please check your connection.');
+            
+            // Remove all players from the scene
+            this.game.playerManager.players.forEach((playerMesh, playerId) => {
+                if (playerMesh.userData.statusGroup) {
+                    this.game.scene.remove(playerMesh.userData.statusGroup);
+                }
+                this.game.scene.remove(playerMesh);
+            });
+            this.game.playerManager.players.clear();
         });
 
         // Handle game state update

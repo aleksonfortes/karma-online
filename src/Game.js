@@ -6,9 +6,10 @@ import { SkillsManager } from './modules/skills/SkillsManager.js';
 import { KarmaManager } from './modules/karma/KarmaManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { getServerUrl } from './config.js';
 
 export class Game {
-    constructor(serverUrl) {
+    constructor() {
         // Initialize Three.js components
         this.scene = new THREE.Scene();
         this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -19,7 +20,7 @@ export class Game {
         this.localPlayer = null;
         this.isRunning = true;
         this.isAlive = true;
-        this.SERVER_URL = serverUrl;
+        this.SERVER_URL = getServerUrl();
         
         // Controls
         this.controls = {
@@ -103,38 +104,43 @@ export class Game {
     }
 
     async initializeManagers() {
-        // Create all managers
-        this.uiManager = new UIManager(this);
-        this.networkManager = new NetworkManager(this);
-        this.playerManager = new PlayerManager(this);
-        this.skillsManager = new SkillsManager(this);
-        this.karmaManager = new KarmaManager(this);
-        this.npcManager = new NPCManager(this);
-        
-        // Initialize UI first so we can show loading indicators
-        await this.uiManager.init();
-        this.uiManager.showLoadingScreen('Connecting to server...');
-        
-        // Initialize network first - required for game to work
-        const networkInitialized = await this.networkManager.init();
-        if (!networkInitialized) {
-            throw new Error('Failed to connect to server');
+        try {
+            // Create all managers
+            this.uiManager = new UIManager(this);
+            this.networkManager = new NetworkManager(this);
+            this.playerManager = new PlayerManager(this);
+            this.skillsManager = new SkillsManager(this);
+            this.karmaManager = new KarmaManager(this);
+            this.npcManager = new NPCManager(this);
+            
+            // Initialize UI first so we can show loading indicators
+            await this.uiManager.init();
+            this.uiManager.showLoadingScreen('Connecting to server...');
+            
+            // Initialize network first - required for game to work
+            const networkInitialized = await this.networkManager.init();
+            if (!networkInitialized) {
+                throw new Error('Failed to connect to server');
+            }
+            
+            // Initialize player
+            await this.playerManager.init();
+            await this.playerManager.loadCharacterModel();
+            
+            // Initialize other systems that depend on player
+            await this.skillsManager.init();
+            await this.karmaManager.init();
+            
+            // NPCs should be initialized last
+            await this.npcManager.init();
+            
+            // Now that everything is loaded, hide loading screen and show game UI
+            this.uiManager.hideLoadingScreen();
+            this.uiManager.createUI();
+        } catch (error) {
+            console.error('Failed to initialize managers:', error);
+            this.handleInitializationError(error);
         }
-        
-        // Initialize player
-        await this.playerManager.init();
-        await this.playerManager.loadCharacterModel();
-        
-        // Initialize other systems that depend on player
-        await this.skillsManager.init();
-        await this.karmaManager.init();
-        
-        // NPCs should be initialized last
-        await this.npcManager.init();
-        
-        // Now that everything is loaded, hide loading screen and show game UI
-        this.uiManager.hideLoadingScreen();
-        this.uiManager.createUI();
     }
 
     // Handle network-related events from NetworkManager
@@ -358,9 +364,8 @@ export class Game {
         ];
 
         // Create statue material
-        const statueMaterial = new THREE.MeshPhongMaterial({
+        const statueMaterial = new THREE.MeshStandardMaterial({
             color: 0x808080,
-            shininess: 10,
             roughness: 0.8,
         });
 
