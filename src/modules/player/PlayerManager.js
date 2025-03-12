@@ -198,55 +198,38 @@ export class PlayerManager {
     }
     
     async createPlayerMesh(id, position, rotation) {
-        // Load model for player
-        let playerModel;
+        let playerMesh;
         
-        if (this.characterModel) {
-            // Clone the preloaded model
-            playerModel = this.characterModel.clone();
-        } else {
-            // Create fallback model if no model is loaded
-            playerModel = this.createFallbackCharacterModel();
-        }
-        
-        // Set position
-        if (position) {
-            playerModel.position.set(position.x, position.y, position.z);
-        } else {
-            playerModel.position.set(0, 3, 0); // Default to temple center
-        }
-        
-        // Add to scene
-        this.game.scene.add(playerModel);
-        
-        // Store reference to player
-        this.game.players.set(id, playerModel);
-        
-        // Add shadow casting
-        playerModel.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
+        try {
+            // Try loading the character model first
+            if (!this.characterModel) {
+                await this.loadCharacterModel();
             }
-        });
+            
+            // Clone the model to ensure each player gets their own instance
+            playerMesh = this.characterModel.clone();
+            playerMesh.position.set(position.x, position.y, position.z);
+            playerMesh.rotation.y = rotation.y;
+            
+            // Set player ID and other metadata
+            playerMesh.userData = {
+                id: id,
+                isLocal: false,
+                stats: {
+                    life: 100,
+                    maxLife: 100,
+                    mana: 100,
+                    maxMana: 100,
+                    karma: 50,
+                    maxKarma: 100
+                }
+            };
+        } catch (error) {
+            console.error('Error creating player mesh, using fallback:', error);
+            playerMesh = this.createFallbackCharacterModel();
+        }
         
-        // Store player stats
-        playerModel.userData = {
-            id: id,
-            stats: {
-                currentLife: 100,
-                maxLife: 100,
-                currentMana: 100,
-                maxMana: 100,
-                currentKarma: 50,
-                maxKarma: 100,
-                path: null
-            },
-            isDead: false
-        };
-        
-        console.log('Player created:', id);
-        return playerModel;
+        return playerMesh;
     }
     
     async createNetworkPlayer(id, position, stats) {

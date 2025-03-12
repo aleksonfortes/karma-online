@@ -62,11 +62,14 @@ export class GameServer {
             const player = this.createPlayer(socket.id);
             this.players.set(socket.id, player);
             
-            // Send current players to new player
-            socket.emit('currentPlayers', Array.from(this.players.values()));
+            // Send current game state to new player
+            socket.emit('initGameState', {
+                players: Array.from(this.players.values()),
+                serverTime: Date.now()
+            });
             
             // Broadcast new player to others
-            socket.broadcast.emit('newPlayer', player);
+            this.io.emit('newPlayer', player);
 
             // Handle player movement with rate limiting
             socket.on('playerMovement', (data) => {
@@ -83,41 +86,22 @@ export class GameServer {
                         player.karma = data.karma;
                         player.maxKarma = data.maxKarma;
                         
-                        // Don't update life from client movement updates
-                        // This prevents client-side life regeneration
-                        player.mana = data.mana;
-                        player.maxMana = data.maxMana;
-                        this.lastUpdateTime.set(socket.id, now);
-                        
                         // Broadcast movement to other players
-                        socket.broadcast.emit('playerMoved', {
+                        this.io.emit('playerMoved', {
                             id: socket.id,
                             position: data.position,
                             rotation: data.rotation,
                             path: data.path,
                             karma: data.karma,
                             maxKarma: data.maxKarma,
-                            life: player.life, // Send server's life value
+                            life: player.life,
                             maxLife: player.maxLife,
                             mana: data.mana,
                             maxMana: data.maxMana
                         });
+                        
+                        this.lastUpdateTime.set(socket.id, now);
                     }
-                }
-            });
-
-            // Handle player death
-            socket.on('playerDied', (data) => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    // Remove player from server state
-                    this.players.delete(socket.id);
-                    this.gameState.players.delete(socket.id);
-                    this.lastUpdateTime.delete(socket.id);
-                    
-                    // Notify all clients that the player has died and should be removed
-                    this.io.emit('playerLeft', socket.id);
-                    console.log(`Player died and left: ${player.displayName} (Total Players: ${this.players.size})`);
                 }
             });
 
@@ -130,42 +114,6 @@ export class GameServer {
                     this.lastUpdateTime.delete(socket.id);
                     this.io.emit('playerLeft', socket.id);
                     console.log(`Player left: ${player.displayName} (Total Players: ${this.players.size})`);
-                }
-            });
-
-            // Handle karma updates
-            socket.on('karmaUpdate', (data) => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    // Update only karma in server state
-                    player.karma = data.karma;
-                    player.maxKarma = data.maxKarma;
-                    
-                    // Update effects
-                    this.updatePlayerEffects(player);
-                    
-                    // Broadcast karma update only
-                    this.io.emit('karmaUpdate', {
-                        id: socket.id,
-                        karma: data.karma,
-                        maxKarma: data.maxKarma,
-                        effects: player.effects
-                    });
-                }
-            });
-
-            // Add new handler for mana updates
-            socket.on('manaUpdate', (data) => {
-                const player = this.players.get(socket.id);
-                if (player) {
-                    player.mana = data.mana;
-                    player.maxMana = data.maxMana;
-                    
-                    this.io.emit('manaUpdate', {
-                        id: socket.id,
-                        mana: data.mana,
-                        maxMana: data.maxMana
-                    });
                 }
             });
         });
