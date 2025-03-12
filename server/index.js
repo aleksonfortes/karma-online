@@ -18,6 +18,19 @@ app.get('/api/status', (req, res) => {
     res.status(200).json({ status: 'online' });
 });
 
+// Add a configuration endpoint to provide server URL and other settings to the client
+app.get('/api/config', (req, res) => {
+    const protocol = req.protocol;
+    const host = req.get('host');
+    const baseUrl = `${protocol}://${host}`;
+    
+    res.status(200).json({
+        serverUrl: baseUrl,
+        environment: process.env.NODE_ENV || 'development',
+        apiVersion: '1.0.0'
+    });
+});
+
 // Handle client-side routing
 app.get('*', (req, res) => {
     res.sendFile(join(__dirname, '../dist/index.html'));

@@ -7,7 +7,7 @@ import { KarmaManager } from './modules/karma/KarmaManager.js';
 import { TerrainManager } from './modules/terrain/TerrainManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import ModelScales from './config/ModelScales.js';
+import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
 
 export class Game {
@@ -480,7 +480,7 @@ export class Game {
 
             // Set up the dark NPC model (right side)
             const darkModel = darkNPC.scene;
-            const darkConfig = ModelScales.TEMPLE_NPC.DARK;
+            const darkConfig = GameConstants.TEMPLE_NPC.DARK;
             darkModel.scale.set(darkConfig.SCALE, darkConfig.SCALE, darkConfig.SCALE);
             darkModel.position.set(
                 darkConfig.POSITION.x, 
@@ -491,7 +491,7 @@ export class Game {
             
             // Set up the light NPC model (left side)
             const lightModel = lightNPC.scene;
-            const lightConfig = ModelScales.TEMPLE_NPC.LIGHT;
+            const lightConfig = GameConstants.TEMPLE_NPC.LIGHT;
             lightModel.scale.set(lightConfig.SCALE, lightConfig.SCALE, lightConfig.SCALE);
             lightModel.position.set(
                 lightConfig.POSITION.x, 
@@ -543,11 +543,11 @@ export class Game {
             this.statueColliders.push(
                 {
                     position: new THREE.Vector3(darkConfig.POSITION.x, 0, darkConfig.POSITION.z),
-                    radius: ModelScales.NPC.DARK.COLLISION_RADIUS
+                    radius: GameConstants.NPC.DARK.COLLISION_RADIUS
                 },
                 {
                     position: new THREE.Vector3(lightConfig.POSITION.x, 0, lightConfig.POSITION.z),
-                    radius: ModelScales.NPC.LIGHT.COLLISION_RADIUS
+                    radius: GameConstants.NPC.LIGHT.COLLISION_RADIUS
                 }
             );
 

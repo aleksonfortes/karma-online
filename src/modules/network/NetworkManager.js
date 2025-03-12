@@ -1,5 +1,6 @@
 import io from 'socket.io-client';
 import * as THREE from 'three';
+import { getServerUrl } from '../../config.js';
 
 // Client-side constants that mirror server constants
 const NETWORK_CONSTANTS = {
@@ -14,12 +15,10 @@ export class NetworkManager {
         this.isOfflineMode = false;
         this.isConnected = false;
         
-        // Initialize socket connection with exact same options as original game
-        const SERVER_URL = window.location.hostname === 'localhost' && window.location.port === '5173'
-            ? 'http://localhost:3000'  // Development
-            : window.location.origin;  // Production
+        // Use the server URL from the centralized configuration
+        const SERVER_URL = getServerUrl();
             
-        console.log('Connecting to server...');
+        console.log('Connecting to server at:', SERVER_URL);
         this.socket = io(SERVER_URL, {
             transports: ['websocket'],
             reconnection: true,

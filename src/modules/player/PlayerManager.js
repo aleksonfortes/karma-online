@@ -1,16 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import ModelScales from '../../config/ModelScales.js';
+import GameConstants from '../../../server/src/config/GameConstants.js';
 
 // Client-side constants that mirror server constants
-export const PLAYER_CONSTANTS = {
-    // These values should match the server's GAME_CONSTANTS
-    DEFAULT_POSITION: { x: 0, y: 0, z: 0 }, // Set player at ground level to match NPCs
-    DEFAULT_ROTATION: { y: 0 },
-    MOVEMENT_SPEED: 10,
-    ROTATION_SPEED: 3,
-    COLLISION_RADIUS: 1.0
-};
+const PLAYER_CONSTANTS = GameConstants.PLAYER;
 
 export class PlayerManager {
     constructor(game) {
@@ -70,13 +63,13 @@ export class PlayerManager {
                         const modelGroup = new THREE.Group();
                         
                         // Set scale using the centralized configuration
-                        const scale = ModelScales.PLAYER.DEFAULT;
+                        const scale = GameConstants.PLAYER.MODEL_SCALE;
                         gltf.scene.scale.set(scale, scale, scale);
                         
                         // Position the model correctly within the group
                         // The model needs to be positioned lower to appear at ground level
                         // With the smaller scale (4.5 vs 5.0), we need to adjust the position slightly
-                        gltf.scene.position.y = -1.65; // Adjusted from -1.8 to -1.65 to account for the smaller scale
+                        gltf.scene.position.y = GameConstants.PLAYER.MODEL_POSITION_Y_OFFSET;
                         
                         // Add the model to the group after positioning
                         modelGroup.add(gltf.scene);
@@ -160,9 +153,9 @@ export class PlayerManager {
         }
         
         // Create player with default position - actual position will be set by server
-        const position = { ...PLAYER_CONSTANTS.DEFAULT_POSITION };
+        const position = { ...GameConstants.PLAYER.DEFAULT_POSITION };
         // No need to adjust y position as it's already set to 0 in PLAYER_CONSTANTS
-        const rotation = { ...PLAYER_CONSTANTS.DEFAULT_ROTATION };
+        const rotation = { ...GameConstants.PLAYER.DEFAULT_ROTATION };
         
         const player = await this.createPlayer(socketId, position, rotation, true);
         if (player) {
@@ -184,7 +177,7 @@ export class PlayerManager {
         
         // Use default position if none provided
         if (!position) {
-            position = { ...PLAYER_CONSTANTS.DEFAULT_POSITION };
+            position = { ...GameConstants.PLAYER.DEFAULT_POSITION };
         }
         
         const player = await this.createPlayerMesh(id, position, rotation);
@@ -251,9 +244,9 @@ export class PlayerManager {
         } else {
             // If no position provided (shouldn't happen), use default
             playerModel.position.set(
-                PLAYER_CONSTANTS.DEFAULT_POSITION.x,
-                PLAYER_CONSTANTS.DEFAULT_POSITION.y,
-                PLAYER_CONSTANTS.DEFAULT_POSITION.z
+                GameConstants.PLAYER.DEFAULT_POSITION.x,
+                GameConstants.PLAYER.DEFAULT_POSITION.y,
+                GameConstants.PLAYER.DEFAULT_POSITION.z
             );
         }
         
@@ -472,9 +465,9 @@ export class PlayerManager {
             
             // Set temporary position until server responds
             player.position.set(
-                PLAYER_CONSTANTS.DEFAULT_POSITION.x,
-                PLAYER_CONSTANTS.DEFAULT_POSITION.y,
-                PLAYER_CONSTANTS.DEFAULT_POSITION.z
+                GameConstants.PLAYER.DEFAULT_POSITION.x,
+                GameConstants.PLAYER.DEFAULT_POSITION.y,
+                GameConstants.PLAYER.DEFAULT_POSITION.z
             );
         }
         // For network players, position will be updated by server
