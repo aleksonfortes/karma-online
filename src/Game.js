@@ -691,32 +691,20 @@ export class Game {
     setupInputHandlers() {
         console.log('Setting up input handlers...');
         
-        // Keyboard events
+        // Keyboard events for movement
         document.addEventListener('keydown', (event) => {
             if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
             
             switch (event.code) {
-                case 'KeyW':
-                    this.controls.forward = true;
-                    break;
-                case 'KeyS':
-                    this.controls.backward = true;
-                    break;
-                case 'KeyA':
-                    this.controls.left = true;
-                    break;
-                case 'KeyD':
-                    this.controls.right = true;
-                    break;
-                case 'Space':
-                    if (this.isAlive) {
-                        this.skillsManager.useMartialArts();
-                    }
+                case 'KeyW': this.controls.forward = true; break;
+                case 'KeyS': this.controls.backward = true; break;
+                case 'KeyA': this.controls.left = true; break;
+                case 'KeyD': this.controls.right = true; break;
+                case 'Space': 
+                    if (this.isAlive) this.skillsManager?.useMartialArts();
                     break;
                 case 'KeyE':
-                    if (this.isAlive) {
-                        this.handleInteraction();
-                    }
+                    if (this.isAlive) this.npcManager?.handleInteraction();
                     break;
             }
         });
@@ -725,31 +713,20 @@ export class Game {
             if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
             
             switch (event.code) {
-                case 'KeyW':
-                    this.controls.forward = false;
-                    break;
-                case 'KeyS':
-                    this.controls.backward = false;
-                    break;
-                case 'KeyA':
-                    this.controls.left = false;
-                    break;
-                case 'KeyD':
-                    this.controls.right = false;
-                    break;
+                case 'KeyW': this.controls.forward = false; break;
+                case 'KeyS': this.controls.backward = false; break;
+                case 'KeyA': this.controls.left = false; break;
+                case 'KeyD': this.controls.right = false; break;
             }
         });
         
-        // Mouse wheel for zoom
+        // Add mouse wheel event listener for zoom
         window.addEventListener('wheel', (event) => {
-            this.currentZoom = Math.max(
-                this.minZoom,
-                Math.min(this.maxZoom,
-                    this.currentZoom + event.deltaY * 0.01 * this.zoomSpeed)
-            );
+            const zoomAmount = event.deltaY * 0.01 * this.zoomSpeed;
+            this.currentZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.currentZoom + zoomAmount));
         });
         
-        // Window resize
+        // Update camera aspect ratio and size when window resizes
         window.addEventListener('resize', () => {
             this.camera.aspect = window.innerWidth / window.innerHeight;
             this.camera.updateProjectionMatrix();
@@ -767,13 +744,13 @@ export class Game {
             
             requestAnimationFrame(animate);
             
-            const delta = this.clock.getDelta();
-            
-            // Update game state
-            this.update(delta);
-            
-            // Render scene
-            this.renderer.render(this.scene, this.camera);
+            try {
+                const delta = this.clock.getDelta();
+                this.update(delta);
+                this.renderer.render(this.scene, this.camera);
+            } catch (error) {
+                console.error('Error in animation loop:', error);
+            }
         };
         
         animate();
@@ -783,30 +760,109 @@ export class Game {
     update(delta) {
         // Update player movement if we have a local player
         if (this.localPlayer && this.isAlive) {
-            this.playerManager.updatePlayerMovement(delta);
+            this.updatePlayerMovement(delta);
         }
         
-        // Update camera position
+        // Update all managers
+        this.networkManager?.update(delta);
+        this.playerManager?.update(delta);
+        this.skillsManager?.update(delta);
+        this.karmaManager?.update(delta);
+        this.npcManager?.update(delta);
+        this.uiManager?.update(delta);
+        
+        // Update camera
         if (this.localPlayer) {
             this.updateCamera();
         }
-        
-        // Update managers
-        if (this.networkManager) this.networkManager.update(delta);
-        if (this.karmaManager) this.karmaManager.update(delta);
-        if (this.npcManager) this.npcManager.update(delta);
+    }
+
+    updatePlayerMovement(delta) {
+        if (!this.localPlayer || !this.isAlive) return;
+
+        const moveSpeed = 0.2;
+        let moveX = 0;
+        let moveZ = 0;
+        let didMove = false;
+
+        // Calculate movement direction
+        if (this.controls.forward) { moveZ = -moveSpeed; didMove = true; }
+        if (this.controls.backward) { moveZ = moveSpeed; didMove = true; }
+        if (this.controls.left) { moveX = -moveSpeed; didMove = true; }
+        if (this.controls.right) { moveX = moveSpeed; didMove = true; }
+
+        if (didMove) {
+            // Store previous position for collision detection
+            const previousPosition = this.localPlayer.position.clone();
+            
+            // Calculate target rotation based on movement direction
+            const targetRotation = Math.atan2(moveX, moveZ);
+            
+            // Set player rotation immediately to face movement direction
+            this.localPlayer.rotation.y = targetRotation;
+            
+            // Move in the direction the player is facing
+            this.localPlayer.position.x += moveX;
+            this.localPlayer.position.z += moveZ;
+            
+            // Check collisions
+            if (this.checkCollision(this.localPlayer.position)) {
+                this.localPlayer.position.copy(previousPosition);
+            }
+
+            // Send position update to server
+            this.networkManager?.sendPlayerState({
+                x: this.localPlayer.position.x,
+                y: this.localPlayer.position.y,
+                z: this.localPlayer.position.z,
+                rotation: this.localPlayer.rotation.y,
+                animation: 'running'
+            });
+        }
     }
 
     updateCamera() {
         if (!this.localPlayer) return;
 
-        // Calculate target camera position
-        const targetPosition = this.localPlayer.position.clone();
-        targetPosition.y += this.cameraOffset.y * (this.currentZoom / 15);
-        targetPosition.z += this.cameraOffset.z * (this.currentZoom / 15);
+        const playerPosition = this.localPlayer.position;
+        const zoomFactor = this.currentZoom / 15;
+        const offsetY = this.cameraOffset.y * zoomFactor;
+        const offsetZ = this.cameraOffset.z * zoomFactor;
+        
+        // Smoothly move camera
+        const smoothness = 0.05;
+        this.camera.position.x += (playerPosition.x - this.camera.position.x) * smoothness;
+        this.camera.position.y += (playerPosition.y + offsetY - this.camera.position.y) * smoothness;
+        this.camera.position.z += (playerPosition.z + offsetZ - this.camera.position.z) * smoothness;
+        
+        // Look at player
+        const lookAtPosition = playerPosition.clone();
+        lookAtPosition.y += 1.5;
+        this.camera.lookAt(lookAtPosition);
+    }
 
-        // Smoothly move camera to target position
-        this.camera.position.lerp(targetPosition, 0.1);
-        this.camera.lookAt(this.localPlayer.position);
+    checkCollision(position) {
+        // Check terrain boundaries
+        const terrainSize = 100;
+        const halfTerrainSize = terrainSize / 2 - 1;
+        
+        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
+            return true;
+        }
+        
+        // Check statue collisions
+        if (this.statueColliders) {
+            for (const collider of this.statueColliders) {
+                const dx = position.x - collider.position.x;
+                const dz = position.z - collider.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < collider.radius + 0.5) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
     }
 } 
