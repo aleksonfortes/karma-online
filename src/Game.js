@@ -347,15 +347,16 @@ export class Game {
             bumpScale: 0.2,
         });
 
-        // Create elevated platform
-        const baseHeight = 1.5;
+        // Create temple floor at ground level (no elevated platform)
+        // Using a very thin box instead of completely removing it to maintain the floor texture
+        const baseHeight = 0.05; // Very thin floor instead of 1.5
         const baseGeometry = new THREE.BoxGeometry(30, baseHeight, 30);
         const basePlatform = new THREE.Mesh(baseGeometry, floorMaterial);
-        basePlatform.position.y = baseHeight / 2; // Position at half height
+        basePlatform.position.y = baseHeight / 2; // Position at half height (almost at ground level)
         basePlatform.receiveShadow = true;
         templeGroup.add(basePlatform);
 
-        // Add corner statues - adjusted positions for new height
+        // Add corner statues - adjusted positions for ground level
         const statuePositions = [
             { x: 13, z: 13 },  // Northeast
             { x: -13, z: 13 }, // Northwest
@@ -412,24 +413,24 @@ export class Game {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: baseWidth // Changed from baseWidth / 1.5 to baseWidth for larger collision area
+                radius: baseWidth // Maintain the same collision radius
             });
         });
 
-        // Create cross-shaped upper platform
+        // Create cross-shaped floor pattern
         const floorGroup = new THREE.Group();
         
         // Vertical part of cross
-        const verticalGeometry = new THREE.BoxGeometry(8, 0.5, 24);
+        const verticalGeometry = new THREE.BoxGeometry(8, 0.1, 24);
         const verticalFloor = new THREE.Mesh(verticalGeometry, floorMaterial);
-        verticalFloor.position.y = baseHeight + 0.25; // Position above base
+        verticalFloor.position.y = baseHeight + 0.05; // Position just above base
         verticalFloor.receiveShadow = true;
         floorGroup.add(verticalFloor);
         
         // Horizontal part of cross
-        const horizontalGeometry = new THREE.BoxGeometry(24, 0.5, 8);
+        const horizontalGeometry = new THREE.BoxGeometry(24, 0.1, 8);
         const horizontalFloor = new THREE.Mesh(horizontalGeometry, floorMaterial);
-        horizontalFloor.position.y = baseHeight + 0.25; // Position above base
+        horizontalFloor.position.y = baseHeight + 0.05; // Position just above base
         horizontalFloor.receiveShadow = true;
         floorGroup.add(horizontalFloor);
         
@@ -437,7 +438,7 @@ export class Game {
 
         // Add temple light
         const templeLight = new THREE.PointLight(0xffd700, 0.8, 30);
-        templeLight.position.set(0, baseHeight + 4, 0); // Adjust light height
+        templeLight.position.set(0, 4, 0); // Adjust light height to be lower
         templeGroup.add(templeLight);
 
         // Add NPC to the temple
@@ -477,14 +478,14 @@ export class Game {
 
             // Set up the dark NPC model (right side)
             const darkModel = darkNPC.scene;
-            darkModel.scale.set(3.5, 3.5, 3.5);
-            darkModel.position.set(7, 5.5, -9);
+            darkModel.scale.set(2.5, 2.5, 2.5);
+            darkModel.position.set(7, 3.5, -9);
             darkModel.rotation.y = -Math.PI / 4;
             
             // Set up the light NPC model (left side)
             const lightModel = lightNPC.scene;
-            lightModel.scale.set(6, 6, 6);
-            lightModel.position.set(-7, 2.0, -9);
+            lightModel.scale.set(5.0, 5.0, 5.0);
+            lightModel.position.set(-7, 0.5, -9.5);
             lightModel.rotation.y = Math.PI / 4;
             
             // Add shadows to both NPCs
@@ -497,10 +498,14 @@ export class Game {
                 });
             });
 
-            // Add interaction text to both NPCs with adjusted y-offsets
-            this.addInteractionText(darkModel, 1.2);
-            this.addInteractionText(lightModel, 1.1);  // Lower light NPC's text position
-
+            // Add interaction text to both NPCs, positioned directly above their heads
+            const darkTextSprite = this.addInteractionText(darkModel, 1.1);
+            const lightTextSprite = this.addInteractionText(lightModel, 1.04);
+            
+            // Ensure text sprites have the same visual size
+            darkTextSprite.scale.set(0.5, 0.125, 1);
+            lightTextSprite.scale.set(0.3, 0.075, 0.8);
+            
             // Add both NPCs to temple group
             templeGroup.add(darkModel);
             templeGroup.add(lightModel);
@@ -514,7 +519,7 @@ export class Game {
                 this.statueColliders = [];
             }
 
-            // Add colliders for both NPCs
+            // Add colliders for both NPCs with the same radius
             this.statueColliders.push(
                 {
                     position: new THREE.Vector3(7, 0, -9),
@@ -569,7 +574,7 @@ export class Game {
 
         // Create sprite and add to NPC
         const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.scale.set(0.4, 0.1, 1);
+        sprite.scale.set(0.5, 0.12, 1);
         sprite.position.y = yOffset;
         sprite.renderOrder = 999;
         
@@ -578,6 +583,9 @@ export class Game {
 
         // Store sprite reference
         npcModel.interactionSprite = sprite;
+        
+        // Return the sprite for further adjustments if needed
+        return sprite;
     }
 
     createAmbientParticles() {
