@@ -431,24 +431,17 @@ export class Game {
                 // Update all players' status bars
                 this.players.forEach((playerMesh) => {
                     if (playerMesh.userData && playerMesh.userData.stats) {
-                        this.updatePlayerStatus(playerMesh, playerMesh.userData.stats, true);
+                        // Removed updatePlayerStatus call
                     }
                 });
                 
                 // Update local player status
                 if (this.localPlayer && this.playerStats) {
-                    this.updatePlayerStatus(this.localPlayer, {
-                        life: this.playerStats.life,
-                        maxLife: this.playerStats.maxLife,
-                        mana: this.playerStats.mana,
-                        maxMana: this.playerStats.maxMana,
-                        karma: this.playerStats.karma,
-                        maxKarma: this.playerStats.maxKarma
-                    }, true);
+                    // Removed updatePlayerStatus call
                 }
                 
                 // Update UI status bars
-                this.updateStatusBars();
+                // Removed updateStatusBars call
                 
                 this.lastStatusUpdate = now;
             }
@@ -460,7 +453,7 @@ export class Game {
             this.updatePlayer();
             
             // Update status bar positions
-            this.updateStatusBarPositions();
+            // Removed updateStatusBarPositions call
             
             // Update network state if connected
             if (this.networkManager) {
@@ -486,89 +479,7 @@ export class Game {
         }
     }
     
-    // Helper method to update status bar positions
-    updateStatusBarPositions() {
-        // Update status bar positions for all players
-        this.players.forEach(player => {
-            if (player && player.userData && player.userData.statusGroup) {
-                const worldPosition = new THREE.Vector3();
-                player.getWorldPosition(worldPosition);
-                
-                player.userData.statusGroup.position.set(
-                    worldPosition.x,
-                    worldPosition.y + 2.0, // Position above player's head
-                    worldPosition.z
-                );
-                
-                // Make status group face the camera
-                player.userData.statusGroup.quaternion.copy(this.camera.quaternion);
-            }
-        });
-        
-        // Also update local player if not in players map
-        if (this.localPlayer && 
-            this.localPlayer.userData && 
-            this.localPlayer.userData.statusGroup && 
-            !this.players.has(this.socket?.id)) {
-            
-            const worldPosition = new THREE.Vector3();
-            this.localPlayer.getWorldPosition(worldPosition);
-            
-            this.localPlayer.userData.statusGroup.position.set(
-                worldPosition.x,
-                worldPosition.y + 2.0, // Position above player's head
-                worldPosition.z
-            );
-            
-            // Make status group face the camera
-            this.localPlayer.userData.statusGroup.quaternion.copy(this.camera.quaternion);
-        }
-    }
-    
-    updatePlayerStatus(playerMesh, stats, silent = false) {
-        if (!playerMesh.userData.statusGroup) {
-            return;
-        }
-        
-        // Remove existing status bars
-        playerMesh.userData.statusGroup.children.forEach(child => {
-            playerMesh.userData.statusGroup.remove(child);
-        });
-        
-        // Create new status bars
-        const createStatusBar = (value, maxValue, color, yOffset) => {
-            const barWidth = 2;
-            const barHeight = 0.1;
-            
-            // Background bar
-            const backgroundGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-            const backgroundMaterial = new THREE.MeshBasicMaterial({
-                color: 0x333333,
-                transparent: true,
-                opacity: 0.7
-            });
-            const backgroundBar = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
-            backgroundBar.position.set(0, yOffset, 0);
-            
-            // Foreground bar
-            const foregroundGeometry = new THREE.PlaneGeometry((value / maxValue) * barWidth, barHeight);
-            const foregroundMaterial = new THREE.MeshBasicMaterial({ color });
-            const foregroundBar = new THREE.Mesh(foregroundGeometry, foregroundMaterial);
-            foregroundBar.position.set(-(barWidth / 2) + (foregroundGeometry.parameters.width / 2), yOffset, 0.01);
-            
-            playerMesh.userData.statusGroup.add(backgroundBar);
-            playerMesh.userData.statusGroup.add(foregroundBar);
-        };
-        
-        // Life bar (red)
-        createStatusBar(stats.life, stats.maxLife, 0xff0000, 0.2);
-        
-        // Mana bar (blue)
-        createStatusBar(stats.mana, stats.maxMana, 0x0000ff, 0.1);
-        
-        // Karma bar (yellow)
-        createStatusBar(stats.karma, stats.maxKarma, 0xffff00, 0);
-    }
+    // Removed updateStatusBarPositions function
     
     setupCamera() {
         // Set initial camera position to match original isometric view
@@ -604,14 +515,7 @@ export class Game {
             
             // Update UI
             if (this.localPlayer) {
-                this.updatePlayerStatus(this.localPlayer, {
-                    life: this.playerStats.currentLife,
-                    maxLife: this.playerStats.maxLife,
-                    mana: this.playerStats.currentMana,
-                    maxMana: this.playerStats.maxMana,
-                    karma: this.playerStats.currentKarma,
-                    maxKarma: this.playerStats.maxKarma
-                });
+                // Removed updatePlayerStatus call
             }
         }
         
@@ -1371,83 +1275,7 @@ export class Game {
         return false;
     }
     
-    updatePlayerStatus(playerMesh, stats, silent = false) {
-        // Skip if player mesh doesn't exist
-        if (!playerMesh) {
-            console.warn('Cannot update status: playerMesh is undefined');
-            return;
-        }
-
-        // Initialize userData if it doesn't exist
-        if (!playerMesh.userData) {
-            console.warn('Player userData not initialized, creating it');
-            playerMesh.userData = {};
-        }
-
-        // Store the stats in player userData
-        if (!playerMesh.userData.stats) {
-            playerMesh.userData.stats = {};
-        }
-        
-        // Update the stored stats with new values
-        if (stats.life !== undefined) playerMesh.userData.stats.life = stats.life;
-        if (stats.maxLife !== undefined) playerMesh.userData.stats.maxLife = stats.maxLife;
-        if (stats.mana !== undefined) playerMesh.userData.stats.mana = stats.mana;
-        if (stats.maxMana !== undefined) playerMesh.userData.stats.maxMana = stats.maxMana;
-        if (stats.karma !== undefined) playerMesh.userData.stats.karma = stats.karma;
-        if (stats.maxKarma !== undefined) playerMesh.userData.stats.maxKarma = stats.maxKarma;
-
-        // Update status bars if they exist
-        if (playerMesh.userData.statusBars && playerMesh.userData.statusGroup) {
-            playerMesh.userData.statusBars.forEach(bar => {
-                const statValue = playerMesh.userData.stats[bar.type];
-                const maxValue = playerMesh.userData.stats[`max${bar.type.charAt(0).toUpperCase() + bar.type.slice(1)}`];
-                
-                if (statValue !== undefined && maxValue !== undefined) {
-                    const ratio = Math.max(0, Math.min(1, statValue / maxValue));
-                    bar.fill.scale.x = ratio;
-                    
-                    // Center the fill bar
-                    bar.fill.position.x = (ratio - 1) * bar.width / 2;
-                    
-                    // Update color for karma bar
-                    if (bar.type === 'karma') {
-                        // Karma color gradient from red (0) to yellow (50) to green (100)
-                        if (ratio <= 0.5) {
-                            // Red to yellow
-                            const r = 1.0;
-                            const g = ratio * 2;
-                            bar.fill.material.color.setRGB(r, g, 0);
-                        } else {
-                            // Yellow to green
-                            const r = 1.0 - (ratio - 0.5) * 2;
-                            const g = 1.0;
-                            bar.fill.material.color.setRGB(r, g, 0);
-                        }
-                    }
-                }
-            });
-            
-            // Update status group position to follow player
-            const worldPosition = new THREE.Vector3();
-            playerMesh.getWorldPosition(worldPosition);
-            playerMesh.userData.statusGroup.position.set(
-                worldPosition.x,
-                worldPosition.y + 2.0,
-                worldPosition.z
-            );
-        } else if (!silent) {
-            console.warn(`Status bars not found for player: ${playerMesh.userData.id || 'unknown'}`);
-        }
-        
-        // Handle special cases, like death
-        if (stats.life === 0 && this.playerManager && playerMesh === this.localPlayer) {
-            console.log('Player died, handling death');
-            if (this.playerManager.handlePlayerDeath) {
-                this.playerManager.handlePlayerDeath(playerMesh);
-            }
-        }
-    }
+    // Removed updatePlayerStatus function
     
     // Add temple interaction method
     checkTempleProximity() {
@@ -1745,8 +1573,8 @@ export class Game {
     useMana(amount) {
         if (this.playerStats.currentMana >= amount) {
             this.playerStats.currentMana -= amount;
-            this.updateStatusBars();
-
+            // Removed updateStatusBars call
+            
             // Emit stats update to server
             if (this.socket?.connected) {
                 this.socket.emit('statsUpdate', {
@@ -1813,81 +1641,9 @@ export class Game {
             this.uiManager.updateStatusBars(this.playerStats);
         }
         
-        // Update 3D status bars for local player
-        if (this.localPlayer && this.localPlayer.userData && this.localPlayer.userData.statusBars) {
-            const { statusBars } = this.localPlayer.userData;
-            
-            // Update life bar
-            const lifeBar = statusBars.find(bar => bar.type === 'life');
-            if (lifeBar) {
-                const lifePercent = Math.max(0, Math.min(1, this.playerStats.life / this.playerStats.maxLife));
-                lifeBar.fill.scale.x = lifePercent;
-                lifeBar.fill.position.x = (lifePercent - 1) * lifeBar.width / 2;
-            }
-            
-            // Update mana bar
-            const manaBar = statusBars.find(bar => bar.type === 'mana');
-            if (manaBar) {
-                const manaPercent = Math.max(0, Math.min(1, this.playerStats.mana / this.playerStats.maxMana));
-                manaBar.fill.scale.x = manaPercent;
-                manaBar.fill.position.x = (manaPercent - 1) * manaBar.width / 2;
-            }
-            
-            // Update karma bar
-            const karmaBar = statusBars.find(bar => bar.type === 'karma');
-            if (karmaBar) {
-                const karmaValue = Math.abs(this.playerStats.karma);
-                const karmaPercent = Math.max(0, Math.min(1, karmaValue / 100));
-                karmaBar.fill.scale.x = karmaPercent;
-                karmaBar.fill.position.x = (karmaPercent - 1) * karmaBar.width / 2;
-                
-                // Update color based on karma alignment
-                if (this.playerStats.karma > 0) {
-                    karmaBar.fill.material.color.set(0xffcc00); // Gold for light
-                } else {
-                    karmaBar.fill.material.color.set(0x800080); // Purple for dark
-                }
-            }
-        }
+        // Removed updatePlayerStatus call for local player
         
-        // Update 3D status bars for other players
-        this.players.forEach((player, id) => {
-            if (player && player.userData && player.userData.statusBars && player.userData.stats) {
-                const { statusBars, stats } = player.userData;
-                
-                // Update life bar
-                const lifeBar = statusBars.find(bar => bar.type === 'life');
-                if (lifeBar && stats.life !== undefined && stats.maxLife !== undefined) {
-                    const lifePercent = Math.max(0, Math.min(1, stats.life / stats.maxLife));
-                    lifeBar.fill.scale.x = lifePercent;
-                    lifeBar.fill.position.x = (lifePercent - 1) * lifeBar.width / 2;
-                }
-                
-                // Update mana bar
-                const manaBar = statusBars.find(bar => bar.type === 'mana');
-                if (manaBar && stats.mana !== undefined && stats.maxMana !== undefined) {
-                    const manaPercent = Math.max(0, Math.min(1, stats.mana / stats.maxMana));
-                    manaBar.fill.scale.x = manaPercent;
-                    manaBar.fill.position.x = (manaPercent - 1) * manaBar.width / 2;
-                }
-                
-                // Update karma bar
-                const karmaBar = statusBars.find(bar => bar.type === 'karma');
-                if (karmaBar && stats.karma !== undefined) {
-                    const karmaValue = Math.abs(stats.karma);
-                    const karmaPercent = Math.max(0, Math.min(1, karmaValue / 100));
-                    karmaBar.fill.scale.x = karmaPercent;
-                    karmaBar.fill.position.x = (karmaPercent - 1) * karmaBar.width / 2;
-                    
-                    // Update color based on karma alignment
-                    if (stats.karma > 0) {
-                        karmaBar.fill.material.color.set(0xffcc00); // Gold for light
-                    } else {
-                        karmaBar.fill.material.color.set(0x800080); // Purple for dark
-                    }
-                }
-            }
-        });
+        // Removed updatePlayerStatus calls for other players
     }
 
     handleInteraction() {
@@ -1949,27 +1705,6 @@ export class Game {
             '0 0 30px rgba(102, 0, 204, 0.4)' : 
             '0 0 30px rgba(255, 204, 0, 0.4)';
 
-        // Don't show choice dialogue if player already has a path
-        if (this.playerStats.path) {
-            const text = document.createElement('p');
-            text.style.margin = '0';
-            text.style.fontSize = '18px';
-            text.style.lineHeight = '1.5';
-            text.style.textShadow = '0 0 2px rgba(0, 0, 0, 0.5)';
-            text.textContent = `You have already chosen the path of ${this.playerStats.path}. This choice is permanent in this life.`;
-
-            const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
-            closeButton.style.marginTop = '15px';
-            closeButton.style.float = 'right';
-            
-            dialogueContainer.appendChild(text);
-            dialogueContainer.appendChild(closeButton);
-            document.body.appendChild(dialogueContainer);
-            
-            this.dialogueUI = dialogueContainer;
-            return;
-        }
-
         // Create title
         const title = document.createElement('h2');
         title.style.margin = '0 0 20px 0';
@@ -1978,7 +1713,7 @@ export class Game {
         title.style.textShadow = '0 0 10px ' + (npcType === 'dark' ? 'rgba(102, 0, 204, 0.5)' : 'rgba(255, 204, 0, 0.5)');
         title.textContent = npcType === 'dark' ? 'Dark Guardian' : 'Light Guardian';
 
-        // Initial greeting
+        // Create greeting
         const greeting = document.createElement('p');
         greeting.style.margin = '0 0 20px 0';
         greeting.style.fontSize = '18px';
@@ -2229,14 +1964,7 @@ export class Game {
         
         // Update local display immediately
         if (this.localPlayer) {
-            this.updatePlayerStatus(this.localPlayer, {
-                life: this.playerStats.currentLife,
-                maxLife: this.playerStats.maxLife,
-                mana: this.playerStats.currentMana,
-                maxMana: this.playerStats.maxMana,
-                karma: this.playerStats.currentKarma,
-                maxKarma: this.playerStats.maxKarma
-            });
+            // Removed updatePlayerStatus call
         }
         
         // Send karma update to server immediately
@@ -2333,27 +2061,9 @@ export class Game {
         try {
             // Update status bars at a lower frequency (every 100ms)
             if (!this.lastStatusUpdate || now - this.lastStatusUpdate >= 100) {
-                // Update all players' status bars
-                this.players.forEach((playerMesh) => {
-                    if (playerMesh.userData && playerMesh.userData.stats) {
-                        this.updatePlayerStatus(playerMesh, playerMesh.userData.stats, true);
-                    }
-                });
+                // Removed updatePlayerStatus calls for all players
                 
-                // Update local player status
-                if (this.localPlayer && this.playerStats) {
-                    this.updatePlayerStatus(this.localPlayer, {
-                        life: this.playerStats.currentLife,
-                        maxLife: this.playerStats.maxLife,
-                        mana: this.playerStats.currentMana,
-                        maxMana: this.playerStats.maxMana,
-                        karma: this.playerStats.currentKarma,
-                        maxKarma: this.playerStats.maxKarma
-                    }, true);
-                }
-                
-                // Update UI status bars
-                this.updateStatusBars();
+                // Removed updateStatusBars call
                 
                 this.lastStatusUpdate = now;
             }
@@ -2364,8 +2074,7 @@ export class Game {
             // Update player movement
             this.updatePlayer();
             
-            // Update status bar positions
-            this.updateStatusBarPositions();
+            // Removed updateStatusBarPositions call
             
             // Update network state if connected
             if (this.networkManager) {
