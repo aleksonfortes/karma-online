@@ -6,13 +6,14 @@
 import { Server } from 'socket.io';
 
 export class NetworkManager {
-    constructor(httpServer, gameManager) {
+    constructor(httpServer, gameManager, playerManager) {
         this.gameManager = gameManager;
+        this.playerManager = playerManager;
         this.lastUpdateTime = new Map();
         this.playerLastPositions = new Map();
         this._lastLogs = {};
         
-        // Initialize socket server with the same options as in the original implementation
+        // Initialize socket server
         this.io = new Server(httpServer, {
             cors: {
                 origin: ["https://localhost:5173", "https://localhost:3000"],
@@ -33,15 +34,15 @@ export class NetworkManager {
         console.log('NetworkManager: Setting up socket handlers');
         
         this.io.on('connection', (socket) => {
-            // Create new player through the game manager
-            const player = this.gameManager.addPlayer(socket.id);
+            // Create new player through the player manager
+            const player = this.playerManager.addPlayer(socket.id);
             
             // Log player connection with total count
-            console.log(`Player connected: ${socket.id} (Total Players: ${this.gameManager.getPlayerCount()})`);
+            console.log(`Player connected: ${socket.id} (Total Players: ${this.playerManager.getPlayerCount()})`);
             
             // Send current game state to new player
             socket.emit('initGameState', {
-                players: this.gameManager.getAllPlayers(),
+                players: this.playerManager.getAllPlayers(),
                 serverTime: Date.now()
             });
             
@@ -56,7 +57,7 @@ export class NetworkManager {
                 if (!this.rateLimitMovement(socket.id)) {
                     return;
                 }
-                if (!this.verifyMessageSignature(data, null)) { // Placeholder signature
+                if (!this.verifyMessageSignature(data, null)) {
                     this.logSecurityEvent(`Invalid message signature from player ${socket.id}`);
                     return;
                 }
@@ -70,7 +71,7 @@ export class NetworkManager {
                 const success = this.gameManager.updatePlayerMovement(socket.id, sanitizedData);
                 if (success) {
                     // Get updated player
-                    const player = this.gameManager.getPlayer(socket.id);
+                    const player = this.playerManager.getPlayer(socket.id);
                     
                     // Broadcast movement to other players
                     this.io.emit('playerMoved', {
@@ -92,11 +93,11 @@ export class NetworkManager {
 
             // Handle disconnection
             socket.on('disconnect', () => {
-                const player = this.gameManager.removePlayer(socket.id);
+                const player = this.playerManager.removePlayer(socket.id);
                 if (player) {
                     this.lastUpdateTime.delete(socket.id);
                     this.io.emit('playerLeft', socket.id);
-                    console.log(`Player left: ${player.displayName} (Total Players: ${this.gameManager.getPlayerCount()})`);
+                    console.log(`Player left: ${player.displayName} (Total Players: ${this.playerManager.getPlayerCount()})`);
                 }
             });
         });
@@ -106,8 +107,8 @@ export class NetworkManager {
      * Broadcast a full player list to all connected clients
      */
     broadcastPlayerList() {
-        if (this.gameManager.getPlayerCount() > 0) {
-            this.io.emit('fullPlayersSync', this.gameManager.getAllPlayers());
+        if (this.playerManager.getPlayerCount() > 0) {
+            this.io.emit('fullPlayersSync', this.playerManager.getAllPlayers());
         }
     }
     
@@ -209,7 +210,7 @@ export class NetworkManager {
      * Validate session
      */
     validateSession(socketId) {
-        if (!this.gameManager.getPlayer(socketId)) {
+        if (!this.playerManager.getPlayer(socketId)) {
             this.logSecurityEvent(`Invalid session attempt: ${socketId}`);
             return false;
         }

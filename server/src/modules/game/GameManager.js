@@ -3,11 +3,10 @@
  * 
  * Handles game state, player updates, and game loop
  */
-import PlayerManager from '../player/PlayerManager.js';
 
 export class GameManager {
-    constructor() {
-        this.playerManager = new PlayerManager();
+    constructor(playerManager) {
+        this.playerManager = playerManager;
         this.gameState = {
             lastUpdate: Date.now()
         };
