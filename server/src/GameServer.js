@@ -6,11 +6,12 @@ export class GameServer {
         console.log('GameServer: Initializing...');
         this.io = new Server(httpServer, {
             cors: {
-                origin: ["http://localhost:5173", "http://localhost:3000"],
+                origin: ["https://localhost:5173", "https://localhost:3000"],
                 methods: ["GET", "POST"],
                 credentials: true
             },
-            transports: ['websocket', 'polling']
+            transports: ['websocket', 'polling'],
+            secure: true
         });
 
         this.players = new Map();
@@ -77,7 +78,7 @@ export class GameServer {
     rateLimitMovement(socketId) {
         const now = Date.now();
         const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
-        if (now - lastUpdate < 30) {
+        if (now - lastUpdate < 100) {
             this.logSecurityEvent(`Rate limit exceeded for player ${socketId}`, socketId);
             return false;
         }
@@ -96,6 +97,35 @@ export class GameServer {
         } else {
             console.warn(`[Security] ${message}`);
         }
+    }
+
+    // Add session validation
+    validateSession(socketId) {
+        if (!this.players.has(socketId)) {
+            this.logSecurityEvent(`Invalid session attempt: ${socketId}`);
+            return false;
+        }
+        return true;
+    }
+
+    // Add message signing verification
+    verifyMessageSignature(message, signature) {
+        // Implementation of message signature verification
+        return true; // Placeholder
+    }
+
+    // Enhanced input validation
+    validatePlayerData(data) {
+        if (!data || typeof data !== 'object') return false;
+        const requiredFields = ['position', 'rotation', 'path', 'karma', 'maxKarma', 'mana', 'maxMana'];
+        return requiredFields.every(field => {
+            const value = data[field];
+            return value !== undefined &&
+                   (typeof value === 'number' || 
+                    (typeof value === 'object' && 
+                     !Array.isArray(value) && 
+                     value !== null));
+        });
     }
 
     setupSocketHandlers() {
@@ -119,7 +149,14 @@ export class GameServer {
 
             // Handle player movement with rate limiting and validation
             socket.on('playerMovement', (data) => {
+                if (!this.validateSession(socket.id)) {
+                    return;
+                }
                 if (!this.rateLimitMovement(socket.id)) {
+                    return;
+                }
+                if (!this.verifyMessageSignature(data, null)) { // Placeholder signature
+                    this.logSecurityEvent(`Invalid message signature from player ${socket.id}`);
                     return;
                 }
                 const sanitizedData = this.sanitizeMovementData(data);
