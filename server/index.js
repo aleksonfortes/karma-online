@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { GameServer } from './src/GameServer.js';
+import ModularGameServer from './src/ModularGameServer.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,8 +37,10 @@ app.get('*', (req, res) => {
     res.sendFile(join(__dirname, '../dist/index.html'));
 });
 
-// Initialize game server
-const gameServer = new GameServer(server);
+// Initialize game server using the modular implementation
+// You can switch between the original and modular implementations by commenting/uncommenting
+// const gameServer = new GameServer(server);
+const gameServer = new ModularGameServer(server);
 
 // Start server with simple approach matching the original
 const PORT = process.env.PORT || 3000;
