@@ -4,8 +4,10 @@ import { NetworkManager } from './modules/network/NetworkManager.js';
 import { PlayerManager } from './modules/player/PlayerManager.js';
 import { SkillsManager } from './modules/skills/SkillsManager.js';
 import { KarmaManager } from './modules/karma/KarmaManager.js';
+import { TerrainManager } from './modules/terrain/TerrainManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import ModelScales from './config/ModelScales.js';
 import { getServerUrl } from './config.js';
 
 export class Game {
@@ -478,15 +480,25 @@ export class Game {
 
             // Set up the dark NPC model (right side)
             const darkModel = darkNPC.scene;
-            darkModel.scale.set(2.5, 2.5, 2.5);
-            darkModel.position.set(7, 3.5, -9);
-            darkModel.rotation.y = -Math.PI / 4;
+            const darkConfig = ModelScales.TEMPLE_NPC.DARK;
+            darkModel.scale.set(darkConfig.SCALE, darkConfig.SCALE, darkConfig.SCALE);
+            darkModel.position.set(
+                darkConfig.POSITION.x, 
+                darkConfig.POSITION.y, 
+                darkConfig.POSITION.z
+            );
+            darkModel.rotation.y = darkConfig.ROTATION;
             
             // Set up the light NPC model (left side)
             const lightModel = lightNPC.scene;
-            lightModel.scale.set(5.0, 5.0, 5.0);
-            lightModel.position.set(-7, 0.5, -9.5);
-            lightModel.rotation.y = Math.PI / 4;
+            const lightConfig = ModelScales.TEMPLE_NPC.LIGHT;
+            lightModel.scale.set(lightConfig.SCALE, lightConfig.SCALE, lightConfig.SCALE);
+            lightModel.position.set(
+                lightConfig.POSITION.x, 
+                lightConfig.POSITION.y, 
+                lightConfig.POSITION.z
+            );
+            lightModel.rotation.y = lightConfig.ROTATION;
             
             // Add shadows to both NPCs
             [darkModel, lightModel].forEach(model => {
@@ -499,12 +511,20 @@ export class Game {
             });
 
             // Add interaction text to both NPCs, positioned directly above their heads
-            const darkTextSprite = this.addInteractionText(darkModel, 1.1);
-            const lightTextSprite = this.addInteractionText(lightModel, 1.04);
+            const darkTextSprite = this.addInteractionText(darkModel, darkConfig.TEXT_OFFSET);
+            const lightTextSprite = this.addInteractionText(lightModel, lightConfig.TEXT_OFFSET);
             
             // Ensure text sprites have the same visual size
-            darkTextSprite.scale.set(0.5, 0.125, 1);
-            lightTextSprite.scale.set(0.3, 0.075, 0.8);
+            darkTextSprite.scale.set(
+                darkConfig.TEXT_SCALE.x, 
+                darkConfig.TEXT_SCALE.y, 
+                darkConfig.TEXT_SCALE.z
+            );
+            lightTextSprite.scale.set(
+                lightConfig.TEXT_SCALE.x, 
+                lightConfig.TEXT_SCALE.y, 
+                lightConfig.TEXT_SCALE.z
+            );
             
             // Add both NPCs to temple group
             templeGroup.add(darkModel);
@@ -522,12 +542,12 @@ export class Game {
             // Add colliders for both NPCs with the same radius
             this.statueColliders.push(
                 {
-                    position: new THREE.Vector3(7, 0, -9),
-                    radius: 2.0
+                    position: new THREE.Vector3(darkConfig.POSITION.x, 0, darkConfig.POSITION.z),
+                    radius: ModelScales.NPC.DARK.COLLISION_RADIUS
                 },
                 {
-                    position: new THREE.Vector3(-7, 0, -9),
-                    radius: 2.0
+                    position: new THREE.Vector3(lightConfig.POSITION.x, 0, lightConfig.POSITION.z),
+                    radius: ModelScales.NPC.LIGHT.COLLISION_RADIUS
                 }
             );
 

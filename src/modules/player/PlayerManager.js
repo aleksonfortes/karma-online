@@ -1,5 +1,16 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import ModelScales from '../../config/ModelScales.js';
+
+// Client-side constants that mirror server constants
+export const PLAYER_CONSTANTS = {
+    // These values should match the server's GAME_CONSTANTS
+    DEFAULT_POSITION: { x: 0, y: 0, z: 0 }, // Set player at ground level to match NPCs
+    DEFAULT_ROTATION: { y: 0 },
+    MOVEMENT_SPEED: 10,
+    ROTATION_SPEED: 3,
+    COLLISION_RADIUS: 1.0
+};
 
 export class PlayerManager {
     constructor(game) {
@@ -19,6 +30,9 @@ export class PlayerManager {
         
         // Initialize players Map - exactly like original game
         this.players = new Map();
+        
+        // Flag to track if we're waiting for server position update
+        this.pendingPositionUpdate = false;
     }
     
     async init() {
@@ -28,8 +42,12 @@ export class PlayerManager {
             // Preload character model
             this.characterModel = await this.loadCharacterModel();
             
-            // Create local player
-            await this.createLocalPlayer();
+            // Only create local player if it doesn't already exist and we're not in offline mode
+            if (!this.game.localPlayer && this.game.networkManager && !this.game.networkManager.isOfflineMode) {
+                console.log('PlayerManager: Creating local player');
+                // Let NetworkManager handle local player creation to ensure proper synchronization
+                // The actual player will be created when receiving server position
+            }
             
             return true;
         } catch (error) {
@@ -40,64 +58,58 @@ export class PlayerManager {
     
     async loadCharacterModel() {
         try {
-            // Load the character model
+            console.log('Loading character model...');
+            
             return new Promise((resolve, reject) => {
                 this.loader.load(
                     this.characterModelPath,
                     (gltf) => {
+                        console.log('Character model loaded successfully');
+                        
                         // Create a group to hold the model
                         const modelGroup = new THREE.Group();
+                        
+                        // Set scale using the centralized configuration
+                        const scale = ModelScales.PLAYER.DEFAULT;
+                        gltf.scene.scale.set(scale, scale, scale);
+                        
+                        // Position the model correctly within the group
+                        // The model needs to be positioned lower to appear at ground level
+                        // With the smaller scale (4.5 vs 5.0), we need to adjust the position slightly
+                        gltf.scene.position.y = -1.65; // Adjusted from -1.8 to -1.65 to account for the smaller scale
+                        
+                        // Add the model to the group after positioning
                         modelGroup.add(gltf.scene);
                         
-                        // Set up the model with larger scale exactly as in original
-                        gltf.scene.scale.set(5, 5, 5);
-                        gltf.scene.position.y = 0;
-                        gltf.scene.rotation.y = 0;
-                        
-                        // Fix materials if needed
+                        // Apply material adjustments if needed
                         gltf.scene.traverse((child) => {
                             if (child.isMesh) {
-                                // Convert any incompatible materials
-                                if (child.material && child.material.type === 'MeshPhongMaterial' && child.material.roughness !== undefined) {
-                                    const color = child.material.color ? child.material.color.clone() : new THREE.Color(0xffffff);
-                                    const newMaterial = new THREE.MeshStandardMaterial({
-                                        color: color,
-                                        metalness: 0.1,
-                                        roughness: 0.8
-                                    });
-                                    child.material = newMaterial;
-                                }
-                                
-                                // Add shadows
+                                // Enable shadows for all meshes
                                 child.castShadow = true;
                                 child.receiveShadow = true;
+                                
+                                // Set material properties
+                                if (child.material) {
+                                    child.material.metalness = 0.1;
+                                    child.material.roughness = 0.8;
+                                }
                             }
                         });
                         
                         resolve(modelGroup);
                     },
-                    // Use a simple progress callback to prevent excessive logging
                     (progress) => {
-                        // Only log every 25%
-                        if (progress.loaded / progress.total > 0.25 && progress.loaded / progress.total < 0.3) {
-                            console.log('Character model 25% loaded');
-                        } else if (progress.loaded / progress.total > 0.5 && progress.loaded / progress.total < 0.55) {
-                            console.log('Character model 50% loaded');
-                        } else if (progress.loaded / progress.total > 0.75 && progress.loaded / progress.total < 0.8) {
-                            console.log('Character model 75% loaded');
-                        } else if (progress.loaded / progress.total === 1) {
-                            console.log('Character model 100% loaded');
-                        }
+                        const percentComplete = Math.round((progress.loaded / progress.total) * 100);
+                        console.log(`Loading character model: ${percentComplete}%`);
                     },
                     (error) => {
-                        console.error('Error loading model, falling back to basic character');
+                        console.error('Error loading character model:', error);
                         reject(error);
                     }
                 );
             });
         } catch (error) {
-            console.error('Error in loadCharacterModel, using fallback');
-            // Fallback to basic character if loading fails
+            console.error('Error in loadCharacterModel:', error);
             return this.createFallbackCharacterModel();
         }
     }
@@ -114,7 +126,7 @@ export class PlayerManager {
             roughness: 0.8
         });
         const cylinder = new THREE.Mesh(geometry, material);
-        cylinder.position.y = 1.0; // Adjusted to be at ground level
+        cylinder.position.y = 1.5;
         cylinder.castShadow = true;
         cylinder.receiveShadow = true;
         group.add(cylinder);
@@ -127,7 +139,7 @@ export class PlayerManager {
             roughness: 0.8
         });
         const head = new THREE.Mesh(headGeometry, headMaterial);
-        head.position.y = 3.0; // Adjusted to match the new body position
+        head.position.y = 3.5;
         head.castShadow = true;
         head.receiveShadow = true;
         group.add(head);
@@ -141,27 +153,40 @@ export class PlayerManager {
             console.error('Cannot create local player without socket connection');
             return null;
         }
+        
         if (this.game.localPlayer) {
-            console.warn('Local player already exists');
+            console.warn('PlayerManager: Local player already exists, not creating a new one');
             return this.game.localPlayer;
         }
-        // Create player at temple center
-        const position = { x: 0, y: 0.5, z: 0 };
-        const rotation = { y: 0 };
+        
+        // Create player with default position - actual position will be set by server
+        const position = { ...PLAYER_CONSTANTS.DEFAULT_POSITION };
+        // No need to adjust y position as it's already set to 0 in PLAYER_CONSTANTS
+        const rotation = { ...PLAYER_CONSTANTS.DEFAULT_ROTATION };
+        
         const player = await this.createPlayer(socketId, position, rotation, true);
         if (player) {
             this.game.localPlayer = player;
             this.game.scene.add(player);
             this.players.set(socketId, player);
+            
+            // Request initial position from server
+            this.game.networkManager.socket.emit('requestInitialPosition');
         }
         return player;
     }
     
-    async createPlayer(id, position = { x: 0, y: 0.5, z: 0 }, rotation = { y: 0 }, isLocal = false) {
+    async createPlayer(id, position = null, rotation = { y: 0 }, isLocal = false) {
         if (this.players.has(id)) {
             console.warn(`Player with ID ${id} already exists.`);
             return this.players.get(id);
         }
+        
+        // Use default position if none provided
+        if (!position) {
+            position = { ...PLAYER_CONSTANTS.DEFAULT_POSITION };
+        }
+        
         const player = await this.createPlayerMesh(id, position, rotation);
         if (player) {
             this.players.set(id, player);
@@ -220,11 +245,16 @@ export class PlayerManager {
             playerModel = this.createFallbackCharacterModel();
         }
         
-        // Set position
+        // Set position - for network players, always use the position provided by server
         if (position) {
             playerModel.position.set(position.x, position.y, position.z);
         } else {
-            playerModel.position.set(0, 0.5, 0); // Default to temple center at ground level
+            // If no position provided (shouldn't happen), use default
+            playerModel.position.set(
+                PLAYER_CONSTANTS.DEFAULT_POSITION.x,
+                PLAYER_CONSTANTS.DEFAULT_POSITION.y,
+                PLAYER_CONSTANTS.DEFAULT_POSITION.z
+            );
         }
         
         // Add to scene
@@ -261,41 +291,39 @@ export class PlayerManager {
     }
     
     update(deltaTime) {
-        // Update player animations and effects
+        // Update player animations
         this.updatePlayerAnimations();
         
-        if (this.game.localPlayer) {
-            const moveDistance = this.moveSpeed * deltaTime;
-            const rotateAngle = this.rotateSpeed * deltaTime;
+        // Only send position updates for local player at controlled intervals
+        const now = Date.now();
+        if (this.game.localPlayer && now - this.lastPositionUpdate > this.updateInterval && !this.pendingPositionUpdate) {
+            this.lastPositionUpdate = now;
             
-            // Handle movement based on input
-            if (this.game.controls.forward) {
-                this.game.localPlayer.position.z -= moveDistance;
-            }
-            if (this.game.controls.backward) {
-                this.game.localPlayer.position.z += moveDistance;
-            }
-            if (this.game.controls.left) {
-                this.game.localPlayer.position.x -= moveDistance;
-            }
-            if (this.game.controls.right) {
-                this.game.localPlayer.position.x += moveDistance;
-            }
+            // Send position update to server
+            this.game.networkManager.socket.emit('playerMovement', {
+                position: {
+                    x: this.game.localPlayer.position.x,
+                    y: this.game.localPlayer.position.y,
+                    z: this.game.localPlayer.position.z
+                },
+                rotation: {
+                    y: this.game.localPlayer.rotation.y
+                },
+                // Include other player data...
+                path: this.game.localPlayer.userData.path || 'neutral',
+                karma: this.game.localPlayer.userData.stats?.karma || 50,
+                maxKarma: this.game.localPlayer.userData.stats?.maxKarma || 100,
+                mana: this.game.localPlayer.userData.stats?.mana || 100,
+                maxMana: this.game.localPlayer.userData.stats?.maxMana || 100
+            });
             
-            // Handle rotation based on input
-            if (this.game.controls.rotateLeft) {
-                this.game.localPlayer.rotation.y += rotateAngle;
-            }
-            if (this.game.controls.rotateRight) {
-                this.game.localPlayer.rotation.y -= rotateAngle;
-            }
+            // Set flag to wait for server confirmation
+            this.pendingPositionUpdate = true;
             
-            // Send movement updates to server
-            const now = Date.now();
-            if (now - this.lastPositionUpdate >= this.updateInterval) {
-                this.game.networkManager.sendPlayerState();
-                this.lastPositionUpdate = now;
-            }
+            // Add timeout to reset flag in case server doesn't respond
+            setTimeout(() => {
+                this.pendingPositionUpdate = false;
+            }, 1000); // 1 second timeout
         }
     }
     
@@ -422,12 +450,9 @@ export class PlayerManager {
     }
     
     respawnPlayer(player) {
-        if (!player || !player.userData) return;
+        if (!player) return;
         
-        // Mark as alive
-        player.userData.isDead = false;
-        
-        // Reset life
+        // Reset player stats
         if (player.userData.stats) {
             player.userData.stats.currentLife = player.userData.stats.maxLife;
             this.updatePlayerLife(player, player.userData.stats.currentLife, player.userData.stats.maxLife);
@@ -441,8 +466,18 @@ export class PlayerManager {
             }
         });
         
-        // Reset position to temple center (at ground level)
-        player.position.set(0, 0.5, 0);
+        // For local player, request respawn position from server
+        if (player === this.game.localPlayer) {
+            this.game.networkManager.socket.emit('requestRespawn');
+            
+            // Set temporary position until server responds
+            player.position.set(
+                PLAYER_CONSTANTS.DEFAULT_POSITION.x,
+                PLAYER_CONSTANTS.DEFAULT_POSITION.y,
+                PLAYER_CONSTANTS.DEFAULT_POSITION.z
+            );
+        }
+        // For network players, position will be updated by server
         
         // Reset rotation
         player.rotation.set(0, 0, 0);
