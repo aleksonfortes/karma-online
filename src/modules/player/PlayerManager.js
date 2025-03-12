@@ -201,17 +201,17 @@ export class PlayerManager {
         let playerMesh;
         
         try {
-            // Try loading the character model first
+            // Ensure model is loaded
             if (!this.characterModel) {
-                await this.loadCharacterModel();
+                this.characterModel = await this.loadCharacterModel();
             }
             
-            // Clone the model to ensure each player gets their own instance
+            // Clone the model
             playerMesh = this.characterModel.clone();
             playerMesh.position.set(position.x, position.y, position.z);
             playerMesh.rotation.y = rotation.y;
             
-            // Set player ID and other metadata
+            // Set player metadata
             playerMesh.userData = {
                 id: id,
                 isLocal: false,
@@ -225,7 +225,7 @@ export class PlayerManager {
                 }
             };
         } catch (error) {
-            console.error('Error creating player mesh, using fallback:', error);
+            console.error('Error creating player mesh:', error);
             playerMesh = this.createFallbackCharacterModel();
         }
         
