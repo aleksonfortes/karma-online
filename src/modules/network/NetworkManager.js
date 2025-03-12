@@ -51,7 +51,7 @@ export class NetworkManager {
                         this.enterOfflineMode();
                         resolve(false);
                     }
-                }, 5000);
+                }, 10000);
             } else {
                 this.enterOfflineMode();
                 resolve(false);
@@ -91,6 +91,22 @@ export class NetworkManager {
         this.socket.on('connect_error', (error) => {
             console.error('Failed to connect to server:', error);
             this.enterOfflineMode();
+        });
+
+        // Handle initial game state
+        this.socket.on('initGameState', (gameState) => {
+            console.log('Received initial game state:', gameState);
+            
+            // Create all existing players
+            gameState.players.forEach(player => {
+                if (player.id !== this.socket.id) {
+                    this.game.playerManager.createPlayer(
+                        player.id,
+                        player.position,
+                        player.rotation
+                    );
+                }
+            });
         });
 
         // Handle current players - exactly like original
@@ -167,6 +183,11 @@ export class NetworkManager {
                 return;
             }
             
+            // Check if player already exists
+            if (this.game.playerManager.players.has(player.id)) {
+                return;
+            }
+            
             console.log('Creating new player:', player.id);
             const playerMesh = await this.game.playerManager.createPlayer(
                 player.id,
@@ -196,10 +217,8 @@ export class NetworkManager {
                 console.log(`Added new player ${player.id} with status bars`);
             }
             
-            // Send our current state to the new player
-            if (this.game.localPlayer) {
-                this.sendPlayerState();
-            }
+            // Request full state update from server
+            this.socket.emit('requestStateUpdate');
         });
 
         // Handle player movement - exactly like original
@@ -573,7 +592,7 @@ export class NetworkManager {
         
         // Send player state if player has moved
         const now = Date.now();
-        if (!this.lastStateUpdate || now - this.lastStateUpdate >= 50) { // Send at most every 50ms
+        if (!this.lastStateUpdate || now - this.lastStateUpdate >= 100) { 
             this.sendPlayerState();
             this.lastStateUpdate = now;
         }

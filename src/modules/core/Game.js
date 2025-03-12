@@ -174,31 +174,19 @@ export class Game {
         console.log('Initializing player for the game...');
         
         try {
-            // Check if we should use network mode
-            const useNetworkMode = this.networkManager && this.networkManager.socket && this.networkManager.socket.connected;
-            
-            if (useNetworkMode) {
-                console.log('Network mode detected - using socket ID:', this.networkManager.socket.id);
-                
-                // In network mode, create the player using the NetworkManager
+            // Always attempt network connection first
+            if (this.networkManager) {
                 const player = await this.networkManager.createLocalPlayer();
-                
                 if (player) {
-                    console.log('Player created successfully via network with ID:', player.userData?.id);
-                    // The NetworkManager already adds the player to the scene and sets it as localPlayer
+                    console.log('Player created successfully via network');
                     return true;
-                } else {
-                    console.warn('Failed to create player via network, falling back to offline mode');
-                    // Fall back to offline mode
-                    return this.createOfflinePlayer();
                 }
-            } else {
-                // Offline mode
-                return this.createOfflinePlayer();
             }
+            
+            // Fall back to offline mode if network fails
+            return this.createOfflinePlayer();
         } catch (error) {
             console.error('Error initializing player:', error);
-            // Attempt recovery with offline player
             return this.createOfflinePlayer();
         }
     }
@@ -535,6 +523,51 @@ export class Game {
             // Make status group face the camera
             this.localPlayer.userData.statusGroup.quaternion.copy(this.camera.quaternion);
         }
+    }
+    
+    updatePlayerStatus(playerMesh, stats, silent = false) {
+        if (!playerMesh.userData.statusGroup) {
+            return;
+        }
+        
+        // Remove existing status bars
+        playerMesh.userData.statusGroup.children.forEach(child => {
+            playerMesh.userData.statusGroup.remove(child);
+        });
+        
+        // Create new status bars
+        const createStatusBar = (value, maxValue, color, yOffset) => {
+            const barWidth = 2;
+            const barHeight = 0.1;
+            
+            // Background bar
+            const backgroundGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
+            const backgroundMaterial = new THREE.MeshBasicMaterial({
+                color: 0x333333,
+                transparent: true,
+                opacity: 0.7
+            });
+            const backgroundBar = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
+            backgroundBar.position.set(0, yOffset, 0);
+            
+            // Foreground bar
+            const foregroundGeometry = new THREE.PlaneGeometry((value / maxValue) * barWidth, barHeight);
+            const foregroundMaterial = new THREE.MeshBasicMaterial({ color });
+            const foregroundBar = new THREE.Mesh(foregroundGeometry, foregroundMaterial);
+            foregroundBar.position.set(-(barWidth / 2) + (foregroundGeometry.parameters.width / 2), yOffset, 0.01);
+            
+            playerMesh.userData.statusGroup.add(backgroundBar);
+            playerMesh.userData.statusGroup.add(foregroundBar);
+        };
+        
+        // Life bar (red)
+        createStatusBar(stats.life, stats.maxLife, 0xff0000, 0.2);
+        
+        // Mana bar (blue)
+        createStatusBar(stats.mana, stats.maxMana, 0x0000ff, 0.1);
+        
+        // Karma bar (yellow)
+        createStatusBar(stats.karma, stats.maxKarma, 0xffff00, 0);
     }
     
     setupCamera() {
@@ -1318,10 +1351,10 @@ export class Game {
                 // Skip self-collision check
                 if (this.localPlayer && otherPlayer === this.localPlayer) continue;
                 
-                const dx = position.x - otherPlayer.position.x;
-                const dz = position.z - otherPlayer.position.z;
+                const dx = otherPlayer.position.x - position.x;
+                const dz = otherPlayer.position.z - position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
-                
+
                 if (distance < playerRadius) {
                     console.log("Player collision with:", id);
                     if (previousPosition) {
