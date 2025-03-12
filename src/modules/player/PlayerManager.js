@@ -15,6 +15,7 @@ export class PlayerManager {
         this.rotateSpeed = 3;
         this.lastPositionUpdate = 0;
         this.updateInterval = 50; // 20 updates per second
+        this.lastFrameTime = Date.now();
         
         // Initialize players Map - exactly like original game
         this.players = new Map();
@@ -259,6 +260,110 @@ export class PlayerManager {
         return playerModel;
     }
     
+    update(deltaTime) {
+        // Update player animations and effects
+        this.updatePlayerAnimations();
+        
+        if (this.game.localPlayer) {
+            const moveDistance = this.moveSpeed * deltaTime;
+            const rotateAngle = this.rotateSpeed * deltaTime;
+            
+            // Handle movement based on input
+            if (this.game.controls.forward) {
+                this.game.localPlayer.position.z -= moveDistance;
+            }
+            if (this.game.controls.backward) {
+                this.game.localPlayer.position.z += moveDistance;
+            }
+            if (this.game.controls.left) {
+                this.game.localPlayer.position.x -= moveDistance;
+            }
+            if (this.game.controls.right) {
+                this.game.localPlayer.position.x += moveDistance;
+            }
+            
+            // Handle rotation based on input
+            if (this.game.controls.rotateLeft) {
+                this.game.localPlayer.rotation.y += rotateAngle;
+            }
+            if (this.game.controls.rotateRight) {
+                this.game.localPlayer.rotation.y -= rotateAngle;
+            }
+            
+            // Send movement updates to server
+            const now = Date.now();
+            if (now - this.lastPositionUpdate >= this.updateInterval) {
+                this.game.networkManager.sendPlayerState();
+                this.lastPositionUpdate = now;
+            }
+        }
+    }
+    
+    updatePlayerAnimations() {
+        // Update animations for all players
+        this.game.players.forEach((player) => {
+            // Skip if player is invalid
+            if (!player || !player.userData) return;
+            
+            // Check if player is moving
+            const isMoving = player.userData.isMoving || 
+                (player.userData.targetPosition && 
+                player.position.distanceToSquared(player.userData.targetPosition) > 0.01);
+            
+            // Update animation state
+            if (player.userData.animations) {
+                // Handle model-specific animations if they exist
+                if (isMoving && player.userData.currentAnimation !== 'Running') {
+                    // Change to running animation
+                    const runAction = player.userData.animations['Running'];
+                    if (runAction) {
+                        if (player.userData.currentAction) {
+                            player.userData.currentAction.fadeOut(0.2);
+                        }
+                        runAction.reset().fadeIn(0.2).play();
+                        player.userData.currentAction = runAction;
+                        player.userData.currentAnimation = 'Running';
+                    }
+                } else if (!isMoving && player.userData.currentAnimation !== 'Idle') {
+                    // Change to idle animation
+                    const idleAction = player.userData.animations['Idle'];
+                    if (idleAction) {
+                        if (player.userData.currentAction) {
+                            player.userData.currentAction.fadeOut(0.2);
+                        }
+                        idleAction.reset().fadeIn(0.2).play();
+                        player.userData.currentAction = idleAction;
+                        player.userData.currentAnimation = 'Idle';
+                    }
+                }
+                
+                // Update animation mixer if it exists
+                if (player.userData.mixer) {
+                    player.userData.mixer.update(deltaTime);
+                }
+            }
+        });
+    }
+    
+    // Add a proper cleanup method
+    cleanup() {
+        console.log('PlayerManager: Cleaning up player references');
+        
+        // Remove any temporary local player
+        if (this.localPlayer) {
+            console.log('Removing local player model');
+            if (this.game.scene && this.game.scene.children.includes(this.localPlayer)) {
+                this.game.scene.remove(this.localPlayer);
+            }
+            this.localPlayer = null;
+        }
+        
+        // Clear character model references
+        this.characterModel = null;
+        
+        console.log('PlayerManager cleanup complete');
+    }
+    
     updatePlayerLife(player, currentLife, maxLife) {
         if (!player || !player.userData) return;
         
@@ -366,138 +471,6 @@ export class PlayerManager {
         }
     }
     
-    update() {
-        // Update player animations and effects
-        this.updatePlayerAnimations();
-    }
-    
-    updatePlayerAnimations() {
-        // Update animations for all players
-        this.game.players.forEach((player) => {
-            // Skip if player is invalid
-            if (!player || !player.userData) return;
-            
-            // Check if player is moving
-            const isMoving = player.userData.isMoving || 
-                (player.userData.targetPosition && 
-                player.position.distanceToSquared(player.userData.targetPosition) > 0.01);
-            
-            // Update animation state
-            if (player.userData.animations) {
-                // Handle model-specific animations if they exist
-                if (isMoving && player.userData.currentAnimation !== 'Running') {
-                    // Change to running animation
-                    const runAction = player.userData.animations['Running'];
-                    if (runAction) {
-                        if (player.userData.currentAction) {
-                            player.userData.currentAction.fadeOut(0.2);
-                        }
-                        runAction.reset().fadeIn(0.2).play();
-                        player.userData.currentAction = runAction;
-                        player.userData.currentAnimation = 'Running';
-                    }
-                } else if (!isMoving && player.userData.currentAnimation !== 'Idle') {
-                    // Change to idle animation
-                    const idleAction = player.userData.animations['Idle'];
-                    if (idleAction) {
-                        if (player.userData.currentAction) {
-                            player.userData.currentAction.fadeOut(0.2);
-                        }
-                        idleAction.reset().fadeIn(0.2).play();
-                        player.userData.currentAction = idleAction;
-                        player.userData.currentAnimation = 'Idle';
-                    }
-                }
-                
-                // Update animation mixer if it exists
-                if (player.userData.mixer) {
-                    player.userData.mixer.update(this.game.clock.getDelta());
-                }
-            }
-        });
-    }
-    
-    // Add a proper cleanup method
-    cleanup() {
-        console.log('PlayerManager: Cleaning up player references');
-        
-        // Remove any temporary local player
-        if (this.localPlayer) {
-            console.log('Removing local player model');
-            if (this.game.scene && this.game.scene.children.includes(this.localPlayer)) {
-                this.game.scene.remove(this.localPlayer);
-            }
-            this.localPlayer = null;
-        }
-        
-        // Clear character model references
-        this.characterModel = null;
-        
-        console.log('PlayerManager cleanup complete');
-    }
-    
-    updatePlayerMovement(delta) {
-        if (!this.game.localPlayer || !this.game.isAlive) return;
-
-        const speed = 0.2;
-        let moveX = 0;
-        let moveZ = 0;
-
-        // Store previous position for collision detection
-        const previousPosition = this.game.localPlayer.position.clone();
-        
-        // Calculate movement direction based on key combinations
-        if (this.game.controls.forward) moveZ = -1;  // W moves north (negative Z)
-        if (this.game.controls.backward) moveZ = 1;  // S moves south (positive Z)
-        if (this.game.controls.left) moveX = -1;    // A moves west (negative X)
-        if (this.game.controls.right) moveX = 1;    // D moves east (positive X)
-
-        // Apply movement if any keys are pressed
-        if (moveX !== 0 || moveZ !== 0) {
-            // Normalize diagonal movement
-            const magnitude = Math.sqrt(moveX * moveX + moveZ * moveZ);
-            moveX = (moveX / magnitude) * speed;
-            moveZ = (moveZ / magnitude) * speed;
-            
-            // Calculate next position
-            const nextPosition = this.game.localPlayer.position.clone();
-            nextPosition.x += moveX;
-            nextPosition.z += moveZ;
-
-            // Check collisions
-            if (this.checkCollision(nextPosition, previousPosition)) {
-                // Update position if no collision
-                this.game.localPlayer.position.copy(nextPosition);
-                
-                // Update height based on temple platform
-                this.updatePlayerHeight(this.game.localPlayer.position);
-
-                // Update rotation to face movement direction - matching original game
-                const targetRotation = Math.atan2(moveX, moveZ);
-                let currentRotation = this.game.localPlayer.rotation.y;
-                const rotationDiff = targetRotation - currentRotation;
-                
-                // Normalize rotation difference to [-PI, PI]
-                let normalizedDiff = rotationDiff;
-                while (normalizedDiff > Math.PI) normalizedDiff -= 2 * Math.PI;
-                while (normalizedDiff < -Math.PI) normalizedDiff += 2 * Math.PI;
-                
-                // Apply smooth rotation
-                this.game.localPlayer.rotation.y += Math.sign(normalizedDiff) * 
-                    Math.min(Math.abs(normalizedDiff), 0.15);
-
-                // Send position update to server if enough time has passed
-                const now = Date.now();
-                if (now - this.lastPositionUpdate >= this.updateInterval) {
-                    this.lastPositionUpdate = now;
-                    if (this.game.networkManager && this.game.networkManager.socket) {
-                        this.game.networkManager.sendPlayerState();
-                    }
-                }
-            }
-        }
-    }
-
     checkCollision(newPosition, previousPosition) {
         const templeRadius = 15; // Temple platform radius
         const templeCenter = new THREE.Vector3(0, 0, 0);

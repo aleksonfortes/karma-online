@@ -52,6 +52,52 @@ export class GameServer {
         }
     }
 
+    // Validate player movement data
+    validateMovementData(data) {
+        if (!data || typeof data !== 'object') return false;
+        const requiredFields = ['position', 'rotation', 'path', 'karma', 'maxKarma', 'mana', 'maxMana'];
+        return requiredFields.every(field => data[field] !== undefined);
+    }
+
+    // Sanitize player movement data
+    sanitizeMovementData(data) {
+        if (!this.validateMovementData(data)) return null;
+        return {
+            position: { x: Number(data.position.x), y: Number(data.position.y), z: Number(data.position.z) },
+            rotation: { y: Number(data.rotation.y) },
+            path: String(data.path),
+            karma: Number(data.karma),
+            maxKarma: Number(data.maxKarma),
+            mana: Number(data.mana),
+            maxMana: Number(data.maxMana)
+        };
+    }
+
+    // Rate limiting for player movement
+    rateLimitMovement(socketId) {
+        const now = Date.now();
+        const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
+        if (now - lastUpdate < 30) {
+            this.logSecurityEvent(`Rate limit exceeded for player ${socketId}`, socketId);
+            return false;
+        }
+        return true;
+    }
+
+    // Enhanced logging with throttling
+    logSecurityEvent(message, throttleKey = null) {
+        const now = Date.now();
+        if (throttleKey) {
+            if (!this._lastSecurityLogs) this._lastSecurityLogs = {};
+            if (!this._lastSecurityLogs[throttleKey] || now - this._lastSecurityLogs[throttleKey] > 30000) {
+                this._lastSecurityLogs[throttleKey] = now;
+                console.warn(`[Security] ${message}`);
+            }
+        } else {
+            console.warn(`[Security] ${message}`);
+        }
+    }
+
     setupSocketHandlers() {
         console.log('GameServer: Setting up socket handlers');
         
@@ -71,37 +117,39 @@ export class GameServer {
             // Broadcast new player to others
             this.io.emit('newPlayer', player);
 
-            // Handle player movement with rate limiting
+            // Handle player movement with rate limiting and validation
             socket.on('playerMovement', (data) => {
+                if (!this.rateLimitMovement(socket.id)) {
+                    return;
+                }
+                const sanitizedData = this.sanitizeMovementData(data);
+                if (!sanitizedData) {
+                    this.logSecurityEvent(`Invalid movement data from player ${socket.id}`);
+                    return;
+                }
                 const player = this.players.get(socket.id);
                 if (player) {
-                    const now = Date.now();
-                    const lastUpdate = this.lastUpdateTime.get(socket.id) || 0;
+                    player.position = sanitizedData.position;
+                    player.rotation = sanitizedData.rotation;
+                    player.path = sanitizedData.path;
+                    player.karma = sanitizedData.karma;
+                    player.maxKarma = sanitizedData.maxKarma;
                     
-                    // Only update if at least 50ms has passed since last update
-                    if (now - lastUpdate >= 50) {
-                        player.position = data.position;
-                        player.rotation = data.rotation;
-                        player.path = data.path;
-                        player.karma = data.karma;
-                        player.maxKarma = data.maxKarma;
-                        
-                        // Broadcast movement to other players
-                        this.io.emit('playerMoved', {
-                            id: socket.id,
-                            position: data.position,
-                            rotation: data.rotation,
-                            path: data.path,
-                            karma: data.karma,
-                            maxKarma: data.maxKarma,
-                            life: player.life,
-                            maxLife: player.maxLife,
-                            mana: data.mana,
-                            maxMana: data.maxMana
-                        });
-                        
-                        this.lastUpdateTime.set(socket.id, now);
-                    }
+                    // Broadcast movement to other players
+                    this.io.emit('playerMoved', {
+                        id: socket.id,
+                        position: sanitizedData.position,
+                        rotation: sanitizedData.rotation,
+                        path: sanitizedData.path,
+                        karma: sanitizedData.karma,
+                        maxKarma: sanitizedData.maxKarma,
+                        life: player.life,
+                        maxLife: player.maxLife,
+                        mana: sanitizedData.mana,
+                        maxMana: sanitizedData.maxMana
+                    });
+                    
+                    this.lastUpdateTime.set(socket.id, Date.now());
                 }
             });
 
