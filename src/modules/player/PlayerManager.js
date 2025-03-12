@@ -152,19 +152,6 @@ export class PlayerManager {
             this.game.localPlayer = player;
             this.game.scene.add(player);
             this.players.set(socketId, player);
-            // Attach status bar to player
-            const statusGroup = new THREE.Group();
-            statusGroup.position.set(0, 2.0, 0); // Adjusted height
-            player.add(statusGroup);
-            this.game.updatePlayerStatus(player, {
-                life: this.game.playerStats.currentLife,
-                maxLife: this.game.playerStats.maxLife,
-                mana: this.game.playerStats.currentMana,
-                maxMana: this.game.playerStats.maxMana,
-                karma: this.game.playerStats.currentKarma,
-                maxKarma: this.game.playerStats.maxKarma
-            });
-            this.game.networkManager.sendPlayerState();
         }
         return player;
     }
@@ -181,18 +168,6 @@ export class PlayerManager {
             if (isLocal) {
                 this.game.localPlayer = player;
             }
-            // Attach status bar to player
-            const statusGroup = new THREE.Group();
-            statusGroup.position.set(0, 2.0, 0); // Adjusted height
-            player.add(statusGroup);
-            this.game.updatePlayerStatus(player, {
-                life: this.game.playerStats.currentLife,
-                maxLife: this.game.playerStats.maxLife,
-                mana: this.game.playerStats.currentMana,
-                maxMana: this.game.playerStats.maxMana,
-                karma: this.game.playerStats.currentKarma,
-                maxKarma: this.game.playerStats.maxKarma
-            });
         }
         return player;
     }
@@ -439,17 +414,6 @@ export class PlayerManager {
                     player.userData.mixer.update(this.game.clock.getDelta());
                 }
             }
-            
-            // Update status bar position to follow player
-            if (player.userData.statusGroup) {
-                const worldPosition = new THREE.Vector3();
-                player.getWorldPosition(worldPosition);
-                player.userData.statusGroup.position.set(
-                    worldPosition.x,
-                    worldPosition.y + 2.0,
-                    worldPosition.z
-                );
-            }
         });
     }
     
@@ -472,47 +436,6 @@ export class PlayerManager {
         console.log('PlayerManager cleanup complete');
     }
     
-    // Helper method to create a status bar
-    createStatusBar(color) {
-        // Create a group for the status bar
-        const barGroup = new THREE.Group();
-        
-        // Create background (dark gray)
-        const barWidth = 1;
-        const barHeight = 0.1;
-        const barGeometry = new THREE.PlaneGeometry(barWidth, barHeight);
-        const backgroundMaterial = new THREE.MeshBasicMaterial({
-            color: 0x333333,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.7
-        });
-        const background = new THREE.Mesh(barGeometry, backgroundMaterial);
-        
-        // Create foreground (colored fill)
-        const fillMaterial = new THREE.MeshBasicMaterial({
-            color: color,
-            side: THREE.DoubleSide,
-            transparent: true,
-            opacity: 0.9
-        });
-        const fill = new THREE.Mesh(barGeometry, fillMaterial);
-        fill.position.z = 0.001; // Slightly in front
-        
-        // Add to group
-        barGroup.add(background);
-        barGroup.add(fill);
-        
-        // Store references
-        barGroup.userData = {
-            background: background,
-            fill: fill,
-            width: barWidth
-        };
-        
-        return barGroup;
-    }
-
     updatePlayerMovement(delta) {
         if (!this.game.localPlayer || !this.game.isAlive) return;
 
@@ -573,87 +496,32 @@ export class PlayerManager {
                 }
             }
         }
-
-        // Update status bars to follow player
-        this.updateStatusBars();
     }
 
     checkCollision(newPosition, previousPosition) {
-        // Check world boundaries
-        const worldBounds = 100;
-        if (Math.abs(newPosition.x) > worldBounds || Math.abs(newPosition.z) > worldBounds) {
-            return false;
+        const templeRadius = 15; // Temple platform radius
+        const templeCenter = new THREE.Vector3(0, 0, 0);
+        
+        // Check if player is on temple platform
+        const distanceFromTemple = newPosition.distanceTo(templeCenter);
+        const wasOnTemple = previousPosition.distanceTo(templeCenter) <= templeRadius;
+        
+        // Check for temple cross shape with precise dimensions
+        const isOnVertical = Math.abs(newPosition.x) <= 4.5 && Math.abs(newPosition.z) <= 12.5;
+        const isOnHorizontal = Math.abs(newPosition.x) <= 12.5 && Math.abs(newPosition.z) <= 4.5;
+        
+        if (distanceFromTemple <= templeRadius || isOnVertical || isOnHorizontal) {
+            // On temple platform - set height to 3
+            newPosition.y = 3;
+            return true;
+        } else {
+            // On grass - set height to 1.5
+            newPosition.y = 1.5;
+            return true;
         }
-
-        // Check temple collision
-        if (this.game.temple) {
-            const templePos = this.game.temple.position;
-            const baseHalfWidth = 15; // Half width of temple base
-
-            // Check if player is within temple bounds
-            const isInTemple = (
-                newPosition.x >= templePos.x - baseHalfWidth && 
-                newPosition.x <= templePos.x + baseHalfWidth &&
-                newPosition.z >= templePos.z - baseHalfWidth && 
-                newPosition.z <= templePos.z + baseHalfWidth
-            );
-
-            // If in temple area, only allow if already on platform
-            if (isInTemple && !this.isOnTemplePlatform(previousPosition)) {
-                return false;
-            }
-        }
-
-        // Check statue collisions
-        if (this.game.statueColliders) {
-            for (const collider of this.game.statueColliders) {
-                const dx = newPosition.x - collider.position.x;
-                const dz = newPosition.z - collider.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                if (distance < collider.radius + 1.0) { // Increased collision radius
-                    return false;
-                }
-            }
-        }
-
-        return true; // No collisions found
-    }
-
-    isOnTemplePlatform(position) {
-        if (!this.game.temple) return false;
-
-        const templePos = this.game.temple.position;
-        const baseHalfWidth = 15;
-        const crossVerticalHalfWidth = 4;
-        const crossHorizontalHalfWidth = 12;
-        const crossVerticalHalfLength = 12;
-        const crossHorizontalHalfLength = 4;
-
-        // Check if position is within base platform bounds
-        const isOnBase = Math.abs(position.x - templePos.x) <= baseHalfWidth && 
-                        Math.abs(position.z - templePos.z) <= baseHalfWidth;
-
-        // Check if position is within cross vertical part
-        const isOnVertical = Math.abs(position.x - templePos.x) <= crossVerticalHalfWidth && 
-                            Math.abs(position.z - templePos.z) <= crossVerticalHalfLength;
-
-        // Check if position is within cross horizontal part
-        const isOnHorizontal = Math.abs(position.x - templePos.x) <= crossHorizontalHalfWidth && 
-                              Math.abs(position.z - templePos.z) <= crossHorizontalHalfLength;
-
-        return isOnBase || isOnVertical || isOnHorizontal;
     }
 
     updatePlayerHeight(position) {
-        if (this.isOnTemplePlatform(position)) {
-            position.y = 3; // Temple platform height
-        } else {
-            position.y = 1.5; // Ground level height
-        }
-    }
-
-    updateStatusBars() {
-        // Implementation of updateStatusBars method
+        // Removed
     }
 }
