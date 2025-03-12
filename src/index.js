@@ -1,6 +1,9 @@
 // Import protection measures
 import './protection';
 
+// Import the getServerUrl function from config.js
+import { getServerUrl } from './config.js';
+
 // Clear any game session data on load to prevent duplicates
 function clearGameData() {
     console.log('Clearing game session data');
@@ -37,9 +40,7 @@ import { Game } from './Game.js';
 document.addEventListener('DOMContentLoaded', () => {
     try {
         // Create and initialize the game with server URL
-        const serverUrl = window.location.hostname === 'localhost' 
-            ? 'http://localhost:3000'
-            : window.location.origin;
+        const serverUrl = getServerUrl();
             
         window.game = new Game(serverUrl);
     } catch (error) {
