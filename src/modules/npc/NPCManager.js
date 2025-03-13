@@ -680,16 +680,27 @@ export class NPCManager {
             }
         });
         
+        // Handle special NPC cases
+        if (this.darkNPC) {
+            this.game.scene.remove(this.darkNPC);
+            if (this.darkNPC.geometry) this.darkNPC.geometry.dispose();
+            if (this.darkNPC.material) this.darkNPC.material.dispose();
+            this.darkNPC = null;
+            this.game.darkNPC = null;
+        }
+        if (this.lightNPC) {
+            this.game.scene.remove(this.lightNPC);
+            if (this.lightNPC.geometry) this.lightNPC.geometry.dispose();
+            if (this.lightNPC.material) this.lightNPC.material.dispose();
+            this.lightNPC = null;
+            this.game.lightNPC = null;
+        }
+        
         // Clear all references
         this.npcs.clear();
         this.npcModels = {
             'light_npc': null,
             'dark_npc': null
         };
-        this.lightNPC = null;
-        this.darkNPC = null;
-        
-        // We don't need to remove the NPCs from the scene here as they're part of the EnvironmentManager
-        // The EnvironmentManager will handle cleaning them up in its own cleanup method
     }
 }
