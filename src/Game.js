@@ -124,9 +124,8 @@ export class Game {
                 throw new Error('Failed to connect to server');
             }
             
-            // Initialize player
+            // Initialize player - this already loads the character model
             await this.playerManager.init();
-            await this.playerManager.loadCharacterModel();
             
             // Initialize other systems that depend on player
             await this.skillsManager.init();
@@ -202,7 +201,6 @@ export class Game {
 
     handleGameUpdate(data) {
         // Process game state updates from server
-        console.log('Processing game update:', data);
         
         // Update karma if provided
         if (data.karma !== undefined && this.playerManager && this.karmaManager) {
@@ -685,7 +683,7 @@ export class Game {
             this.playerStats = {
                 currentKarma: 50,
                 maxKarma: 100,
-                path: "neutral"
+                path: null
             };
         }
 
@@ -703,8 +701,8 @@ export class Game {
                 this.playerStats.path = "light";
                 this.karmaManager.onKarmaThresholdCrossed();
             }
-        } else if (this.playerStats.path !== "neutral") {
-            this.playerStats.path = "neutral";
+        } else if (this.playerStats.path !== null) {
+            this.playerStats.path = null;
             this.karmaManager.onKarmaThresholdCrossed();
         }
 
@@ -908,5 +906,32 @@ export class Game {
         }
         
         return false;
+    }
+
+    /**
+     * Choose a path for the player and notify the server
+     * @param {string} path - The path to choose ('light' or 'dark')
+     */
+    choosePath(path) {
+        if (this.playerStats.path) {
+            console.log(`Already chosen path: ${this.playerStats.path}`);
+            return false;
+        }
+        
+        // Set path locally
+        this.playerStats.path = path;
+        
+        // Notify server about path choice
+        if (this.networkManager) {
+            this.networkManager.sendPathChoice(path);
+        }
+        
+        // Grant skills based on path
+        if (path === 'light') {
+            this.skillsManager.addSkill('martial_arts');
+        }
+        
+        console.log(`Path chosen: ${path}`);
+        return true;
     }
 } 

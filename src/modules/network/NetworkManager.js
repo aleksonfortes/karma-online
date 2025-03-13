@@ -419,10 +419,8 @@ export class NetworkManager {
 
         // Handle stats update
         this.socket.on('statsUpdate', (data) => {
-            console.log('Received statsUpdate:', data);
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
-                console.log('Player mesh not found for stats update:', data.id);
                 return;
             }
 
@@ -439,14 +437,6 @@ export class NetworkManager {
                 mana: data.mana,
                 maxMana: data.maxMana
             };
-
-            console.log('Updated player stats:', {
-                playerId: data.id,
-                oldLife: oldStats.life,
-                newLife: data.life,
-                oldMana: oldStats.mana,
-                newMana: data.mana
-            });
 
             // Update the visual status bars
             if (this.game.updatePlayerStatus) {
@@ -469,7 +459,6 @@ export class NetworkManager {
         this.socket.on('lifeUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
-                console.log('Player mesh not found for life update:', data.id);
                 return;
             }
 
@@ -502,13 +491,6 @@ export class NetworkManager {
                         this.game.handlePlayerDeath();
                     }
                 }
-                
-                console.log('🛡️ Life Updated:', {
-                    oldLife: previousLife,
-                    newLife: this.game.playerStats.currentLife,
-                    maxLife: this.game.playerStats.maxLife,
-                    died: this.game.playerStats.currentLife === 0
-                });
             }
         });
 
@@ -516,7 +498,6 @@ export class NetworkManager {
         this.socket.on('manaUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
-                console.log('Player mesh not found for mana update:', data.id);
                 return;
             }
 
@@ -547,7 +528,6 @@ export class NetworkManager {
         this.socket.on('karmaUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
-                console.log('Player mesh not found for karma update:', data.id);
                 return;
             }
 
@@ -681,7 +661,7 @@ export class NetworkManager {
             rotation: {
                 y: this.game.localPlayer.rotation.y
             },
-            path: this.game.localPlayer.userData.path || 'neutral',
+            path: this.game.localPlayer.userData.path || null,
             karma: this.game.localPlayer.userData.stats?.karma || 50,
             maxKarma: this.game.localPlayer.userData.stats?.maxKarma || 100,
             mana: this.game.localPlayer.userData.stats?.mana || 100,
@@ -774,5 +754,50 @@ export class NetworkManager {
             
             console.log(`Added network player ${player.id} with status bars`);
         }
+    }
+
+    /**
+     * Send path choice to server for validation
+     * @param {string} path - The path chosen ('light' or 'dark')
+     */
+    sendPathChoice(path) {
+        if (!this.socket || !this.isConnected) {
+            console.warn('Cannot send path choice: Not connected to server');
+            return false;
+        }
+        
+        console.log(`Sending path choice to server: ${path}`);
+        this.socket.emit('choosePath', { path });
+        
+        // Set up a listener for the server's response
+        this.socket.once('pathSelectionResult', (result) => {
+            if (result.success) {
+                console.log(`Path selection confirmed by server: ${path}`);
+                
+                // Show confirmation message
+                if (this.game.uiManager) {
+                    if (path === 'light') {
+                        this.game.uiManager.showNotification('You have chosen the Light Path. You have learned Martial Arts skill!', '#ffcc00');
+                    } else if (path === 'dark') {
+                        this.game.uiManager.showNotification('You have chosen the Dark Path. Your power grows with darkness.', '#6600cc');
+                    }
+                }
+            } else {
+                // Path selection was rejected by the server
+                console.warn(`Path selection rejected: ${result.message}`);
+                
+                // Reset the path locally since server rejected it
+                if (this.game.playerStats) {
+                    this.game.playerStats.path = null;
+                }
+                
+                // Show error message
+                if (this.game.uiManager) {
+                    this.game.uiManager.showNotification(result.message, '#ff0000');
+                }
+            }
+        });
+        
+        return true;
     }
 }

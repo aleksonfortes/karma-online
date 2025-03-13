@@ -224,4 +224,26 @@ export class SkillsManager {
             this.game.uiManager.updateSkillBar();
         }
     }
+    
+    // Add method to add skills to the player's active skills
+    addSkill(skillId) {
+        if (!this.skills[skillId]) {
+            console.warn(`Cannot add skill ${skillId}: skill not found`);
+            return false;
+        }
+        
+        // Initialize activeSkills if it doesn't exist
+        this.game.activeSkills = this.game.activeSkills || new Set();
+        
+        // Add the skill to the player's active skills
+        this.game.activeSkills.add(skillId);
+        console.log(`Added skill ${skillId} to player's active skills`);
+        
+        // Update the skill bar
+        if (this.game.uiManager && typeof this.game.uiManager.updateSkillBar === 'function') {
+            this.game.uiManager.updateSkillBar();
+        }
+        
+        return true;
+    }
 } 

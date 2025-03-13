@@ -111,6 +111,59 @@ export class NetworkManager {
                     socket.emit('npcInteractionResult', interactionResult);
                 }
             });
+            
+            // Handle path selection
+            socket.on('choosePath', (data) => {
+                console.log(`Player ${socket.id} is choosing path: ${data?.path}`);
+                
+                // Validate path data
+                if (!data || !data.path || (data.path !== 'light' && data.path !== 'dark')) {
+                    this.logSecurityEvent(`Invalid path selection data from player ${socket.id}`);
+                    socket.emit('pathSelectionResult', {
+                        success: false,
+                        message: 'Invalid path selection'
+                    });
+                    return;
+                }
+                
+                // Get the player
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    socket.emit('pathSelectionResult', {
+                        success: false,
+                        message: 'Player not found'
+                    });
+                    return;
+                }
+                
+                // Check if player has already chosen a path
+                if (player.path) {
+                    // Player already has a path, reject the request
+                    socket.emit('pathSelectionResult', {
+                        success: false,
+                        message: `You have already chosen the path of ${player.path}. This choice is permanent in this life.`
+                    });
+                    return;
+                }
+                
+                // Set the player's path
+                player.path = data.path;
+                
+                // Grant skills based on path
+                const skills = [];
+                if (data.path === 'light') {
+                    skills.push('martial_arts');
+                }
+                
+                // Send success response
+                socket.emit('pathSelectionResult', {
+                    success: true,
+                    path: data.path,
+                    skills: skills
+                });
+                
+                console.log(`Player ${socket.id} successfully chose path: ${data.path}`);
+            });
 
             // Handle disconnection
             socket.on('disconnect', () => {
@@ -199,7 +252,7 @@ export class NetworkManager {
             rotation: {
                 y: Number(data.rotation.y || 0)
             },
-            path: String(data.path || 'neutral'),
+            path: data.path || null,
             karma: Number(data.karma || 50),
             maxKarma: Number(data.maxKarma || 100),
             mana: Number(data.mana || 100),

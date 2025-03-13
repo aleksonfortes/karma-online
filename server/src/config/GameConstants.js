@@ -22,7 +22,7 @@ const GameConstants = {
         DEFAULT_MAX_MANA: 100,
         DEFAULT_KARMA: 50,
         DEFAULT_MAX_KARMA: 100,
-        DEFAULT_PATH: "neutral",
+        DEFAULT_PATH: null,
         
         // Model properties
         MODEL_SCALE: 4.5, // Matches the Light NPC scale
