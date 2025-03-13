@@ -3,10 +3,12 @@
  * 
  * Handles game state, player updates, and game loop
  */
+import NPCManager from '../npc/NPCManager.js';
 
 export class GameManager {
     constructor(playerManager) {
         this.playerManager = playerManager;
+        this.npcManager = new NPCManager(this);
         this.gameState = {
             lastUpdate: Date.now()
         };
@@ -59,6 +61,24 @@ export class GameManager {
     }
     
     /**
+     * Get all NPCs
+     * @returns {Array} Array of all NPC objects
+     */
+    getAllNPCs() {
+        return this.npcManager.getAllNPCs();
+    }
+    
+    /**
+     * Handle player interaction with NPC
+     * @param {string} playerId - The player's socket ID
+     * @param {string} npcId - The NPC ID
+     * @returns {Object|null} NPC interaction data or null if not found
+     */
+    handleNPCInteraction(playerId, npcId) {
+        return this.npcManager.handleNPCInteraction(playerId, npcId);
+    }
+    
+    /**
      * Update a player's movement and state
      * @param {string} socketId - The socket ID of the player
      * @param {Object} data - The movement data
@@ -99,8 +119,8 @@ export class GameManager {
         const deltaTime = now - this.gameState.lastUpdate;
         this.gameState.lastUpdate = now;
         
-        // Update game logic here
-        // This is where we would add NPC movement, world events, etc.
+        // Update NPCs to face nearby players
+        this.npcManager.update(this.playerManager);
     }
 }
 

@@ -118,6 +118,12 @@ export class NetworkManager {
             if (!this.game.localPlayer) {
                 this.createLocalPlayer();
             }
+            
+            // Process NPCs from server if they exist
+            if (gameState.npcs && this.game.npcManager) {
+                console.log('Processing NPCs from server:', gameState.npcs);
+                this.game.npcManager.processServerNPCs(gameState.npcs);
+            }
         });
         
         // Handle initial position response
@@ -388,6 +394,27 @@ export class NetworkManager {
                     }
                 }
             });
+            
+            // Process NPC updates if they exist
+            if (data.npcs && this.game.npcManager) {
+                this.game.npcManager.processNPCUpdates(data.npcs);
+            }
+        });
+
+        // Handle NPC updates from server
+        this.socket.on('npcUpdates', (npcData) => {
+            if (this.game.npcManager) {
+                this.game.npcManager.processNPCUpdates(npcData);
+            }
+        });
+        
+        // Handle NPC interaction result
+        this.socket.on('npcInteractionResult', (result) => {
+            console.log('Received NPC interaction result:', result);
+            // The UI manager will handle showing the dialogue based on the NPC type
+            if (this.game.uiManager && this.game.uiManager.showDialogue && result.type) {
+                this.game.uiManager.showDialogue(result.type);
+            }
         });
 
         // Handle stats update

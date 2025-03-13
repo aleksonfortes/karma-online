@@ -113,7 +113,6 @@ export class Game {
             this.playerManager = new PlayerManager(this);
             this.skillsManager = new SkillsManager(this);
             this.karmaManager = new KarmaManager(this);
-            this.npcManager = new NPCManager(this);
             
             // Initialize UI first so we can show loading indicators
             await this.uiManager.init();
@@ -133,7 +132,8 @@ export class Game {
             await this.skillsManager.init();
             await this.karmaManager.init();
             
-            // NPCs should be initialized last
+            // Initialize NPCManager last
+            this.npcManager = new NPCManager(this);
             await this.npcManager.init();
             
             // Now that everything is loaded, hide loading screen and show game UI
@@ -443,7 +443,7 @@ export class Game {
         templeLight.position.set(0, 4, 0); // Adjust light height to be lower
         templeGroup.add(templeLight);
 
-        // Add NPC to the temple
+        // Add NPC to the temple - we're restoring this to ensure NPCs are visible
         this.loadNPC(templeGroup, baseHeight);
 
         // Position the entire temple
@@ -878,7 +878,7 @@ export class Game {
             return true;
         }
         
-        // Check statue collisions
+        // Check collision with statues
         if (this.statueColliders) {
             for (const collider of this.statueColliders) {
                 const dx = position.x - collider.position.x;
@@ -886,6 +886,22 @@ export class Game {
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
                 if (distance < collider.radius + 0.5) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check collision with NPCs from NPCManager
+        if (this.npcManager && this.npcManager.npcs) {
+            for (const [id, npcData] of this.npcManager.npcs) {
+                if (!npcData.mesh) continue;
+                
+                const npcPos = npcData.mesh.position;
+                const dx = position.x - npcPos.x;
+                const dz = position.z - npcPos.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                if (distance < npcData.collisionRadius + 0.5) {
                     return true;
                 }
             }
