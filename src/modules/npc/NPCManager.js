@@ -382,40 +382,44 @@ export class NPCManager {
         context.clearRect(0, 0, canvas.width, canvas.height);
         
         // Set up text style
-        context.font = 'Bold 24px Arial';
-        context.fillStyle = 'white';
+        context.font = 'bold 24px Arial';
         context.textAlign = 'center';
         context.textBaseline = 'middle';
-        context.strokeStyle = 'black';
-        context.lineWidth = 3;
-        
-        // Draw text with black outline
-        const text = 'Press E to interact';
-        const x = canvas.width / 2;
-        const y = canvas.height / 2;
-        
-        // Draw stroke
-        context.strokeText(text, x, y);
-        // Draw fill
-        context.fillText(text, x, y);
-        
-        // Create sprite with text texture
+
+        // Create gradient for text
+        const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
+        gradient.addColorStop(0, '#4a9eff');
+        gradient.addColorStop(1, '#00ff88');
+
+        // Draw text with gradient and outline
+        const text = 'Press E';
+        context.fillStyle = gradient;
+        context.strokeStyle = '#000000';
+        context.lineWidth = 2;
+        context.strokeText(text, canvas.width / 2, canvas.height / 2);
+        context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+        // Create texture from canvas
         const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+
+        // Create sprite material
         const spriteMaterial = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
             depthTest: false
         });
-        
+
+        // Create sprite and position it above NPC
         const sprite = new THREE.Sprite(spriteMaterial);
         sprite.scale.set(2, 0.5, 1);
         sprite.position.y = yOffset;
-        sprite.visible = false; // Initially hidden
+        sprite.visible = false; // Start hidden
         
-        // Add to NPC
+        // Add sprite to NPC model
         npcModel.add(sprite);
         
-        // Store reference to sprite
+        // Store reference to the sprite in the NPC model's userData
         if (!npcModel.userData) {
             npcModel.userData = {};
         }
@@ -424,45 +428,32 @@ export class NPCManager {
         return sprite;
     }
     
+    // Use the EnvironmentManager's checkTempleProximity method instead
     checkTempleProximity() {
-        if (!this.game.localPlayer || !this.game.temple) return false;
-        
-        const playerPosition = this.game.localPlayer.position;
-        
-        // Simple distance check from temple center
-        const templex = 0; // Temple is at origin x
-        const templez = 0; // Temple is at origin z
-        
-        const distanceX = playerPosition.x - templex;
-        const distanceZ = playerPosition.z - templez;
-        const distance = Math.sqrt(distanceX * distanceX + distanceZ * distanceZ);
-        
-        // Player is in temple if within 15 units of center
-        return distance < 15;
+        if (this.game.environmentManager) {
+            return this.game.environmentManager.checkTempleProximity();
+        }
+        return false;
     }
-    
+
     calculateDistance(posA, posB) {
         const dx = posA.x - posB.x;
+        const dy = posA.y - posB.y;
         const dz = posA.z - posB.z;
-        return Math.sqrt(dx * dx + dz * dz);
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
     
     handleInteraction() {
-        if (!this.game.localPlayer) {
-            console.log("No local player found for interaction");
-            return;
-        }
-        
         console.log("Handling NPC interaction");
         
         // Check proximity to NPCs
         const playerPos = this.game.localPlayer.position;
         
-        // First check the original NPCs from Game.js if they exist
-        if (this.game.darkNPC || this.game.lightNPC) {
+        // First check the NPCs from EnvironmentManager if they exist
+        if (this.game.environmentManager && (this.game.environmentManager.darkNPC || this.game.environmentManager.lightNPC)) {
             // Check dark NPC
-            if (this.game.darkNPC) {
-                const darkNpcPos = this.game.darkNPC.position;
+            if (this.game.environmentManager.darkNPC) {
+                const darkNpcPos = this.game.environmentManager.darkNPC.position;
                 const distance = this.calculateDistance(playerPos, darkNpcPos);
                 const darkConfig = GameConstants.NPC.DARK;
                 
@@ -486,8 +477,8 @@ export class NPCManager {
             }
             
             // Check light NPC
-            if (this.game.lightNPC) {
-                const lightNpcPos = this.game.lightNPC.position;
+            if (this.game.environmentManager.lightNPC) {
+                const lightNpcPos = this.game.environmentManager.lightNPC.position;
                 const distance = this.calculateDistance(playerPos, lightNpcPos);
                 const lightConfig = GameConstants.NPC.LIGHT;
                 
@@ -511,7 +502,7 @@ export class NPCManager {
             }
         }
         
-        // If we didn't interact with the original NPCs, check the ones in our map
+        // If we didn't interact with the EnvironmentManager NPCs, check the ones in our map
         for (const [npcId, npcData] of this.npcs) {
             if (!npcData.mesh) {
                 console.log(`NPC ${npcId} has no mesh, skipping`);
@@ -589,6 +580,40 @@ export class NPCManager {
         // Update NPC interaction labels based on proximity
         const playerPos = this.game.localPlayer.position;
         
+        // First check NPCs from EnvironmentManager
+        if (this.game.environmentManager) {
+            // Check Dark NPC
+            if (this.game.environmentManager.darkNPC && this.game.environmentManager.darkNPC.interactionSprite) {
+                const darkNPC = this.game.environmentManager.darkNPC;
+                const distance = this.calculateDistance(playerPos, darkNPC.position);
+                const darkConfig = GameConstants.NPC.DARK;
+                
+                // Show/hide interaction label based on distance
+                darkNPC.interactionSprite.visible = distance < darkConfig.COLLISION_RADIUS + 3;
+                
+                // Make interaction sprite face camera
+                if (this.game.camera && darkNPC.interactionSprite) {
+                    darkNPC.interactionSprite.quaternion.copy(this.game.camera.quaternion);
+                }
+            }
+            
+            // Check Light NPC
+            if (this.game.environmentManager.lightNPC && this.game.environmentManager.lightNPC.interactionSprite) {
+                const lightNPC = this.game.environmentManager.lightNPC;
+                const distance = this.calculateDistance(playerPos, lightNPC.position);
+                const lightConfig = GameConstants.NPC.LIGHT;
+                
+                // Show/hide interaction label based on distance
+                lightNPC.interactionSprite.visible = distance < lightConfig.COLLISION_RADIUS + 3;
+                
+                // Make interaction sprite face camera
+                if (this.game.camera && lightNPC.interactionSprite) {
+                    lightNPC.interactionSprite.quaternion.copy(this.game.camera.quaternion);
+                }
+            }
+        }
+        
+        // Then check NPCs in our own map
         this.npcs.forEach(npcData => {
             const npcMesh = npcData.mesh;
             if (!npcMesh || !npcMesh.userData || !npcMesh.userData.interactionSprite) return;
@@ -602,17 +627,31 @@ export class NPCManager {
             if (this.game.camera && npcMesh.userData.interactionSprite) {
                 npcMesh.userData.interactionSprite.quaternion.copy(this.game.camera.quaternion);
             }
-            
-            // Make NPCs face the player when close
-            if (distance < 10) {
-                const angle = Math.atan2(npcMesh.position.x - playerPos.x, npcMesh.position.z - playerPos.z);
-                npcMesh.rotation.y = angle;
-            }
         });
         
         // Update NPC proximity flag based on closest distance
         let closestDistance = Infinity;
+        
+        // Check distance to EnvironmentManager NPCs
+        if (this.game.environmentManager) {
+            if (this.game.environmentManager.darkNPC) {
+                const distance = this.calculateDistance(playerPos, this.game.environmentManager.darkNPC.position);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                }
+            }
+            
+            if (this.game.environmentManager.lightNPC) {
+                const distance = this.calculateDistance(playerPos, this.game.environmentManager.lightNPC.position);
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                }
+            }
+        }
+        
+        // Check distance to NPCs in our map
         this.npcs.forEach(npcData => {
+            if (!npcData.mesh) return;
             const distance = this.calculateDistance(playerPos, npcData.mesh.position);
             if (distance < closestDistance) {
                 closestDistance = distance;
@@ -649,13 +688,8 @@ export class NPCManager {
         };
         this.lightNPC = null;
         this.darkNPC = null;
-        if (this.game.lightNPC) {
-            this.game.scene.remove(this.game.lightNPC);
-            this.game.lightNPC = null;
-        }
-        if (this.game.darkNPC) {
-            this.game.scene.remove(this.game.darkNPC);
-            this.game.darkNPC = null;
-        }
+        
+        // We don't need to remove the NPCs from the scene here as they're part of the EnvironmentManager
+        // The EnvironmentManager will handle cleaning them up in its own cleanup method
     }
 }

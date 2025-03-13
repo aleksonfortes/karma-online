@@ -110,7 +110,11 @@ export class NetworkManager {
             // Create all existing players
             gameState.players.forEach(player => {
                 if (player.id !== this.socket.id) {
-                    this.createNetworkPlayer(player);
+                    // Use async function without waiting for it to complete
+                    // This is fine because each player is created independently
+                    this.createNetworkPlayer(player).catch(error => {
+                        console.error(`Failed to create network player ${player.id}:`, error);
+                    });
                 }
             });
             
@@ -214,7 +218,9 @@ export class NetworkManager {
             
             // Only create if the player doesn't already exist
             if (!this.game.playerManager.players.has(player.id)) {
-                this.createNetworkPlayer(player);
+                this.createNetworkPlayer(player).catch(error => {
+                    console.error(`Failed to create network player ${player.id}:`, error);
+                });
             } else {
                 console.log(`Player ${player.id} already exists, not creating again`);
             }
@@ -722,37 +728,50 @@ export class NetworkManager {
         // Clear local player reference
         this.game.localPlayer = null;
         
+        // Clean up NPCs and environment
+        if (this.game.npcManager) {
+            this.game.npcManager.cleanup();
+        }
+        
+        if (this.game.environmentManager) {
+            this.game.environmentManager.cleanup();
+        }
+        
         console.log('Cleaned up network state');
     }
 
-    createNetworkPlayer(player) {
+    async createNetworkPlayer(player) {
         console.log('Creating network player:', player.id);
-        const playerMesh = this.game.playerManager.createPlayer(
-            player.id,
-            player.position,
-            { y: player.rotation.y || 0 },
-            false // not local
-        );
-        
-        if (playerMesh) {
-            this.game.scene.add(playerMesh);
+        try {
+            const playerMesh = await this.game.playerManager.createPlayer(
+                player.id,
+                player.position,
+                { y: player.rotation.y || 0 },
+                false // not local
+            );
             
-            const stats = {
-                life: player.life ?? 100,
-                maxLife: player.maxLife ?? 100,
-                mana: player.mana ?? 100,
-                maxMana: player.maxMana ?? 100,
-                karma: player.karma ?? 50,
-                maxKarma: player.maxKarma ?? 100
-            };
-            
-            // Force creation and update of status bars
-            if (this.game.updatePlayerStatus) {
-                this.game.updatePlayerStatus(playerMesh, stats);
+            if (playerMesh) {
+                this.game.scene.add(playerMesh);
+                
+                const stats = {
+                    life: player.life ?? 100,
+                    maxLife: player.maxLife ?? 100,
+                    mana: player.mana ?? 100,
+                    maxMana: player.maxMana ?? 100,
+                    karma: player.karma ?? 50,
+                    maxKarma: player.maxKarma ?? 100
+                };
+                
+                // Force creation and update of status bars
+                if (this.game.updatePlayerStatus) {
+                    this.game.updatePlayerStatus(playerMesh, stats);
+                }
+                this.game.playerManager.players.set(player.id, playerMesh);
+                
+                console.log(`Added network player ${player.id} with status bars`);
             }
-            this.game.playerManager.players.set(player.id, playerMesh);
-            
-            console.log(`Added network player ${player.id} with status bars`);
+        } catch (error) {
+            console.error(`Error creating network player ${player.id}:`, error);
         }
     }
 

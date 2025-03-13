@@ -245,8 +245,8 @@ export class TerrainManager {
     }
     
     update() {
-        // Animate water waves
-        this.waterTime += 0.01;
+        // Update water time for wave animation
+        this.waterTime += this.waveSpeed;
         
         // Update wave rings
         for (const ring of this.waveRings) {
@@ -256,7 +256,12 @@ export class TerrainManager {
     }
     
     isOnTemplePlatform(position) {
-        // Check if player is within temple platform radius
+        // Use the EnvironmentManager's implementation if available
+        if (this.game.environmentManager) {
+            return this.game.environmentManager.isOnTemplePlatform(position);
+        }
+        
+        // Fallback implementation if EnvironmentManager is not available
         const platformRadius = 5; // Radius of the temple platform
         const distance = Math.sqrt(position.x * position.x + position.z * position.z);
         return distance <= platformRadius;
@@ -272,8 +277,11 @@ export class TerrainManager {
             this.ocean.material.dispose();
         }
         
-        // Clean up wave rings
+        // Remove all wave rings
         for (const ring of this.waveRings) {
+            if (ring.mesh && ring.mesh.parent) {
+                ring.mesh.parent.remove(ring.mesh);
+            }
             if (ring.mesh && ring.mesh.geometry) {
                 ring.mesh.geometry.dispose();
             }
