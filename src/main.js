@@ -1,4 +1,4 @@
-import './style.css';
+import './styles.css';
 import { Game } from './Game.js';
 import { getServerUrl } from './config.js';
 

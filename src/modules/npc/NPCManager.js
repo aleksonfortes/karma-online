@@ -16,18 +16,28 @@ export class NPCManager {
             'light_npc': null,
             'dark_npc': null
         };
+        this.initialized = false;
     }
     
     async init() {
         console.log('Initializing NPC Manager');
         
-        // Load the NPC models locally if not received from server yet
-        // This ensures backward compatibility
-        if (!this.game.networkManager?.isConnected) {
+        // Only initialize once
+        if (this.initialized) {
+            console.log('NPC Manager already initialized');
+            return;
+        }
+        
+        // Wait for network manager to be ready
+        if (this.game.networkManager?.isConnected) {
+            console.log('Network connected, waiting for server NPCs');
+            // NPCs will be initialized through processServerNPCs
+        } else {
+            console.log('No network connection, loading NPCs locally');
             await this.loadLocalNPCs();
         }
         
-        return true;
+        this.initialized = true;
     }
     
     /**
@@ -42,13 +52,13 @@ export class NPCManager {
         
         console.log('Processing server NPCs:', npcData);
         
-        // Clear existing NPCs before loading new ones from server
-        // This prevents duplication when reconnecting
+        // Clean up existing NPCs before loading new ones
         this.cleanup();
         
         // Load each NPC from server data
-        npcData.forEach(npc => {
-            this.loadNPC(npc.position, npc.type, npc);
+        npcData.forEach(async npc => {
+            const position = new THREE.Vector3(npc.position.x, npc.position.y, npc.position.z);
+            await this.loadNPC(position, npc.type, npc);
         });
     }
     
@@ -168,18 +178,19 @@ export class NPCManager {
     async loadNPC(position, npcType, serverData = null) {
         const npcId = serverData?.id || npcType;
         
-        // Only log when initially loading, not for position updates
-        if (!this.npcs.has(npcId)) {
-            console.log(`Loading NPC: ${npcType}`);
-        }
-        
-        // If we already have this NPC loaded, just update its position
+        // Check if we already have this NPC
         if (this.npcs.has(npcId)) {
+            console.log(`NPC ${npcId} already exists, updating position`);
             const existingNPC = this.npcs.get(npcId);
             if (existingNPC && existingNPC.mesh && position) {
                 existingNPC.mesh.position.copy(position);
-                return existingNPC.mesh;
             }
+            return existingNPC.mesh;
+        }
+        
+        // Only log when initially loading, not for position updates
+        if (!this.npcs.has(npcId)) {
+            console.log(`Loading NPC: ${npcType}`);
         }
         
         // Check if we already have an NPC of this type loaded (regardless of ID)
@@ -612,16 +623,39 @@ export class NPCManager {
     }
     
     cleanup() {
-        // Remove all NPCs
-        this.npcs.forEach(npcData => {
-            if (npcData.mesh) {
-                this.game.scene.remove(npcData.mesh);
+        console.log('Cleaning up NPCs');
+        
+        // Remove all NPCs from the scene
+        this.npcs.forEach(npc => {
+            if (npc.mesh) {
+                this.game.scene.remove(npc.mesh);
+                // Clean up any associated resources
+                if (npc.mesh.geometry) npc.mesh.geometry.dispose();
+                if (npc.mesh.material) {
+                    if (Array.isArray(npc.mesh.material)) {
+                        npc.mesh.material.forEach(m => m.dispose());
+                    } else {
+                        npc.mesh.material.dispose();
+                    }
+                }
             }
         });
+        
+        // Clear all references
         this.npcs.clear();
+        this.npcModels = {
+            'light_npc': null,
+            'dark_npc': null
+        };
         this.lightNPC = null;
         this.darkNPC = null;
-        this.game.lightNPC = null;
-        this.game.darkNPC = null;
+        if (this.game.lightNPC) {
+            this.game.scene.remove(this.game.lightNPC);
+            this.game.lightNPC = null;
+        }
+        if (this.game.darkNPC) {
+            this.game.scene.remove(this.game.darkNPC);
+            this.game.darkNPC = null;
+        }
     }
 }
