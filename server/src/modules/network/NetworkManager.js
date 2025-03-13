@@ -40,9 +40,10 @@ export class NetworkManager {
             // Log player connection with total count
             console.log(`Player connected: ${socket.id} (Total Players: ${this.playerManager.getPlayerCount()})`);
             
-            // Send current game state to new player
+            // Send current game state to new player including NPCs
             socket.emit('initGameState', {
                 players: this.playerManager.getAllPlayers(),
+                npcs: this.gameManager.getAllNPCs(),
                 serverTime: Date.now()
             });
             
@@ -90,6 +91,26 @@ export class NetworkManager {
                     this.lastUpdateTime.set(socket.id, Date.now());
                 }
             });
+            
+            // Handle NPC interaction requests
+            socket.on('npcInteraction', (data) => {
+                if (!this.validateSession(socket.id)) {
+                    return;
+                }
+                
+                // Validate NPC ID
+                if (!data || !data.npcId) {
+                    this.logSecurityEvent(`Invalid NPC interaction data from player ${socket.id}`);
+                    return;
+                }
+                
+                // Process interaction through game manager
+                const interactionResult = this.gameManager.handleNPCInteraction(socket.id, data.npcId);
+                if (interactionResult) {
+                    // Send interaction result back to the requesting player
+                    socket.emit('npcInteractionResult', interactionResult);
+                }
+            });
 
             // Handle disconnection
             socket.on('disconnect', () => {
@@ -110,6 +131,13 @@ export class NetworkManager {
         if (this.playerManager.getPlayerCount() > 0) {
             this.io.emit('fullPlayersSync', this.playerManager.getAllPlayers());
         }
+    }
+    
+    /**
+     * Broadcast NPC updates to all connected clients
+     */
+    broadcastNPCUpdates() {
+        this.io.emit('npcUpdates', this.gameManager.getAllNPCs());
     }
     
     /**
