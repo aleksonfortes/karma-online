@@ -7,6 +7,7 @@ import { KarmaManager } from './modules/karma/KarmaManager.js';
 import { TerrainManager } from './modules/terrain/TerrainManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
 import { EnvironmentManager } from './modules/environment/EnvironmentManager.js';
+import { CameraManager } from './modules/camera/CameraManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
@@ -15,7 +16,6 @@ export class Game {
     constructor() {
         // Initialize Three.js components
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         
         // Game state
@@ -62,19 +62,14 @@ export class Game {
         };
         this.activeSkills = new Set(['martial_arts']);
         
-        // Camera settings
-        this.cameraOffset = { x: 0, y: 8, z: 10 };
-        this.cameraTarget = null;
-        this.minZoom = 12;
-        this.maxZoom = 20;
-        this.zoomSpeed = 0.5;
-        this.currentZoom = 15;
-        
         // Timing
         this.clock = new THREE.Clock();
         this.lastTime = 0;
         this.lastPositionLog = 0;
         this.logFrequency = 5000;
+        
+        // Initialize camera manager
+        this.cameraManager = new CameraManager(this);
         
         // Initialize the game
         this.initialize();
@@ -111,6 +106,7 @@ export class Game {
             this.playerManager = new PlayerManager(this);
             this.skillsManager = new SkillsManager(this);
             this.karmaManager = new KarmaManager(this);
+            this.cameraManager = new CameraManager(this);
             
             // Initialize UI first so we can show loading indicators
             await this.uiManager.init();
@@ -169,27 +165,10 @@ export class Game {
             case 'characterLoaded':
                 // Character is ready to be shown in scene
                 console.log('Character loaded and ready');
-                // Set camera to follow player
-                this.setupCamera();
                 break;
                 
             default:
                 console.log('Unhandled player event:', eventName);
-        }
-    }
-
-    setupCamera() {
-        if (this.playerManager.player) {
-            // Set camera to follow player from behind
-            this.camera.position.set(0, 5, 10); // Position behind and above player
-            
-            // Create a camera target that follows the player smoothly
-            this.cameraTarget = new THREE.Object3D();
-            this.cameraTarget.position.copy(this.playerManager.player.position);
-            this.cameraTarget.position.y += 2; // Look at player head level
-            this.scene.add(this.cameraTarget);
-            
-            this.camera.lookAt(this.cameraTarget.position);
         }
     }
 
@@ -220,10 +199,6 @@ export class Game {
         this.renderer.shadowMap.enabled = true;
         this.renderer.setClearColor(0x004488); // Ocean blue background
         document.body.appendChild(this.renderer.domElement);
-        
-        // Setup camera
-        this.camera.position.set(0, 15, 15);
-        this.camera.lookAt(0, 0, 0);
         
         // Add fog to the scene
         this.scene.fog = new THREE.Fog(0x004488, 150, 400);
@@ -311,19 +286,6 @@ export class Game {
             }
         });
         
-        // Add mouse wheel event listener for zoom
-        window.addEventListener('wheel', (event) => {
-            const zoomAmount = event.deltaY * 0.01 * this.zoomSpeed;
-            this.currentZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.currentZoom + zoomAmount));
-        });
-        
-        // Update camera aspect ratio and size when window resizes
-        window.addEventListener('resize', () => {
-            this.camera.aspect = window.innerWidth / window.innerHeight;
-            this.camera.updateProjectionMatrix();
-            this.renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-        
         console.log('Input handlers setup complete');
     }
 
@@ -338,7 +300,7 @@ export class Game {
             try {
                 const delta = this.clock.getDelta();
                 this.update(delta);
-                this.renderer.render(this.scene, this.camera);
+                this.renderer.render(this.scene, this.cameraManager.getCamera());
             } catch (error) {
                 console.error('Error in animation loop:', error);
             }
@@ -362,10 +324,11 @@ export class Game {
         this.npcManager?.update(delta);
         this.uiManager?.update(delta);
         this.environmentManager?.update(delta);
+        this.cameraManager?.update(delta);
         
         // Update camera
         if (this.localPlayer) {
-            this.updateCamera();
+            this.cameraManager.update(delta);
         }
     }
 
@@ -411,26 +374,6 @@ export class Game {
                 animation: 'running'
             });
         }
-    }
-
-    updateCamera() {
-        if (!this.localPlayer) return;
-
-        const playerPosition = this.localPlayer.position;
-        const zoomFactor = this.currentZoom / 15;
-        const offsetY = this.cameraOffset.y * zoomFactor;
-        const offsetZ = this.cameraOffset.z * zoomFactor;
-        
-        // Smoothly move camera
-        const smoothness = 0.05;
-        this.camera.position.x += (playerPosition.x - this.camera.position.x) * smoothness;
-        this.camera.position.y += (playerPosition.y + offsetY - this.camera.position.y) * smoothness;
-        this.camera.position.z += (playerPosition.z + offsetZ - this.camera.position.z) * smoothness;
-        
-        // Look at player
-        const lookAtPosition = playerPosition.clone();
-        lookAtPosition.y += 1.5;
-        this.camera.lookAt(lookAtPosition);
     }
 
     checkCollision(position) {
