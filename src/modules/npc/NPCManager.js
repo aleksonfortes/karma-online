@@ -42,6 +42,10 @@ export class NPCManager {
         
         console.log('Processing server NPCs:', npcData);
         
+        // Clear existing NPCs before loading new ones from server
+        // This prevents duplication when reconnecting
+        this.cleanup();
+        
         // Load each NPC from server data
         npcData.forEach(npc => {
             this.loadNPC(npc.position, npc.type, npc);
@@ -162,17 +166,33 @@ export class NPCManager {
     }
     
     async loadNPC(position, npcType, serverData = null) {
+        const npcId = serverData?.id || npcType;
+        
         // Only log when initially loading, not for position updates
-        if (!this.npcs.has(serverData?.id || npcType)) {
+        if (!this.npcs.has(npcId)) {
             console.log(`Loading NPC: ${npcType}`);
         }
         
         // If we already have this NPC loaded, just update its position
-        if (this.npcs.has(serverData?.id || npcType)) {
-            const existingNPC = this.npcs.get(serverData?.id || npcType);
+        if (this.npcs.has(npcId)) {
+            const existingNPC = this.npcs.get(npcId);
             if (existingNPC && existingNPC.mesh && position) {
                 existingNPC.mesh.position.copy(position);
                 return existingNPC.mesh;
+            }
+        }
+        
+        // Check if we already have an NPC of this type loaded (regardless of ID)
+        // This prevents duplicate NPCs of the same type when reconnecting
+        if (!serverData && (npcType === 'light_npc' || npcType === 'dark_npc')) {
+            const existingNPCs = Array.from(this.npcs.values());
+            const sameTypeNPC = existingNPCs.find(npc => npc.type === npcType);
+            if (sameTypeNPC && sameTypeNPC.mesh) {
+                console.log(`Using existing ${npcType} instead of creating a duplicate`);
+                if (position) {
+                    sameTypeNPC.mesh.position.copy(position);
+                }
+                return sameTypeNPC.mesh;
             }
         }
         
