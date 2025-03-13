@@ -162,14 +162,16 @@ export class NPCManager {
     }
     
     async loadNPC(position, npcType, serverData = null) {
-        console.log(`Loading NPC: ${npcType} at position:`, position);
+        // Only log when initially loading, not for position updates
+        if (!this.npcs.has(serverData?.id || npcType)) {
+            console.log(`Loading NPC: ${npcType}`);
+        }
         
         // If we already have this NPC loaded, just update its position
         if (this.npcs.has(serverData?.id || npcType)) {
             const existingNPC = this.npcs.get(serverData?.id || npcType);
             if (existingNPC && existingNPC.mesh && position) {
                 existingNPC.mesh.position.copy(position);
-                console.log(`Updated existing NPC position: ${npcType}`);
                 return existingNPC.mesh;
             }
         }

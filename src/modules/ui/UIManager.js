@@ -15,7 +15,6 @@ export class UIManager {
     
     // Add init method
     init() {
-        console.log('Initializing UI Manager');
         // This method is called during game initialization
         // We'll create our UI elements when requested, not immediately
     }
@@ -612,14 +611,7 @@ export class UIManager {
     }
     
     updateSkillBar() {
-        console.log('Updating skill bar with:', {
-            playerPath: this.game.playerStats?.path,
-            activeSkills: Array.from(this.game.activeSkills || []),
-            hasSkills: !!this.game.skills
-        });
-        
         if (!this.game.skills || !this.skillElements) {
-            console.warn('Cannot update skill bar: skills or skillElements not found');
             return;
         }
         
@@ -643,7 +635,6 @@ export class UIManager {
                 this.game.playerStats.path === 'light' && 
                 activeSkills.has('martial_arts')) {
                 
-                console.log('Adding martial arts skill to skill bar');
                 const skill = this.game.skills.martial_arts;
                 
                 // Create skill icon
@@ -682,8 +673,6 @@ export class UIManager {
                 }
             }
         }
-        
-        console.log('Skill bar updated');
     }
     
     createDarknessOverlay() {
@@ -818,48 +807,52 @@ export class UIManager {
             titleElement.style.textShadow = '0 0 10px rgba(255, 204, 0, 0.5)';
             
             titleElement.textContent = 'Light Path Master';
-            contentElement.textContent = 'Welcome, seeker. The Light Path offers wisdom and harmony. Would you like to learn more?';
             
-            const infoButton = this.createDialogueButton('Tell me about the Light Path', () => {
-                contentElement.textContent = 'The Light Path is one of harmony and healing. Those who follow it gain abilities to heal and protect. Your karma increases when you help others.';
+            // Don't show choice dialogue if player already has a path
+            if (this.game.playerStats && this.game.playerStats.path) {
+                contentElement.textContent = `You have already chosen the path of ${this.game.playerStats.path}. This choice is permanent in this life.`;
                 
-                // Clear buttons and add new ones
-                buttonsContainer.innerHTML = '';
-                buttonsContainer.appendChild(this.createDialogueButton('I wish to follow the Light Path', () => {
-                    // Call the choosePath method on the game object
-                    if (this.game.choosePath) {
-                        console.log('Choosing light path through Game.choosePath');
-                        this.game.choosePath('light');
-                    } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
-                        console.log('Choosing light path through KarmaManager.choosePath');
-                        this.game.karmaManager.choosePath('light');
-                    } else {
-                        console.log('No choosePath method found, implementing directly');
-                        // Fallback implementation in case neither method is available
-                        // Set the player's path
-                        if (this.game.playerStats) {
-                            this.game.playerStats.path = 'light';
+                // Only show a close button
+                const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
+                buttonsContainer.appendChild(closeButton);
+            } else {
+                contentElement.textContent = 'Welcome, seeker. The Light Path offers balance and harmony.';
+                
+                const infoButton = this.createDialogueButton('Tell me about the Light Path', () => {
+                    contentElement.textContent = 'The Light Path grants inner strength and healing abilities. Follow this path to gain defensive and supportive powers. Your karma increases as you embrace the light.';
+                    
+                    // Clear buttons and add new ones
+                    buttonsContainer.innerHTML = '';
+                    buttonsContainer.appendChild(this.createDialogueButton('I choose the Light Path', () => {
+                        // Call the choosePath method on the game object
+                        if (this.game.choosePath) {
+                            console.log('Choosing light path through Game.choosePath');
+                            this.game.choosePath('light');
+                        } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
+                            console.log('Choosing light path through KarmaManager.choosePath');
+                            this.game.karmaManager.choosePath('light');
+                        } else {
+                            console.log('No choosePath method found, implementing directly');
+                            // Fallback implementation
+                            if (this.game.playerStats) {
+                                this.game.playerStats.path = 'light';
+                            }
+                            
+                            // Add martial arts skill
+                            this.game.activeSkills = this.game.activeSkills || new Set();
+                            this.game.activeSkills.add('martial_arts');
+                            this.updateSkillBar();
                         }
-                        
-                        // Add the martial arts skill
-                        this.game.activeSkills = this.game.activeSkills || new Set();
-                        this.game.activeSkills.add('martial_arts');
-                        
-                        // Update the skill bar directly
-                        this.updateSkillBar();
-                        
-                        // Show confirmation message
-                        this.showNotification('You have learned Martial Arts skill! Press Space to use it.', '#ffcc00');
-                    }
-                    this.hideDialogue();
-                }));
-                buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
-            });
-            
-            const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
-            
-            buttonsContainer.appendChild(infoButton);
-            buttonsContainer.appendChild(closeButton);
+                        this.hideDialogue();
+                    }));
+                    buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
+                });
+                
+                const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
+                
+                buttonsContainer.appendChild(infoButton);
+                buttonsContainer.appendChild(closeButton);
+            }
         }
         else if (npcType === 'dark_npc') {
             dialogueContainer.style.border = '2px solid #6600cc';
@@ -868,38 +861,48 @@ export class UIManager {
             titleElement.style.textShadow = '0 0 10px rgba(102, 0, 204, 0.5)';
             
             titleElement.textContent = 'Dark Path Master';
-            contentElement.textContent = 'Power awaits those with the courage to seize it. The Dark Path offers strength beyond measure.';
             
-            const infoButton = this.createDialogueButton('Tell me about the Dark Path', () => {
-                contentElement.textContent = 'The Dark Path grants great power through sacrifice. Follow this path to gain destructive abilities and dominance over others. Your karma decreases as you embrace darkness.';
+            // Don't show choice dialogue if player already has a path
+            if (this.game.playerStats && this.game.playerStats.path) {
+                contentElement.textContent = `You have already chosen the path of ${this.game.playerStats.path}. This choice is permanent in this life.`;
                 
-                // Clear buttons and add new ones
-                buttonsContainer.innerHTML = '';
-                buttonsContainer.appendChild(this.createDialogueButton('I choose the Dark Path', () => {
-                    // Call the choosePath method on the game object
-                    if (this.game.choosePath) {
-                        console.log('Choosing dark path through Game.choosePath');
-                        this.game.choosePath('dark');
-                    } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
-                        console.log('Choosing dark path through KarmaManager.choosePath');
-                        this.game.karmaManager.choosePath('dark');
-                    } else {
-                        console.log('No choosePath method found, implementing directly');
-                        // Fallback implementation
-                        if (this.game.playerStats) {
-                            this.game.playerStats.path = 'dark';
+                // Only show a close button
+                const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
+                buttonsContainer.appendChild(closeButton);
+            } else {
+                contentElement.textContent = 'Power awaits those with the courage to seize it. The Dark Path offers strength beyond measure.';
+                
+                const infoButton = this.createDialogueButton('Tell me about the Dark Path', () => {
+                    contentElement.textContent = 'The Dark Path grants great power through sacrifice. Follow this path to gain destructive abilities and dominance over others. Your karma decreases as you embrace darkness.';
+                    
+                    // Clear buttons and add new ones
+                    buttonsContainer.innerHTML = '';
+                    buttonsContainer.appendChild(this.createDialogueButton('I choose the Dark Path', () => {
+                        // Call the choosePath method on the game object
+                        if (this.game.choosePath) {
+                            console.log('Choosing dark path through Game.choosePath');
+                            this.game.choosePath('dark');
+                        } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
+                            console.log('Choosing dark path through KarmaManager.choosePath');
+                            this.game.karmaManager.choosePath('dark');
+                        } else {
+                            console.log('No choosePath method found, implementing directly');
+                            // Fallback implementation
+                            if (this.game.playerStats) {
+                                this.game.playerStats.path = 'dark';
+                            }
+                            this.updateSkillBar();
                         }
-                        this.updateSkillBar();
-                    }
-                    this.hideDialogue();
-                }));
-                buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
-            });
-            
-            const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
-            
-            buttonsContainer.appendChild(infoButton);
-            buttonsContainer.appendChild(closeButton);
+                        this.hideDialogue();
+                    }));
+                    buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
+                });
+                
+                const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
+                
+                buttonsContainer.appendChild(infoButton);
+                buttonsContainer.appendChild(closeButton);
+            }
         } 
         else {
             titleElement.textContent = 'NPC';

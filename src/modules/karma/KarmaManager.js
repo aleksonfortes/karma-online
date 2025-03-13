@@ -17,7 +17,7 @@ export class KarmaManager {
         if (this.game.playerStats) {
             this.game.playerStats.currentKarma = 50;
             this.game.playerStats.maxKarma = 100;
-            this.game.playerStats.path = "neutral";
+            this.game.playerStats.path = null;
         }
         
         return true;
@@ -94,7 +94,7 @@ export class KarmaManager {
         } else if (karma > maxKarma * 0.7) {
             this.game.playerStats.path = "light";
         } else {
-            this.game.playerStats.path = "neutral";
+            this.game.playerStats.path = null;
         }
         
         // Update UI elements if they exist
@@ -170,44 +170,15 @@ export class KarmaManager {
         this.karmaEffects.clear();
     }
     
-    // Add choosePath method to handle path selection
+    // Method to handle path selection
     choosePath(path) {
-        console.log(`Choosing path: ${path}`);
+        console.log(`KarmaManager: Requesting path selection: ${path}`);
         
-        // Set the player's path
-        if (this.game.playerStats) {
-            this.game.playerStats.path = path;
-        }
-        
-        // Grant Martial Arts skill if choosing Light path
-        if (path === 'light') {
-            this.game.activeSkills = this.game.activeSkills || new Set();
-            this.game.activeSkills.add('martial_arts');
-            
-            // Update the player's karma towards light
-            if (this.game.playerStats) {
-                this.game.playerStats.currentKarma = Math.max(0, this.game.playerStats.currentKarma - 20);
-            }
-            
-            // Show confirmation message
-            if (this.game.uiManager && this.game.uiManager.showNotification) {
-                this.game.uiManager.showNotification('You have learned Martial Arts skill! Press Space to use it.', '#ffcc00');
-            }
-        } else if (path === 'dark') {
-            // Update the player's karma towards dark
-            if (this.game.playerStats) {
-                this.game.playerStats.currentKarma = Math.min(100, this.game.playerStats.currentKarma + 20);
-            }
-            
-            // Show confirmation message
-            if (this.game.uiManager && this.game.uiManager.showNotification) {
-                this.game.uiManager.showNotification('You have chosen the Dark Path. Your power grows with darkness.', '#6600cc');
-            }
-        }
-        
-        // Update UI elements
-        if (this.game.uiManager) {
-            this.game.uiManager.updateSkillBar();
+        // Delegate to Game's choosePath method which handles server communication
+        if (this.game && typeof this.game.choosePath === 'function') {
+            this.game.choosePath(path);
+        } else {
+            console.error('KarmaManager: Cannot choose path, Game.choosePath not available');
         }
     }
 } 

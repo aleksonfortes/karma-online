@@ -26,14 +26,21 @@ export class PlayerManager {
         
         // Flag to track if we're waiting for server position update
         this.pendingPositionUpdate = false;
+        
+        // Flag to track if model is currently being loaded
+        this.isLoadingModel = false;
     }
     
     async init() {
         console.log('Initializing Player Manager');
         
         try {
-            // Preload character model
-            this.characterModel = await this.loadCharacterModel();
+            // Preload character model only if not already loaded
+            if (!this.characterModel) {
+                console.log('Preloading character model during initialization');
+                this.characterModel = await this.loadCharacterModel();
+                console.log('Character model preloaded and cached');
+            }
             
             // Only create local player if it doesn't already exist and we're not in offline mode
             if (!this.game.localPlayer && this.game.networkManager && !this.game.networkManager.isOfflineMode) {
@@ -51,12 +58,33 @@ export class PlayerManager {
     
     async loadCharacterModel() {
         try {
+            // If model is already loaded, return it
+            if (this.characterModel) {
+                return this.characterModel;
+            }
+            
+            // If model is currently being loaded by another call, wait for it
+            if (this.isLoadingModel) {
+                console.log('Character model is already being loaded, waiting...');
+                // Wait until the model is loaded (check every 100ms)
+                while (this.isLoadingModel) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+                // Once loaded, return the cached model
+                return this.characterModel;
+            }
+            
+            // Set loading flag to prevent duplicate loading
+            this.isLoadingModel = true;
+            
+            // Only log once at the start of loading
             console.log('Loading character model...');
             
             return new Promise((resolve, reject) => {
                 this.loader.load(
                     this.characterModelPath,
                     (gltf) => {
+                        // Success message is fine to keep
                         console.log('Character model loaded successfully');
                         
                         // Create a group to hold the model
@@ -89,20 +117,32 @@ export class PlayerManager {
                             }
                         });
                         
+                        // Make sure to set the class property before resolving
+                        this.characterModel = modelGroup;
+                        // Reset loading flag
+                        this.isLoadingModel = false;
                         resolve(modelGroup);
                     },
-                    (progress) => {
-                        const percentComplete = Math.round((progress.loaded / progress.total) * 100);
-                        console.log(`Loading character model: ${percentComplete}%`);
+                    (xhr) => {
+                        // Only log progress at 25%, 50%, 75%, and 100% to reduce spam
+                        const percentComplete = Math.round((xhr.loaded / xhr.total) * 100);
+                        if (percentComplete === 25 || percentComplete === 50 || 
+                            percentComplete === 75 || percentComplete === 100) {
+                            console.log(`Loading character model: ${percentComplete}%`);
+                        }
                     },
                     (error) => {
                         console.error('Error loading character model:', error);
+                        // Reset loading flag on error
+                        this.isLoadingModel = false;
                         reject(error);
                     }
                 );
             });
         } catch (error) {
             console.error('Error in loadCharacterModel:', error);
+            // Reset loading flag on error
+            this.isLoadingModel = false;
             return this.createFallbackCharacterModel();
         }
     }
@@ -195,9 +235,12 @@ export class PlayerManager {
         let playerMesh;
         
         try {
-            // Ensure model is loaded
+            // Check if the model is already loaded and cached
             if (!this.characterModel) {
-                this.characterModel = await this.loadCharacterModel();
+                // Only log this once when we need to load the model
+                console.log('Character model not cached, loading now...');
+                await this.loadCharacterModel();
+                // No need to assign to this.characterModel as loadCharacterModel now does this
             }
             
             // Clone the model
@@ -303,7 +346,7 @@ export class PlayerManager {
                     y: this.game.localPlayer.rotation.y
                 },
                 // Include other player data...
-                path: this.game.localPlayer.userData.path || 'neutral',
+                path: this.game.localPlayer.userData.path || null,
                 karma: this.game.localPlayer.userData.stats?.karma || 50,
                 maxKarma: this.game.localPlayer.userData.stats?.maxKarma || 100,
                 mana: this.game.localPlayer.userData.stats?.mana || 100,
