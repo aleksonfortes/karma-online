@@ -29,9 +29,20 @@ export class NetworkManager {
         });
         
         // Set up handlers
-        if (this.socket) {
-            this.setupSocketHandlers();
-        }
+        this.setupSocketHandlers();
+        
+        // Player state
+        this.playerDead = false;
+        
+        // Movement tracking for optimizing network updates
+        this.lastPositionUpdate = { x: 0, y: 0, z: 0 };
+        this.lastRotationUpdate = { y: 0 };
+        this.positionUpdateThreshold = 0.1;
+        this.rotationUpdateThreshold = 0.1;
+        this._lastPathChoiceSent = null;
+        
+        // Health check interval for ensuring consistent health values
+        this.healthCheckInterval = null;
         
         // Store last server positions for reconciliation
         this.lastServerPositions = new Map();
@@ -95,6 +106,9 @@ export class NetworkManager {
             console.log('Connected to server with ID:', this.socket.id);
             this.isConnected = true;
             this.socket.emit('requestStateUpdate');
+            
+            // Start the periodic health check
+            this.startPeriodicHealthCheck();
         });
 
         // Handle connection error
@@ -462,97 +476,111 @@ export class NetworkManager {
             }
         });
 
-        // Handle life update
-        this.socket.on('lifeUpdate', (data) => {
-            // Get the player mesh
-            const playerMesh = this.game.playerManager.players.get(data.id);
-            if (!playerMesh) {
-                console.warn(`Player mesh not found for life update: ${data.id}`);
+        // Handle batch stats updates from server
+        this.socket.on('statsUpdate', (data) => {
+            // Skip if no players in the update
+            if (!data.players || data.players.length === 0) {
                 return;
             }
             
-            // Initialize player stats if needed
-            if (!playerMesh.userData.stats) {
-                playerMesh.userData.stats = {};
-            }
-            
-            // Check if this update is newer than the last one we processed
+            // Get the timestamp of this update
             const timestamp = data.timestamp || Date.now();
-            const lastTimestamp = playerMesh.userData.lastUpdateTimestamp || 0;
             
-            // Only process updates that are newer than the last one we processed
-            if (timestamp < lastTimestamp) {
-                console.log(`Ignoring outdated health update for player ${data.id} (${timestamp} < ${lastTimestamp})`);
-                return;
-            }
-            
-            // Store the timestamp of this update
-            playerMesh.userData.lastUpdateTimestamp = timestamp;
-            
-            // Store the server-provided values
-            const serverLife = data.life;
-            const serverMaxLife = data.maxLife || 100;
-            
-            // Update player stats with server values (server authority)
-            playerMesh.userData.stats.life = serverLife;
-            playerMesh.userData.stats.maxLife = serverMaxLife;
-            
-            // Set player ID for better debugging
-            if (!playerMesh.userData.playerId) {
-                playerMesh.userData.playerId = data.id;
-            }
-            
-            // Create health bar if it doesn't exist
-            if (!playerMesh.userData.healthBar) {
-                console.log(`Creating health bar for player ${data.id}`);
-                this.game.playerManager.createHealthBar(playerMesh);
-                this.game.playerManager.updateHealthBar(playerMesh);
-                return;
-            }
-            
-            // LOCK MECHANISM: Only update if we're not currently processing a damage effect
-            if (playerMesh.userData.processingDamageEffect) {
-                console.log(`Skipping health update for player ${data.id} - currently processing damage effect`);
-                return;
-            }
-            
-            // Clear any existing update timeout
-            if (playerMesh.userData.healthUpdateTimeout) {
-                clearTimeout(playerMesh.userData.healthUpdateTimeout);
-                playerMesh.userData.healthUpdateTimeout = null;
-            }
-            
-            // Use a debounced update for the health bar to prevent oscillation
-            playerMesh.userData.healthUpdateTimeout = setTimeout(() => {
-                // Update the health bar with the final values
-                this.game.playerManager.updateHealthBar(playerMesh);
+            // Process each player's stats
+            data.players.forEach(playerData => {
+                // Get the player mesh
+                const playerMesh = this.game.playerManager.players.get(playerData.id);
+                if (!playerMesh) {
+                    return;
+                }
                 
-                // Clear the timeout
-                playerMesh.userData.healthUpdateTimeout = null;
-            }, 300); // Longer delay to collect multiple rapid updates
-            
-            // If this is our player, update the main UI immediately
-            if (data.id === this.socket.id) {
-                // Update UI if available
-                if (this.game.uiManager) {
-                    if (this.game.playerStats) {
-                        // Update player stats first
-                        this.game.playerStats.currentLife = serverLife;
-                        this.game.playerStats.maxLife = serverMaxLife;
+                // Check for unique update ID to prevent race conditions
+                if (playerData.updateId) {
+                    // Skip if we've already processed this exact update
+                    if (playerMesh.userData.lastUpdateId === playerData.updateId) {
+                        return;
                     }
                     
-                    // Then update the UI
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    // Store the update ID
+                    playerMesh.userData.lastUpdateId = playerData.updateId;
+                } else {
+                    // Fall back to timestamp checking for older server versions
+                    const lastTimestamp = playerMesh.userData.lastStatsUpdateTimestamp || 0;
+                    if (timestamp <= lastTimestamp) {
+                        return;
+                    }
+                    
+                    // Store the timestamp of this update
+                    playerMesh.userData.lastStatsUpdateTimestamp = timestamp;
                 }
                 
-                // Check for death
-                if (serverLife <= 0 && !this.playerDead) {
-                    this.playerDead = true;
-                    this.handlePlayerDeath();
-                } else if (serverLife > 0 && this.playerDead) {
-                    this.playerDead = false;
+                // Initialize player stats if needed
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
                 }
-            }
+                
+                // Check if the current health value is different from what the server says
+                if (playerMesh.userData.stats.life !== playerData.life) {
+                    console.log(`Correcting health values for player ${playerData.id} from ${playerMesh.userData.stats.life} to ${playerData.life}`);
+                }
+                
+                // Store the server values as the absolute source of truth
+                playerMesh.userData.serverLife = playerData.life;
+                playerMesh.userData.serverMaxLife = playerData.maxLife;
+                
+                // Update player stats with server values (server authority)
+                playerMesh.userData.stats.life = playerData.life;
+                playerMesh.userData.stats.maxLife = playerData.maxLife;
+                
+                // Set player ID for better debugging
+                if (!playerMesh.userData.playerId) {
+                    playerMesh.userData.playerId = playerData.id;
+                }
+                
+                // Create health bar if it doesn't exist
+                if (!playerMesh.userData.healthBar) {
+                    this.game.playerManager.createHealthBar(playerMesh);
+                }
+                
+                // Force unlock health updates for server stats
+                // This ensures server stats can always update the health bar
+                playerMesh.userData.healthLocked = false;
+                
+                // Update the health bar immediately with server values
+                // This ensures health bars always reflect the server state
+                if (this.game.playerManager.updateHealthBarWithServerValues) {
+                    this.game.playerManager.updateHealthBarWithServerValues(playerMesh);
+                } else {
+                    // Fallback to regular update if the new method isn't available
+                    this.game.playerManager.updateHealthBar(playerMesh);
+                }
+                
+                // If this is our player, update the main UI
+                if (playerData.id === this.socket.id) {
+                    // Update player stats first
+                    this.game.playerStats.currentLife = playerData.life;
+                    this.game.playerStats.maxLife = playerData.maxLife;
+                    
+                    // Then update the UI
+                    if (this.game.uiManager && this.game.playerStats) {
+                        this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    }
+                    
+                    // Check for death
+                    if (playerData.life <= 0 && !this.playerDead) {
+                        this.playerDead = true;
+                        this.handlePlayerDeath();
+                    } else if (playerData.life > 0 && this.playerDead) {
+                        this.playerDead = false;
+                    }
+                }
+            });
+        });
+
+        // Handle life update
+        this.socket.on('lifeUpdate', (data) => {
+            console.log(`Ignoring individual lifeUpdate for player ${data.id} - using statsUpdate instead`);
+            return;
         });
 
         // Handle mana update
@@ -620,41 +648,59 @@ export class NetworkManager {
 
         // Handle damage effect
         this.socket.on('damageEffect', (data) => {
-            console.log('Received damage effect:', data);
-            
-            // Get the source and target players
-            const sourcePlayer = this.game.playerManager.players.get(data.sourceId);
+            // Get the target player
             const targetPlayer = this.game.playerManager.players.get(data.targetId);
+            if (!targetPlayer) {
+                console.warn(`Target player not found for damage effect: ${data.targetId}`);
+                return;
+            }
             
-            // Update target player's health bar if available
-            if (targetPlayer) {
-                // Set the processing flag to prevent conflicting updates
-                targetPlayer.userData.processingDamageEffect = true;
+            console.log(`Received damage effect:`, data);
+            
+            // Set a flag to indicate we're processing a damage effect
+            targetPlayer.userData.processingDamageEffect = true;
+            
+            // Show damage number if available
+            if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
+                this.game.effectsManager.showDamageNumber(targetPlayer, data.damage, data.isCritical);
+            }
+            
+            // Update the health bar immediately with the expected new health
+            if (targetPlayer.userData.stats) {
+                // Calculate the expected new health
+                const currentHealth = targetPlayer.userData.stats.life || 100;
+                const newHealth = Math.max(0, currentHealth - data.damage);
+                const maxHealth = targetPlayer.userData.stats.maxLife || 100;
                 
-                // Create damage effect
-                if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
-                    this.game.effectsManager.showDamageNumber(targetPlayer, data.damage);
+                // Store these values for immediate visual feedback
+                targetPlayer.userData.serverLife = newHealth;
+                targetPlayer.userData.serverMaxLife = maxHealth;
+                
+                // Update the player's stats
+                targetPlayer.userData.stats.life = newHealth;
+                targetPlayer.userData.stats.maxLife = maxHealth;
+                
+                // Update the health bar immediately
+                if (this.game.playerManager.updateHealthBarWithServerValues) {
+                    this.game.playerManager.updateHealthBarWithServerValues(targetPlayer);
                 } else {
-                    // Fallback to basic damage effect
-                    this.createDamageEffect(targetPlayer, data.damage);
-                }
-                
-                // Update health bar directly with the current server values
-                if (targetPlayer.userData.stats) {
-                    // Force an immediate update of the health bar
                     this.game.playerManager.updateHealthBar(targetPlayer);
                 }
                 
-                // Clear the processing flag after a delay
-                setTimeout(() => {
-                    targetPlayer.userData.processingDamageEffect = false;
-                }, 500); // Keep the lock for 500ms to prevent oscillation
+                // If this is our player, update the UI
+                if (data.targetId === this.socket.id) {
+                    if (this.game.uiManager && this.game.playerStats) {
+                        this.game.playerStats.currentLife = newHealth;
+                        this.game.playerStats.maxLife = maxHealth;
+                        this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    }
+                }
             }
             
-            // Play attack animation for source player
-            if (sourcePlayer && this.game.animationManager) {
-                this.game.animationManager.playAnimation(sourcePlayer, 'attack');
-            }
+            // Clear the processing flag after a delay
+            setTimeout(() => {
+                targetPlayer.userData.processingDamageEffect = false;
+            }, 1000);
         });
 
         // Handle player state request response
@@ -1278,7 +1324,6 @@ export class NetworkManager {
             deathMessage.style.fontWeight = 'bold';
             deathMessage.style.textAlign = 'center';
             deathMessage.style.zIndex = '1000';
-            deathMessage.textContent = 'YOU DIED';
             document.body.appendChild(deathMessage);
             
             // Add respawn button
@@ -1313,11 +1358,60 @@ export class NetworkManager {
                 }
             };
             deathMessage.appendChild(respawnButton);
+            deathMessage.textContent = 'YOU DIED';
         }
         
         // Disable controls if available
         if (this.game.controlsManager && this.game.controlsManager.disableControls) {
             this.game.controlsManager.disableControls();
+        }
+    }
+
+    initialize() {
+        this.setupSocketHandlers();
+        this.setupGameListeners();
+        
+        // Start periodic health check to ensure health values stay consistent
+        this.startPeriodicHealthCheck();
+    }
+
+    startPeriodicHealthCheck() {
+        // Clear any existing interval
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+        }
+        
+        // Set up a new interval to check health values periodically
+        this.healthCheckInterval = setInterval(() => {
+            // Check all players
+            this.game.playerManager.players.forEach((playerMesh, playerId) => {
+                // Skip if player doesn't have stored server values
+                if (!playerMesh.userData.serverLife) {
+                    return;
+                }
+                
+                // Check if current health values match stored server values
+                if (playerMesh.userData.stats && 
+                    (playerMesh.userData.stats.life !== playerMesh.userData.serverLife || 
+                     playerMesh.userData.stats.maxLife !== playerMesh.userData.serverMaxLife)) {
+                    
+                    console.log(`Correcting health values for player ${playerId} from ${playerMesh.userData.stats.life} to ${playerMesh.userData.serverLife}`);
+                    
+                    // Restore the server values
+                    playerMesh.userData.stats.life = playerMesh.userData.serverLife;
+                    playerMesh.userData.stats.maxLife = playerMesh.userData.serverMaxLife;
+                    
+                    // Update the health bar
+                    this.game.playerManager.updateHealthBar(playerMesh);
+                }
+            });
+        }, 2000); // Check every 2 seconds
+    }
+
+    stopPeriodicHealthCheck() {
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = null;
         }
     }
 }

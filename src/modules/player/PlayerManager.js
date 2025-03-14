@@ -528,6 +528,13 @@ export class PlayerManager {
             return;
         }
         
+        // CRITICAL FIX: Always use server values if available
+        if (player.userData.serverLife !== undefined && player.userData.serverMaxLife !== undefined) {
+            // Use updateHealthBarWithServerValues instead
+            this.updateHealthBarWithServerValues(player);
+            return;
+        }
+        
         // Create health bar if it doesn't exist
         if (!player.userData.healthBar) {
             this.createHealthBar(player);
@@ -592,6 +599,20 @@ export class PlayerManager {
                 // No significant change, so don't update the visual
                 return;
             }
+        }
+        
+        // CRITICAL FIX: Check for final health update flag
+        // If this player has a final health update, use the server values directly
+        if (player.userData.finalHealthUpdate && player.userData.serverLife !== undefined) {
+            // Use server values directly for final updates
+            const serverLife = player.userData.serverLife;
+            const serverMaxLife = player.userData.serverMaxLife || 100;
+            
+            // Recalculate health percentage using server values
+            healthPercent = Math.max(0, Math.min(1, serverLife / serverMaxLife));
+            
+            // Log this special case
+            console.log(`Using final health update for player ${player.userData.playerId}: ${Math.round(healthPercent * 100)}%`);
         }
         
         // Clear the canvas
@@ -827,5 +848,99 @@ export class PlayerManager {
 
     updatePlayerHeight(position) {
         // Removed
+    }
+    
+    /**
+     * Update a player's health bar using server values directly
+     * This method ensures the health bar always reflects the server state
+     * @param {THREE.Object3D} player - The player object
+     */
+    updateHealthBarWithServerValues(player) {
+        if (!player || !player.userData) {
+            return;
+        }
+        
+        // Skip if no server values are available
+        if (player.userData.serverLife === undefined || player.userData.serverMaxLife === undefined) {
+            return;
+        }
+        
+        // Create health bar if it doesn't exist
+        if (!player.userData.healthBar) {
+            this.createHealthBar(player);
+            return;
+        }
+        
+        const healthBarSprite = player.userData.healthBar;
+        const canvas = player.userData.healthBarCanvas;
+        const context = player.userData.healthBarContext;
+        
+        if (!canvas || !context) {
+            console.warn('Missing canvas or context for health bar, recreating...');
+            this.createHealthBar(player);
+            return;
+        }
+        
+        // Use server values directly
+        const serverLife = player.userData.serverLife;
+        const serverMaxLife = player.userData.serverMaxLife;
+        
+        // Calculate percentage with bounds checking
+        const healthPercent = Math.max(0, Math.min(1, serverLife / serverMaxLife));
+        
+        // Get player ID for debugging
+        const playerId = player.userData.healthBarPlayerId || player.userData.playerId || 'unknown';
+        
+        // CRITICAL FIX: Check if we're in a locked state
+        if (player.userData.healthLocked) {
+            return;
+        }
+        
+        // Only log significant changes to reduce spam
+        if (player.userData.lastHealthPercent === undefined || 
+            Math.abs(player.userData.lastHealthPercent - healthPercent) > 0.05) {
+            
+            // Only log if this is a new value or a significant change
+            if (player.userData.lastHealthPercent !== undefined) {
+                console.log(`Health bar updated (server values) for player ${playerId}: ${Math.round(player.userData.lastHealthPercent * 100)}% -> ${Math.round(healthPercent * 100)}%`);
+            }
+            
+            // Store the current health percentage for comparison in future updates
+            player.userData.lastHealthPercent = healthPercent;
+            
+            // Force the health bar to be visible
+            if (healthBarSprite.material) {
+                healthBarSprite.material.visible = true;
+                healthBarSprite.visible = true;
+            }
+            
+            // CRITICAL FIX: Lock the health value to prevent oscillation
+            player.userData.healthLocked = true;
+            
+            // Unlock after a delay to allow for new legitimate updates
+            setTimeout(() => {
+                player.userData.healthLocked = false;
+            }, 2000); // 2 second lock to prevent oscillation
+        } else {
+            // No significant change, so don't update the visual
+            return;
+        }
+        
+        // Clear the canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw the background (dark backing)
+        context.fillStyle = '#222222';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Always use red for health bar to match original design
+        context.fillStyle = '#ff0000';
+        const healthWidth = Math.floor(canvas.width * healthPercent);
+        context.fillRect(0, 0, healthWidth, canvas.height);
+        
+        // Update the texture
+        if (healthBarSprite.material && healthBarSprite.material.map) {
+            healthBarSprite.material.map.needsUpdate = true;
+        }
     }
 }
