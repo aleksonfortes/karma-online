@@ -49,6 +49,9 @@ export class PlayerManager {
                 // The actual player will be created when receiving server position
             }
             
+            // Initialize health bars for all players
+            this.initHealthBars();
+            
             return true;
         } catch (error) {
             console.error('Failed to initialize PlayerManager:', error);
@@ -227,6 +230,9 @@ export class PlayerManager {
             if (isLocal) {
                 this.game.localPlayer = player;
             }
+            
+            // Create a health bar for the player
+            this.createHealthBar(player);
         }
         return player;
     }
@@ -361,6 +367,9 @@ export class PlayerManager {
                 this.pendingPositionUpdate = false;
             }, 1000); // 1 second timeout
         }
+        
+        // Update all health bars to face the camera
+        this.updateAllHealthBars();
     }
     
     updatePlayerAnimations() {
@@ -407,6 +416,136 @@ export class PlayerManager {
                 }
             }
         });
+    }
+    
+    /**
+     * Initialize health bars for all players
+     */
+    initHealthBars() {
+        console.log('Initializing health bars for all players');
+        
+        // Create health bars for all existing players
+        for (const [id, player] of this.players) {
+            this.createHealthBar(player);
+        }
+    }
+    
+    /**
+     * Create a health bar for a player
+     * @param {THREE.Object3D} player - The player object
+     */
+    createHealthBar(player) {
+        if (!player || player.userData.healthBar) {
+            return; // Skip if player doesn't exist or already has a health bar
+        }
+        
+        console.log('Creating health bar for player:', player.userData.name || 'Unknown');
+        
+        // Create a group for the health bar
+        const healthBarGroup = new THREE.Group();
+        
+        // Create a backing for the health bar (dark background)
+        const backingGeometry = new THREE.PlaneGeometry(1.0, 0.12);
+        const backingMaterial = new THREE.MeshBasicMaterial({
+            color: 0x222222,
+            transparent: true,
+            opacity: 0.7,
+            side: THREE.DoubleSide
+        });
+        const backing = new THREE.Mesh(backingGeometry, backingMaterial);
+        healthBarGroup.add(backing);
+        
+        // Create the actual health bar that will be scaled
+        const healthBarGeometry = new THREE.PlaneGeometry(1.0, 0.12);
+        const healthBarMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff0000, // Bright red health bar
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide
+        });
+        const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
+        healthBar.position.z = 0.01; // Slightly in front of the backing
+        healthBarGroup.add(healthBar);
+        
+        // Position the health bar directly on top of the player's head
+        let playerHeight = 1.8; // Default height
+        
+        // Try to determine actual player height from the mesh
+        if (player.children && player.children.length > 0) {
+            // Calculate bounding box to get actual height
+            const bbox = new THREE.Box3().setFromObject(player);
+            if (bbox.max.y !== Infinity && bbox.min.y !== -Infinity) {
+                playerHeight = bbox.max.y - bbox.min.y;
+                console.log(`Calculated player height: ${playerHeight}`);
+            }
+        }
+        
+        // Position the bar directly on top of the head
+        healthBarGroup.position.y = playerHeight; // Exactly at the top of the head
+        
+        // Store references to elements that need to be updated
+        healthBarGroup.userData = {
+            healthBar: healthBar,
+            healthBarOriginalWidth: healthBarGeometry.parameters.width
+        };
+        
+        // Add the health bar to the player
+        player.add(healthBarGroup);
+        
+        // Store a reference to the health bar in the player's userData
+        player.userData.healthBar = healthBarGroup;
+        
+        // Update the health bar initially
+        this.updateHealthBar(player);
+    }
+    
+    /**
+     * Update a player's health bar
+     * @param {THREE.Object3D} player - The player object
+     */
+    updateHealthBar(player) {
+        if (!player || !player.userData.healthBar) {
+            return;
+        }
+        
+        const healthBarGroup = player.userData.healthBar;
+        const healthBar = healthBarGroup.userData.healthBar;
+        
+        // Get health percentage (default to 100% if not available)
+        let healthPercent = 1.0;
+        if (player.userData.stats && player.userData.stats.life !== undefined && player.userData.stats.maxLife !== undefined) {
+            healthPercent = Math.max(0, Math.min(1, player.userData.stats.life / player.userData.stats.maxLife));
+        }
+        
+        // Scale the health bar based on health percentage
+        healthBar.scale.x = healthPercent;
+        
+        // Center the health bar based on its new scale
+        const offset = (1 - healthPercent) * healthBarGroup.userData.healthBarOriginalWidth / 2;
+        healthBar.position.x = -offset;
+        
+        // Make sure the health bar faces the camera
+        if (this.game.cameraManager) {
+            healthBarGroup.lookAt(this.game.cameraManager.getCamera().position);
+        }
+        
+        // Always ensure the health bar is red
+        healthBar.material.color.set(0xff0000);
+    }
+    
+    /**
+     * Update all players' health bars
+     */
+    updateAllHealthBars() {
+        for (const [id, player] of this.players) {
+            // Create a health bar if the player doesn't have one
+            if (!player.userData.healthBar) {
+                this.createHealthBar(player);
+            }
+            
+            // Update the health bar
+            this.updateHealthBar(player);
+        }
     }
     
     // Update player color based on path
