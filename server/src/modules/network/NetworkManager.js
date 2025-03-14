@@ -349,6 +349,52 @@ export class NetworkManager {
                 console.log(`Player ${socket.id} respawned at position:`, player.position);
             });
 
+            // Handle karma updates from clients
+            socket.on('karmaUpdate', (data) => {
+                console.log(`Received karma update from player ${socket.id}:`, data);
+                
+                // Validate data
+                if (!data || typeof data.karma !== 'number' || typeof data.maxKarma !== 'number') {
+                    console.warn(`Invalid karma data received from player ${socket.id}`);
+                    return;
+                }
+                
+                // Get the player
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    console.warn(`Player ${socket.id} not found for karma update`);
+                    return;
+                }
+                
+                // Update player's karma values with server authority
+                const previousKarma = player.karma;
+                player.karma = Math.max(0, Math.min(player.maxKarma, data.karma));
+                player.maxKarma = data.maxKarma;
+                
+                // Update player path based on karma level
+                if (player.karma > player.maxKarma * 0.7) {
+                    player.path = "dark";
+                } else if (player.karma < player.maxKarma * 0.3) {
+                    player.path = "light";
+                } else {
+                    player.path = null;
+                }
+                
+                console.log(`Updated karma for player ${socket.id}: ${previousKarma} -> ${player.karma} (${player.path || 'neutral'} path)`);
+                
+                // Update player effects based on new karma value
+                this.playerManager.updatePlayerEffects(player);
+                
+                // Broadcast the karma update to all clients
+                this.io.emit('karmaUpdate', {
+                    id: socket.id,
+                    karma: player.karma,
+                    maxKarma: player.maxKarma,
+                    path: player.path,
+                    timestamp: Date.now()
+                });
+            });
+
             // Handle player reset request (for reconnections)
             socket.on('requestPlayerReset', () => {
                 console.log(`Player ${socket.id} requested a reset (reconnection)`);

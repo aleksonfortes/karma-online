@@ -40,7 +40,7 @@ export class UIManager {
         const karmaContainer = document.createElement('div');
         karmaContainer.style.width = '300px'; // Match skills bar width
         
-        // Create karma bar with white background and black fill
+        // Create karma bar with black background and white fill for right side
         const karmaBar = document.createElement('div');
         karmaBar.style.position = 'relative';
         karmaBar.style.width = '100%';
@@ -49,40 +49,29 @@ export class UIManager {
         karmaBar.style.borderRadius = '6px';
         karmaBar.style.overflow = 'hidden';
         
-        // White background for karma bar
+        // Black background for karma bar
         const karmaBackground = document.createElement('div');
         karmaBackground.style.position = 'absolute';
         karmaBackground.style.top = '0';
         karmaBackground.style.left = '0';
         karmaBackground.style.width = '100%';
         karmaBackground.style.height = '100%';
-        karmaBackground.style.background = '#ffffff';
+        karmaBackground.style.background = '#000000';
         karmaBackground.style.borderRadius = '6px';
         karmaBar.appendChild(karmaBackground);
         
-        // Black fill for karma (starts at 50%)
+        // White fill for karma (shows on right side based on karma)
         const karmaFill = document.createElement('div');
         karmaFill.className = 'fill';
         karmaFill.style.position = 'absolute';
         karmaFill.style.top = '0';
-        karmaFill.style.left = '0';
+        karmaFill.style.right = '0'; // Right aligned instead of left
         karmaFill.style.width = '50%'; // Default 50%
         karmaFill.style.height = '100%';
-        karmaFill.style.background = '#000000';
+        karmaFill.style.background = '#ffffff';
         karmaFill.style.borderRadius = '6px';
         karmaFill.style.transition = 'width 0.3s ease-out';
         karmaBar.appendChild(karmaFill);
-        
-        // Center line indicator for karma neutral position
-        const karmaCenterLine = document.createElement('div');
-        karmaCenterLine.style.position = 'absolute';
-        karmaCenterLine.style.top = '0';
-        karmaCenterLine.style.left = '50%';
-        karmaCenterLine.style.width = '2px';
-        karmaCenterLine.style.height = '100%';
-        karmaCenterLine.style.background = 'rgba(255, 215, 0, 0.8)'; // Golden line
-        karmaCenterLine.style.zIndex = '2';
-        karmaBar.appendChild(karmaCenterLine);
         
         // Karma tooltip
         const karmaTooltip = document.createElement('div');
@@ -1231,20 +1220,29 @@ export class UIManager {
     updateKarmaDisplay(currentKarma, maxKarma) {
         if (!this.karmaBarFill || !this.karmaTooltip) return;
         
-        // Update karma bar fill
-        const percentage = (currentKarma / maxKarma) * 100;
+        // Update karma bar fill - ensure it fills properly from 0-100
+        // For right-aligned fill, higher karma means smaller white portion
+        const percentage = (1 - (currentKarma / maxKarma)) * 100;
         this.karmaBarFill.style.width = `${percentage}%`;
         
+        // Keep karma color always white (right side)
+        this.karmaBarFill.style.background = '#ffffff';
+        
         // Update tooltip text with karma status
+        // In our game: Higher karma = Darker path, Lower karma = Lighter path
         let karmaStatus = 'Neutral';
-        if (currentKarma < maxKarma * 0.3) {
-            karmaStatus = 'Dark';
-            this.karmaBarFill.style.background = '#660000'; // Dark red for dark path
-        } else if (currentKarma > maxKarma * 0.7) {
+        
+        // Determine status based on karma value
+        if (currentKarma <= 20) {
+            karmaStatus = 'Very Light';
+        } else if (currentKarma <= 40) {
             karmaStatus = 'Light';
-            this.karmaBarFill.style.background = '#ffffff'; // White for light path
+        } else if (currentKarma <= 60) {
+            karmaStatus = 'Neutral';
+        } else if (currentKarma <= 80) {
+            karmaStatus = 'Dark';
         } else {
-            this.karmaBarFill.style.background = '#000000'; // Black for neutral
+            karmaStatus = 'Very Dark';
         }
         
         this.karmaTooltip.textContent = `Karma: ${karmaStatus} (${currentKarma}/${maxKarma})`;
