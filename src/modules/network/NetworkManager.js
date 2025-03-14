@@ -610,6 +610,117 @@ export class NetworkManager {
                 document.body.appendChild(damageText);
             }
         });
+
+        // Handle player state request response
+        this.socket.on('playerState', (data) => {
+            console.log('Received player state from server:', data);
+            
+            if (!data) {
+                console.error('Received invalid player state data');
+                return;
+            }
+            
+            // Update player stats
+            if (this.game.playerStats && data.stats) {
+                Object.assign(this.game.playerStats, data.stats);
+            }
+            
+            // Set path in karma manager
+            if (data.path && this.game.karmaManager) {
+                this.game.karmaManager.chosenPath = data.path;
+            }
+            
+            // Add skills
+            if (data.skills && Array.isArray(data.skills) && this.game.skillsManager) {
+                console.log('Adding skills from server:', data.skills);
+                data.skills.forEach(skillId => {
+                    this.game.skillsManager.addSkill(skillId);
+                });
+            }
+            
+            // Update UI
+            if (this.game.uiManager) {
+                this.game.uiManager.updateSkillBar();
+            }
+            
+            console.log('Player state updated from server');
+        });
+
+        // Handle path selection result
+        this.socket.on('pathSelectionResult', (result) => {
+            this.handlePathSelectionResult(result);
+        });
+
+        // Handle reconnect
+        this.socket.on('reconnect', () => {
+            this.handleReconnect();
+        });
+    }
+
+    handlePathSelectionResult(result) {
+        console.log('Received path selection result:', result);
+        
+        if (result.success) {
+            // Set the chosen path in the karma manager
+            this.game.karmaManager.setChosenPath(result.path);
+            
+            // Update player stats
+            if (this.game.playerStats) {
+                this.game.playerStats.path = result.path;
+            }
+            
+            // Add skills received from server
+            if (result.skills && Array.isArray(result.skills) && this.game.skillsManager) {
+                console.log('Adding skills from server:', result.skills);
+                result.skills.forEach(skillId => {
+                    const added = this.game.skillsManager.addSkill(skillId);
+                    console.log(`Skill ${skillId} added:`, added);
+                });
+                
+                // Force update UI after adding skills
+                if (this.game.uiManager) {
+                    console.log('Updating skill bar after adding skills');
+                    this.game.uiManager.updateSkillBar();
+                }
+            }
+            
+            console.log(`Path selection confirmed by server: ${result.path}`);
+            
+            // Update player color based on path
+            if (this.game.playerManager && this.game.playerManager.updatePlayerColor) {
+                this.game.playerManager.updatePlayerColor(result.path);
+            }
+        } else {
+            console.error('Path selection failed:', result.message);
+            
+            // Reset the path locally since server rejected it
+            if (this.game.karmaManager) {
+                this.game.karmaManager.chosenPath = null;
+            }
+            
+            if (this.game.playerStats) {
+                this.game.playerStats.path = null;
+            }
+            
+            // Show error message
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification(result.message || 'Path selection failed', '#ff0000');
+            }
+        }
+    }
+
+    handleReconnect() {
+        // Clear existing state
+        this.game.karmaManager.chosenPath = null;
+        this.game.skillsManager.clearSkills();
+        
+        // Request server to resend player state
+        this.socket.emit('requestPlayerState');
+        
+        // Update UI
+        if (this.game.uiManager) {
+            this.game.uiManager.updateSkillBar();
+        }
     }
 
     async createLocalPlayer() {
@@ -775,48 +886,8 @@ export class NetworkManager {
         }
     }
 
-    /**
-     * Send path choice to server for validation
-     * @param {string} path - The path chosen ('light' or 'dark')
-     */
     sendPathChoice(path) {
-        if (!this.socket || !this.isConnected) {
-            console.warn('Cannot send path choice: Not connected to server');
-            return false;
-        }
-        
-        console.log(`Sending path choice to server: ${path}`);
+        console.log('Sending path choice to server:', path);
         this.socket.emit('choosePath', { path });
-        
-        // Set up a listener for the server's response
-        this.socket.once('pathSelectionResult', (result) => {
-            if (result.success) {
-                console.log(`Path selection confirmed by server: ${path}`);
-                
-                // Show confirmation message
-                if (this.game.uiManager) {
-                    if (path === 'light') {
-                        this.game.uiManager.showNotification('You have chosen the Light Path. You have learned Martial Arts skill!', '#ffcc00');
-                    } else if (path === 'dark') {
-                        this.game.uiManager.showNotification('You have chosen the Dark Path. Your power grows with darkness.', '#6600cc');
-                    }
-                }
-            } else {
-                // Path selection was rejected by the server
-                console.warn(`Path selection rejected: ${result.message}`);
-                
-                // Reset the path locally since server rejected it
-                if (this.game.playerStats) {
-                    this.game.playerStats.path = null;
-                }
-                
-                // Show error message
-                if (this.game.uiManager) {
-                    this.game.uiManager.showNotification(result.message, '#ff0000');
-                }
-            }
-        });
-        
-        return true;
     }
 }

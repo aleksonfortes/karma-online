@@ -60,7 +60,7 @@ export class Game {
                 icon: '🥋'
             }
         };
-        this.activeSkills = new Set(['martial_arts']);
+        this.activeSkills = new Set();
         
         // Timing
         this.clock = new THREE.Clock();
@@ -436,12 +436,16 @@ export class Game {
             this.networkManager.sendPathChoice(path);
         }
         
-        // Grant skills based on path
-        if (path === 'light') {
-            this.skillsManager.addSkill('martial_arts');
-        }
-        
         console.log(`Path chosen: ${path}`);
         return true;
+    }
+    
+    handleInput() {
+        // Handle space key press for martial arts skill
+        if (this.inputManager.isKeyPressed('Space')) {
+            if (this.karmaManager.chosenPath === 'light') {
+                this.skillsManager.useSkillBySlot(1);
+            }
+        }
     }
 } 
