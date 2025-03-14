@@ -11,6 +11,7 @@ export class UIManager {
         this.loadingScreen = null;
         this.notificationElement = null;
         this.errorScreen = null;
+        this.targetDisplay = null;
     }
     
     // Add init method
@@ -561,8 +562,10 @@ export class UIManager {
         tooltip.style.padding = '5px 10px';
         tooltip.style.borderRadius = '4px';
         tooltip.style.whiteSpace = 'nowrap';
-        tooltip.style.zIndex = '1000';
         tooltip.style.display = 'none';
+        tooltip.style.zIndex = '1000';
+        tooltip.style.pointerEvents = 'none';
+        tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
         tooltip.textContent = `${skill.name}: ${skill.description}`;
         
         // Show tooltip on hover
@@ -837,13 +840,10 @@ export class UIManager {
                     // Clear buttons and add new ones
                     buttonsContainer.innerHTML = '';
                     buttonsContainer.appendChild(this.createDialogueButton('I choose the Light Path', () => {
-                        // Call the choosePath method on the game object
+                        // Only call the Game.choosePath method to avoid duplicate path selection
                         if (this.game.choosePath) {
                             console.log('Choosing light path through Game.choosePath');
                             this.game.choosePath('light');
-                        } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
-                            console.log('Choosing light path through KarmaManager.choosePath');
-                            this.game.karmaManager.choosePath('light');
                         } else {
                             console.log('No choosePath method found, implementing directly');
                             // Fallback implementation
@@ -891,13 +891,10 @@ export class UIManager {
                     // Clear buttons and add new ones
                     buttonsContainer.innerHTML = '';
                     buttonsContainer.appendChild(this.createDialogueButton('I choose the Dark Path', () => {
-                        // Call the choosePath method on the game object
+                        // Only call the Game.choosePath method to avoid duplicate path selection
                         if (this.game.choosePath) {
                             console.log('Choosing dark path through Game.choosePath');
                             this.game.choosePath('dark');
-                        } else if (this.game.karmaManager && typeof this.game.karmaManager.choosePath === 'function') {
-                            console.log('Choosing dark path through KarmaManager.choosePath');
-                            this.game.karmaManager.choosePath('dark');
                         } else {
                             console.log('No choosePath method found, implementing directly');
                             // Fallback implementation
@@ -1251,5 +1248,116 @@ export class UIManager {
         }
         
         this.karmaTooltip.textContent = `Karma: ${karmaStatus} (${currentKarma}/${maxKarma})`;
+    }
+    
+    /**
+     * Create the target display element
+     */
+    createTargetDisplay() {
+        if (this.targetDisplay) return;
+        
+        // Create target display container
+        const targetDisplay = document.createElement('div');
+        targetDisplay.style.position = 'fixed';
+        targetDisplay.style.top = '20px';
+        targetDisplay.style.right = '20px';
+        targetDisplay.style.width = '200px';
+        targetDisplay.style.padding = '10px';
+        targetDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        targetDisplay.style.borderRadius = '5px';
+        targetDisplay.style.color = '#ffffff';
+        targetDisplay.style.fontFamily = 'Arial, sans-serif';
+        targetDisplay.style.zIndex = '1000';
+        targetDisplay.style.display = 'none';
+        
+        // Target name
+        const targetName = document.createElement('div');
+        targetName.style.fontSize = '16px';
+        targetName.style.fontWeight = 'bold';
+        targetName.style.marginBottom = '5px';
+        targetName.textContent = 'Target';
+        targetDisplay.appendChild(targetName);
+        
+        // Target health bar container
+        const healthBarContainer = document.createElement('div');
+        healthBarContainer.style.width = '100%';
+        healthBarContainer.style.height = '10px';
+        healthBarContainer.style.backgroundColor = '#333333';
+        healthBarContainer.style.borderRadius = '5px';
+        healthBarContainer.style.overflow = 'hidden';
+        targetDisplay.appendChild(healthBarContainer);
+        
+        // Target health bar
+        const healthBar = document.createElement('div');
+        healthBar.style.width = '100%';
+        healthBar.style.height = '100%';
+        healthBar.style.backgroundColor = '#ff0000';
+        healthBar.style.transition = 'width 0.3s';
+        healthBarContainer.appendChild(healthBar);
+        
+        // Target type indicator
+        const targetType = document.createElement('div');
+        targetType.style.fontSize = '12px';
+        targetType.style.marginTop = '5px';
+        targetType.style.color = '#aaaaaa';
+        targetType.textContent = 'Type: Unknown';
+        targetDisplay.appendChild(targetType);
+        
+        // Store references to elements
+        this.targetDisplay = {
+            container: targetDisplay,
+            name: targetName,
+            healthBar: healthBar,
+            type: targetType
+        };
+        
+        // Add to document
+        document.body.appendChild(targetDisplay);
+    }
+    
+    /**
+     * Update the target display with new information
+     * @param {string} name - The name of the target
+     * @param {number} health - The current health of the target
+     * @param {number} maxHealth - The maximum health of the target
+     * @param {string} type - The type of target ('player' or 'npc')
+     */
+    updateTargetDisplay(name, health, maxHealth, type) {
+        // Create the target display if it doesn't exist
+        if (!this.targetDisplay) {
+            this.createTargetDisplay();
+        }
+        
+        // Update target information
+        this.targetDisplay.name.textContent = name;
+        
+        // Calculate health percentage
+        const healthPercent = Math.max(0, Math.min(100, (health / maxHealth) * 100));
+        this.targetDisplay.healthBar.style.width = `${healthPercent}%`;
+        
+        // Update color based on health percentage
+        if (healthPercent > 60) {
+            this.targetDisplay.healthBar.style.backgroundColor = '#00cc00'; // Green
+        } else if (healthPercent > 30) {
+            this.targetDisplay.healthBar.style.backgroundColor = '#cccc00'; // Yellow
+        } else {
+            this.targetDisplay.healthBar.style.backgroundColor = '#cc0000'; // Red
+        }
+        
+        // Update type
+        this.targetDisplay.type.textContent = `Type: ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+        
+        // Show the target display
+        this.targetDisplay.container.style.display = 'block';
+    }
+    
+    /**
+     * Clear the target display
+     */
+    clearTargetDisplay() {
+        if (!this.targetDisplay) return;
+        
+        // Hide the target display
+        this.targetDisplay.container.style.display = 'none';
     }
 } 

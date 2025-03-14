@@ -108,20 +108,21 @@ export class NetworkManager {
             console.log('Received initial game state:', gameState);
             
             // Create all existing players
-            gameState.players.forEach(player => {
-                if (player.id !== this.socket.id) {
-                    // Use async function without waiting for it to complete
-                    // This is fine because each player is created independently
-                    this.createNetworkPlayer(player).catch(error => {
-                        console.error(`Failed to create network player ${player.id}:`, error);
-                    });
-                }
-            });
-            
-            // Only create local player if it doesn't already exist
-            if (!this.game.localPlayer) {
-                this.createLocalPlayer();
+            if (gameState.players) {
+                Object.entries(gameState.players).forEach(([id, player]) => {
+                    if (id !== this.socket.id) {
+                        // Use async function without waiting for it to complete
+                        // This is fine because each player is created independently
+                        this.createNetworkPlayer(player).catch(error => {
+                            console.error(`Failed to create network player ${id}:`, error);
+                        });
+                    }
+                });
             }
+            
+            // Always create a new local player - matching original game behavior
+            // This ensures if a player is disconnected, they start over
+            this.createLocalPlayer();
             
             // Process NPCs from server if they exist
             if (gameState.npcs && this.game.npcManager) {
@@ -366,10 +367,10 @@ export class NetworkManager {
         this.socket.on('gameStateUpdate', (data) => {
             if (!data.players) return;
             
-            data.players.forEach(player => {
-                if (player.id === this.socket.id) return;
+            Object.entries(data.players).forEach(([id, player]) => {
+                if (id === this.socket.id) return;
                 
-                const playerMesh = this.game.playerManager.players.get(player.id);
+                const playerMesh = this.game.playerManager.players.get(id);
                 if (playerMesh) {
                     // Update position and rotation
                     playerMesh.position.set(
@@ -655,6 +656,102 @@ export class NetworkManager {
         this.socket.on('reconnect', () => {
             this.handleReconnect();
         });
+
+        // Handle skill damage
+        this.socket.on('skillDamage', (data) => {
+            console.log('Received skill damage:', data);
+            
+            if (data.targetId === this.socket.id) {
+                // We took damage
+                if (this.game.playerStats) {
+                    // Update player health
+                    this.game.playerStats.currentLife = Math.max(0, this.game.playerStats.currentLife - data.damage);
+                    
+                    // Update UI
+                    if (this.game.uiManager) {
+                        this.game.uiManager.updateStatusBars();
+                    }
+                    
+                    // Check for death
+                    if (this.game.playerStats.currentLife <= 0 && this.game.isAlive) {
+                        this.game.isAlive = false;
+                        if (this.game.playerManager) {
+                            this.game.playerManager.handlePlayerDeath(this.game.localPlayer);
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Handle player died event
+        this.socket.on('playerDied', (data) => {
+            console.log('Received player died event:', data);
+            
+            // Show death message
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification(`You were killed by another player!`, '#ff0000');
+            }
+        });
+        
+        // Handle respawn confirmation
+        this.socket.on('respawnConfirmed', (data) => {
+            console.log('Respawn confirmed:', data);
+            
+            // Update player position
+            if (this.game.localPlayer && data.position) {
+                this.game.localPlayer.position.set(
+                    data.position.x,
+                    data.position.y,
+                    data.position.z
+                );
+            }
+            
+            // Update player stats
+            if (this.game.playerStats) {
+                this.game.playerStats.currentLife = data.life;
+                this.game.playerStats.maxLife = data.maxLife;
+                
+                // Update UI
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateStatusBars();
+                    this.game.uiManager.hideDeathScreen();
+                    this.game.uiManager.showNotification('You have respawned!', '#00ff00');
+                }
+            }
+            
+            // Mark player as alive
+            this.game.isAlive = true;
+        });
+        
+        // Handle other player respawned
+        this.socket.on('playerRespawned', (data) => {
+            console.log('Player respawned:', data);
+            
+            // Get the player from the map
+            const player = this.game.players.get(data.id);
+            if (player) {
+                // Update player position
+                player.position.set(
+                    data.position.x,
+                    data.position.y,
+                    data.position.z
+                );
+                
+                // Reset visual state
+                player.rotation.set(0, 0, 0);
+                player.traverse((child) => {
+                    if (child.isMesh && child.material) {
+                        child.material.transparent = false;
+                        child.material.opacity = 1.0;
+                    }
+                });
+                
+                // Reset player data
+                if (player.userData) {
+                    player.userData.isDead = false;
+                }
+            }
+        });
     }
 
     handlePathSelectionResult(result) {
@@ -710,17 +807,35 @@ export class NetworkManager {
     }
 
     handleReconnect() {
+        console.log('Reconnected to server - creating new player as per original game behavior');
+        
+        // In the original game, reconnection meant starting over
+        // Remove any existing player
+        if (this.game.localPlayer) {
+            console.log('Removing existing local player before creating a new one');
+            this.game.scene.remove(this.game.localPlayer);
+            this.game.localPlayer = null;
+        }
+        
         // Clear existing state
         this.game.karmaManager.chosenPath = null;
         this.game.skillsManager.clearSkills();
         
-        // Request server to resend player state
-        this.socket.emit('requestPlayerState');
+        // Request server to reset our player data
+        this.socket.emit('requestPlayerReset');
         
-        // Update UI
-        if (this.game.uiManager) {
-            this.game.uiManager.updateSkillBar();
-        }
+        // Set up a handler for the reset confirmation
+        this.socket.once('playerResetConfirmed', () => {
+            console.log('Server confirmed player reset, creating new local player');
+            // Create a new player - but only if we don't have one
+            this.createLocalPlayer();
+            
+            // Update UI
+            if (this.game.uiManager) {
+                this.game.uiManager.updateSkillBar();
+                this.game.uiManager.showNotification('Reconnected to server. Starting over...', '#ffffff');
+            }
+        });
     }
 
     async createLocalPlayer() {
@@ -887,7 +1002,16 @@ export class NetworkManager {
     }
 
     sendPathChoice(path) {
+        // Check if we've already sent a path choice recently
+        if (this._lastPathChoiceSent && (Date.now() - this._lastPathChoiceSent < 2000)) {
+            console.log('Ignoring duplicate path choice request - already sent within the last 2 seconds');
+            return;
+        }
+        
         console.log('Sending path choice to server:', path);
         this.socket.emit('choosePath', { path });
+        
+        // Record the time we sent this request to prevent duplicates
+        this._lastPathChoiceSent = Date.now();
     }
 }

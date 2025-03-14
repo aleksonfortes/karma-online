@@ -8,6 +8,7 @@ import { TerrainManager } from './modules/terrain/TerrainManager.js';
 import { NPCManager } from './modules/npc/NPCManager.js';
 import { EnvironmentManager } from './modules/environment/EnvironmentManager.js';
 import { CameraManager } from './modules/camera/CameraManager.js';
+import { TargetingManager } from './modules/targeting/TargetingManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
@@ -107,6 +108,7 @@ export class Game {
             this.skillsManager = new SkillsManager(this);
             this.karmaManager = new KarmaManager(this);
             this.cameraManager = new CameraManager(this);
+            this.targetingManager = new TargetingManager(this);
             
             // Initialize UI first so we can show loading indicators
             await this.uiManager.init();
@@ -132,6 +134,9 @@ export class Game {
             // Initialize NPCManager last
             this.npcManager = new NPCManager(this);
             await this.npcManager.init();
+            
+            // Initialize TargetingManager
+            await this.targetingManager.init();
             
             // Now that everything is loaded, hide loading screen and show game UI
             this.uiManager.hideLoadingScreen();
@@ -272,6 +277,10 @@ export class Game {
                 case 'KeyE':
                     if (this.isAlive) this.npcManager?.handleInteraction();
                     break;
+                case 'Escape':
+                    // Clear current target when pressing Escape
+                    this.targetingManager?.clearTarget();
+                    break;
             }
         });
         
@@ -283,6 +292,46 @@ export class Game {
                 case 'KeyS': this.controls.backward = false; break;
                 case 'KeyA': this.controls.left = false; break;
                 case 'KeyD': this.controls.right = false; break;
+            }
+        });
+        
+        // Mouse click event for targeting
+        this.renderer.domElement.addEventListener('click', (event) => {
+            if (!this.isAlive) return;
+            
+            console.log('Mouse click detected');
+            
+            // Log player information
+            console.log('Local player:', this.localPlayer ? {
+                id: this.localPlayer.userData?.id || 'unknown',
+                position: this.localPlayer.position ? 
+                    `(${this.localPlayer.position.x.toFixed(2)}, ${this.localPlayer.position.y.toFixed(2)}, ${this.localPlayer.position.z.toFixed(2)})` : 'N/A'
+            } : 'No local player');
+            
+            console.log('All players in game:', Array.from(this.players.entries()).map(([id, player]) => {
+                return {
+                    id: id,
+                    isLocalPlayer: player === this.localPlayer,
+                    position: player.position ? 
+                        `(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})` : 'N/A'
+                };
+            }));
+            
+            // Calculate mouse position in normalized device coordinates (-1 to +1)
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            console.log(`Mouse click at screen coordinates: (${event.clientX}, ${event.clientY})`);
+            console.log(`Normalized coordinates: (${x.toFixed(4)}, ${y.toFixed(4)})`);
+            console.log(`Canvas rect: left=${rect.left.toFixed(0)}, top=${rect.top.toFixed(0)}, width=${rect.width.toFixed(0)}, height=${rect.height.toFixed(0)}`);
+            
+            // Check if targeting manager exists
+            if (this.targetingManager) {
+                console.log('Targeting manager exists, handling targeting');
+                this.targetingManager.handleTargeting(x, y);
+            } else {
+                console.warn('No targeting manager available');
             }
         });
         
@@ -325,6 +374,7 @@ export class Game {
         this.uiManager?.update(delta);
         this.environmentManager?.update(delta);
         this.cameraManager?.update(delta);
+        this.targetingManager?.update(delta);
         
         // Update camera
         if (this.localPlayer) {
@@ -448,4 +498,4 @@ export class Game {
             }
         }
     }
-} 
+}
