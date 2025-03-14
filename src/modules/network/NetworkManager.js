@@ -464,39 +464,93 @@ export class NetworkManager {
 
         // Handle life update
         this.socket.on('lifeUpdate', (data) => {
+            // Get the player mesh
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
+                console.warn(`Player mesh not found for life update: ${data.id}`);
                 return;
             }
-
-            // Update stored life stats
+            
+            // Initialize player stats if needed
             if (!playerMesh.userData.stats) {
                 playerMesh.userData.stats = {};
             }
             
-            const oldLife = playerMesh.userData.stats.life;
-            playerMesh.userData.stats.life = data.life;
-            playerMesh.userData.stats.maxLife = data.maxLife;
+            // Check if this update is newer than the last one we processed
+            const timestamp = data.timestamp || Date.now();
+            const lastTimestamp = playerMesh.userData.lastUpdateTimestamp || 0;
             
-            // Update visual status bars
-            if (this.game.updatePlayerStatus) {
-                this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+            // Only process updates that are newer than the last one we processed
+            if (timestamp < lastTimestamp) {
+                console.log(`Ignoring outdated health update for player ${data.id} (${timestamp} < ${lastTimestamp})`);
+                return;
             }
-
-            // If this is our player, update the main UI and check for death
+            
+            // Store the timestamp of this update
+            playerMesh.userData.lastUpdateTimestamp = timestamp;
+            
+            // Store the server-provided values
+            const serverLife = data.life;
+            const serverMaxLife = data.maxLife || 100;
+            
+            // Update player stats with server values (server authority)
+            playerMesh.userData.stats.life = serverLife;
+            playerMesh.userData.stats.maxLife = serverMaxLife;
+            
+            // Set player ID for better debugging
+            if (!playerMesh.userData.playerId) {
+                playerMesh.userData.playerId = data.id;
+            }
+            
+            // Create health bar if it doesn't exist
+            if (!playerMesh.userData.healthBar) {
+                console.log(`Creating health bar for player ${data.id}`);
+                this.game.playerManager.createHealthBar(playerMesh);
+                this.game.playerManager.updateHealthBar(playerMesh);
+                return;
+            }
+            
+            // LOCK MECHANISM: Only update if we're not currently processing a damage effect
+            if (playerMesh.userData.processingDamageEffect) {
+                console.log(`Skipping health update for player ${data.id} - currently processing damage effect`);
+                return;
+            }
+            
+            // Clear any existing update timeout
+            if (playerMesh.userData.healthUpdateTimeout) {
+                clearTimeout(playerMesh.userData.healthUpdateTimeout);
+                playerMesh.userData.healthUpdateTimeout = null;
+            }
+            
+            // Use a debounced update for the health bar to prevent oscillation
+            playerMesh.userData.healthUpdateTimeout = setTimeout(() => {
+                // Update the health bar with the final values
+                this.game.playerManager.updateHealthBar(playerMesh);
+                
+                // Clear the timeout
+                playerMesh.userData.healthUpdateTimeout = null;
+            }, 300); // Longer delay to collect multiple rapid updates
+            
+            // If this is our player, update the main UI immediately
             if (data.id === this.socket.id) {
-                const previousLife = this.game.playerStats.currentLife;
-                this.game.playerStats.currentLife = data.life;
-                this.game.playerStats.maxLife = data.maxLife;
-                if (this.game.updateStatusBars) {
-                    this.game.updateStatusBars();
+                // Update UI if available
+                if (this.game.uiManager) {
+                    if (this.game.playerStats) {
+                        // Update player stats first
+                        this.game.playerStats.currentLife = serverLife;
+                        this.game.playerStats.maxLife = serverMaxLife;
+                    }
+                    
+                    // Then update the UI
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
                 }
                 
                 // Check for death
-                if (this.game.playerStats.currentLife === 0 && previousLife > 0) {
-                    if (this.game.handlePlayerDeath) {
-                        this.game.handlePlayerDeath();
-                    }
+                if (serverLife <= 0 && !this.playerDead) {
+                    this.playerDead = true;
+                    this.handlePlayerDeath();
+                } else if (serverLife > 0 && this.playerDead) {
+                    this.playerDead = false;
                 }
             }
         });
@@ -564,51 +618,42 @@ export class NetworkManager {
             }
         });
 
-        // Handle skill effect
-        this.socket.on('skillEffect', (data) => {
-            const targetMesh = this.game.playerManager.players.get(data.targetId);
-            if (!targetMesh) {
-                console.warn('🎯 Skill Effect: Target not found', {
-                    targetId: data.targetId,
-                    type: data.type
-                });
-                return;
-            }
-
-            if (data.type === 'damage') {
-                console.log('⚔️ Damage Effect:', {
-                    targetId: data.targetId,
-                    damage: data.damage,
-                    oldLife: targetMesh.userData.stats?.life,
-                    isLocalPlayer: data.targetId === this.socket.id
-                });
-
-                // Find the character model's material (it's a child of the player mesh)
-                let characterMaterial;
-                targetMesh.traverse((child) => {
-                    if (child.isMesh && child.material) {
-                        characterMaterial = child.material;
-                    }
-                });
-
-                if (!characterMaterial) {
-                    console.warn('Character material not found for damage effect');
-                    return;
+        // Handle damage effect
+        this.socket.on('damageEffect', (data) => {
+            console.log('Received damage effect:', data);
+            
+            // Get the source and target players
+            const sourcePlayer = this.game.playerManager.players.get(data.sourceId);
+            const targetPlayer = this.game.playerManager.players.get(data.targetId);
+            
+            // Update target player's health bar if available
+            if (targetPlayer) {
+                // Set the processing flag to prevent conflicting updates
+                targetPlayer.userData.processingDamageEffect = true;
+                
+                // Create damage effect
+                if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
+                    this.game.effectsManager.showDamageNumber(targetPlayer, data.damage);
+                } else {
+                    // Fallback to basic damage effect
+                    this.createDamageEffect(targetPlayer, data.damage);
                 }
                 
-                // Create damage number with unique ID
-                const damageId = `damage-${Date.now()}-${Math.random()}`;
-                const damageText = document.createElement('div');
-                damageText.id = damageId;
-                damageText.textContent = data.isCritical ? `${data.damage}!` : data.damage;
-                damageText.style.position = 'fixed';
-                damageText.style.color = data.isCritical ? '#ff0000' : '#ffffff';
-                damageText.style.fontSize = data.isCritical ? '24px' : '20px';
-                damageText.style.fontWeight = 'bold';
-                damageText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
-                damageText.style.pointerEvents = 'none';
-                damageText.style.zIndex = '1000';
-                document.body.appendChild(damageText);
+                // Update health bar directly with the current server values
+                if (targetPlayer.userData.stats) {
+                    // Force an immediate update of the health bar
+                    this.game.playerManager.updateHealthBar(targetPlayer);
+                }
+                
+                // Clear the processing flag after a delay
+                setTimeout(() => {
+                    targetPlayer.userData.processingDamageEffect = false;
+                }, 500); // Keep the lock for 500ms to prevent oscillation
+            }
+            
+            // Play attack animation for source player
+            if (sourcePlayer && this.game.animationManager) {
+                this.game.animationManager.playAnimation(sourcePlayer, 'attack');
             }
         });
 
@@ -660,6 +705,36 @@ export class NetworkManager {
         // Handle skill damage
         this.socket.on('skillDamage', (data) => {
             console.log('Received skill damage:', data);
+            
+            // Get the target player mesh
+            const targetPlayer = this.game.playerManager.players.get(data.targetId);
+            
+            if (targetPlayer) {
+                // Update the target player's stats
+                if (!targetPlayer.userData.stats) {
+                    targetPlayer.userData.stats = {
+                        life: 100,
+                        maxLife: 100
+                    };
+                }
+                
+                // Apply damage
+                targetPlayer.userData.stats.life = Math.max(0, targetPlayer.userData.stats.life - data.damage);
+                
+                // Create health bar if it doesn't exist
+                if (!targetPlayer.userData.healthBar && this.game.playerManager.createHealthBar) {
+                    console.log(`Creating health bar for damaged player ${data.targetId}`);
+                    this.game.playerManager.createHealthBar(targetPlayer);
+                }
+                
+                // Update the health bar visually
+                this.game.playerManager.updateHealthBar(targetPlayer);
+                
+                // Show damage effect
+                if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
+                    this.game.effectsManager.showDamageNumber(targetPlayer, data.damage);
+                }
+            }
             
             if (data.targetId === this.socket.id) {
                 // We took damage
@@ -752,6 +827,65 @@ export class NetworkManager {
                 }
             }
         });
+
+        // Handle player respawn
+        this.socket.on('playerRespawned', (data) => {
+            console.log('Player respawned:', data);
+            
+            // Get the player mesh
+            const playerMesh = this.game.playerManager.players.get(data.id);
+            if (!playerMesh) {
+                console.warn(`Player mesh not found for respawn: ${data.id}`);
+                return;
+            }
+            
+            // Update player position
+            if (data.position) {
+                playerMesh.position.set(data.position.x, data.position.y, data.position.z);
+            }
+            
+            // Update player stats
+            if (data.stats) {
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+                
+                playerMesh.userData.stats.life = data.stats.life;
+                playerMesh.userData.stats.maxLife = data.stats.maxLife;
+                
+                // Update health bar
+                this.game.playerManager.updateHealthBar(playerMesh);
+            }
+            
+            // If this is the local player, reset controls and camera
+            if (data.id === this.socket.id) {
+                console.log('Local player respawned');
+                
+                // Update local player stats
+                if (this.game.playerStats && data.stats) {
+                    this.game.playerStats.currentLife = data.stats.life;
+                    this.game.playerStats.maxLife = data.stats.maxLife;
+                }
+                
+                // Update UI
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                }
+                
+                // Reset player state
+                this.playerDead = false;
+                
+                // Re-enable controls if available
+                if (this.game.controlsManager && this.game.controlsManager.enableControls) {
+                    this.game.controlsManager.enableControls();
+                }
+                
+                // Reset camera if needed
+                if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
+                    this.game.cameraManager.resetCamera();
+                }
+            }
+        });
     }
 
     handlePathSelectionResult(result) {
@@ -770,8 +904,7 @@ export class NetworkManager {
             if (result.skills && Array.isArray(result.skills) && this.game.skillsManager) {
                 console.log('Adding skills from server:', result.skills);
                 result.skills.forEach(skillId => {
-                    const added = this.game.skillsManager.addSkill(skillId);
-                    console.log(`Skill ${skillId} added:`, added);
+                    this.game.skillsManager.addSkill(skillId);
                 });
                 
                 // Force update UI after adding skills
@@ -932,38 +1065,31 @@ export class NetworkManager {
     }
 
     cleanup() {
-        // Clear all players and their status bars
-        this.game.playerManager.players.forEach((playerMesh) => {
-            if (playerMesh.userData.statusGroup) {
-                this.game.scene.remove(playerMesh.userData.statusGroup);
-            }
-            this.game.scene.remove(playerMesh);
-        });
-        this.game.playerManager.players.clear();
+        console.log('Cleaning up NetworkManager');
         
-        // Reset game controls to prevent stuck movement
-        if (this.game.controls) {
+        // Disconnect socket if connected
+        if (this.socket && this.socket.connected) {
+            this.socket.disconnect();
+        }
+        
+        // Reset controls if available
+        if (this.game.controls && typeof this.game.controls.resetKeys === 'function') {
             this.game.controls.resetKeys();
+        } else if (this.game.controlsManager && typeof this.game.controlsManager.resetKeys === 'function') {
+            this.game.controlsManager.resetKeys();
         }
         
-        // Reset player stats
-        if (this.game.playerStats) {
-            this.game.playerStats.reset();
+        // Clear any pending timers
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
         }
         
-        // Clear local player reference
-        this.game.localPlayer = null;
-        
-        // Clean up NPCs and environment
-        if (this.game.npcManager) {
-            this.game.npcManager.cleanup();
+        // Clear any UI elements
+        if (this.connectionStatusElement) {
+            document.body.removeChild(this.connectionStatusElement);
+            this.connectionStatusElement = null;
         }
-        
-        if (this.game.environmentManager) {
-            this.game.environmentManager.cleanup();
-        }
-        
-        console.log('Cleaned up network state');
     }
 
     async createNetworkPlayer(player) {
@@ -979,6 +1105,7 @@ export class NetworkManager {
             if (playerMesh) {
                 this.game.scene.add(playerMesh);
                 
+                // Initialize player stats
                 const stats = {
                     life: player.life ?? 100,
                     maxLife: player.maxLife ?? 100,
@@ -988,13 +1115,26 @@ export class NetworkManager {
                     maxKarma: player.maxKarma ?? 100
                 };
                 
+                // Store player ID and stats
+                playerMesh.userData.playerId = player.id;
+                playerMesh.userData.stats = stats;
+                
                 // Force creation and update of status bars
                 if (this.game.updatePlayerStatus) {
                     this.game.updatePlayerStatus(playerMesh, stats);
                 }
+                
+                // Make sure the health bar is created and updated
+                if (!playerMesh.userData.healthBar) {
+                    this.game.playerManager.createHealthBar(playerMesh);
+                }
+                
                 this.game.playerManager.players.set(player.id, playerMesh);
                 
-                console.log(`Added network player ${player.id} with status bars`);
+                console.log(`Added network player ${player.id} with health bar`);
+                
+                // Request a life update for this player to ensure health bar is correct
+                this.socket.emit('requestLifeUpdate', { playerId: player.id });
             }
         } catch (error) {
             console.error(`Error creating network player ${player.id}:`, error);
@@ -1013,5 +1153,171 @@ export class NetworkManager {
         
         // Record the time we sent this request to prevent duplicates
         this._lastPathChoiceSent = Date.now();
+    }
+
+    /**
+     * Create a visual damage effect on a player
+     * @param {THREE.Object3D} targetPlayer - The player that took damage
+     * @param {number} damage - The amount of damage dealt
+     * @param {boolean} isCritical - Whether the damage is critical
+     */
+    createDamageEffect(targetPlayer, damage, isCritical = false) {
+        if (!targetPlayer) return;
+        
+        // Find the character model's material (it's a child of the player mesh)
+        let characterMaterial;
+        targetPlayer.traverse((child) => {
+            if (child.isMesh && child.material) {
+                characterMaterial = child.material;
+            }
+        });
+        
+        // Flash the target player red
+        if (characterMaterial) {
+            const originalColor = characterMaterial.color ? characterMaterial.color.clone() : new THREE.Color(0xffffff);
+            characterMaterial.color = new THREE.Color(0xff0000);
+            
+            setTimeout(() => {
+                characterMaterial.color.copy(originalColor);
+            }, 200);
+        }
+        
+        // Create a damage number that floats up from the player's head
+        if (this.game.scene && targetPlayer.position) {
+            // Create damage number with unique ID
+            const damageId = `damage-${Date.now()}-${Math.random()}`;
+            const damageText = document.createElement('div');
+            damageText.id = damageId;
+            damageText.textContent = isCritical ? `${damage}!` : damage;
+            damageText.style.position = 'fixed';
+            damageText.style.color = isCritical ? '#ff0000' : '#ffffff';
+            damageText.style.fontSize = isCritical ? '24px' : '20px';
+            damageText.style.fontWeight = 'bold';
+            damageText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
+            damageText.style.pointerEvents = 'none';
+            damageText.style.zIndex = '1000';
+            document.body.appendChild(damageText);
+            
+            // Position the damage number above the player's head
+            const updatePosition = () => {
+                if (!targetPlayer.position || !this.game.camera) return;
+                
+                // Convert 3D position to screen position
+                const position = new THREE.Vector3();
+                position.copy(targetPlayer.position);
+                position.y += 2; // Position above the player's head
+                
+                // Project the 3D position to 2D screen coordinates
+                position.project(this.game.camera);
+                
+                // Convert to screen coordinates
+                const x = (position.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-(position.y * 0.5) + 0.5) * window.innerHeight;
+                
+                // Update the position of the damage text
+                damageText.style.left = `${x}px`;
+                damageText.style.top = `${y}px`;
+            };
+            
+            // Initial position
+            updatePosition();
+            
+            // Animate the damage number
+            let animationFrame = 0;
+            const animate = () => {
+                animationFrame++;
+                
+                // Update position
+                updatePosition();
+                
+                // Move upward and fade out
+                const opacity = 1 - (animationFrame / 60);
+                damageText.style.transform = `translateY(-${animationFrame * 2}px)`;
+                damageText.style.opacity = opacity;
+                
+                if (opacity > 0 && document.getElementById(damageId)) {
+                    requestAnimationFrame(animate);
+                } else {
+                    // Remove the element when animation is complete
+                    if (document.getElementById(damageId)) {
+                        document.body.removeChild(damageText);
+                    }
+                }
+            };
+            
+            // Start animation
+            requestAnimationFrame(animate);
+        }
+    }
+
+    /**
+     * Handle player death
+     */
+    handlePlayerDeath() {
+        console.log('Local player has died');
+        
+        // Use existing death handling if available
+        if (this.game.handlePlayerDeath) {
+            this.game.handlePlayerDeath();
+            return;
+        }
+        
+        // Show death screen if UI manager is available
+        if (this.game.uiManager && this.game.uiManager.showDeathScreen) {
+            this.game.uiManager.showDeathScreen();
+        } else {
+            // Fallback to basic death handling
+            const deathMessage = document.createElement('div');
+            deathMessage.id = 'death-screen';
+            deathMessage.style.position = 'fixed';
+            deathMessage.style.top = '50%';
+            deathMessage.style.left = '50%';
+            deathMessage.style.transform = 'translate(-50%, -50%)';
+            deathMessage.style.color = '#ff0000';
+            deathMessage.style.fontSize = '32px';
+            deathMessage.style.fontWeight = 'bold';
+            deathMessage.style.textAlign = 'center';
+            deathMessage.style.zIndex = '1000';
+            deathMessage.textContent = 'YOU DIED';
+            document.body.appendChild(deathMessage);
+            
+            // Add respawn button
+            const respawnButton = document.createElement('button');
+            respawnButton.textContent = 'Respawn';
+            respawnButton.style.display = 'block';
+            respawnButton.style.margin = '20px auto';
+            respawnButton.style.padding = '10px 20px';
+            respawnButton.style.fontSize = '18px';
+            respawnButton.onclick = () => {
+                // Request respawn from server
+                this.socket.emit('respawn');
+                
+                // Remove death screen
+                const deathScreen = document.getElementById('death-screen');
+                if (deathScreen) {
+                    document.body.removeChild(deathScreen);
+                }
+                
+                // Reset player state
+                this.playerDead = false;
+                
+                // Restore player stats
+                if (this.game.playerStats) {
+                    // Update player health
+                    this.game.playerStats.currentLife = 100;
+                }
+                
+                // Update UI
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                }
+            };
+            deathMessage.appendChild(respawnButton);
+        }
+        
+        // Disable controls if available
+        if (this.game.controlsManager && this.game.controlsManager.disableControls) {
+            this.game.controlsManager.disableControls();
+        }
     }
 }
