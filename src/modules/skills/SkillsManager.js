@@ -4,7 +4,7 @@ export class SkillsManager {
     constructor(game) {
         this.game = game;
         
-        // Add skills system
+        // Initialize skills system without default skills
         this.skills = {
             martial_arts: {
                 id: 'martial_arts',
@@ -15,9 +15,25 @@ export class SkillsManager {
                 lastUsed: 0,
                 damage: 75,
                 range: 3,
-                description: 'Basic martial arts attack'
+                description: 'Basic martial arts attack',
+                path: 'light'
+            },
+            dark_strike: {
+                id: 'dark_strike',
+                name: 'Dark Strike',
+                icon: '⚔️',
+                slot: 1,
+                cooldown: 2000,
+                lastUsed: 0,
+                damage: 75,
+                range: 3,
+                description: 'Basic dark path attack',
+                path: 'dark'
             }
         };
+        
+        // Initialize active skills
+        this.game.activeSkills = new Set();
     }
     
     init() {
@@ -32,35 +48,28 @@ export class SkillsManager {
             return false;
         }
         
-        // Get the skill
-        const skill = this.skills[skillId];
-        const now = Date.now();
+        // Check if player has the skill
+        if (!this.game.activeSkills.has(skillId)) {
+            console.log(`Player does not have ${skillId} skill`);
+            return false;
+        }
         
-        // Check if on cooldown
+        // Check if player is on the correct path
+        const skill = this.skills[skillId];
+        if (skill.path && skill.path !== this.game.karmaManager.chosenPath) {
+            console.log(`Only ${skill.path} path players can use ${skillId}`);
+            return false;
+        }
+        
+        // Check cooldown
+        const now = Date.now();
         if (now - skill.lastUsed < skill.cooldown) {
             console.log(`Skill ${skillId} is on cooldown`);
             return false;
         }
         
-        // Use the skill
-        console.log(`Using skill: ${skill.name}`);
         skill.lastUsed = now;
-        
-        // Handle specific skill effects
-        switch(skillId) {
-            case 'martial_arts':
-                console.log('Martial arts attack!');
-                this.useMartialArts();
-                break;
-            default:
-                console.warn(`No implementation for skill ${skillId}`);
-        }
-        
-        // Update UI
-        if (this.game.uiManager) {
-            this.game.uiManager.updateSkillBar();
-        }
-        
+        console.log(`Using skill ${skillId}`);
         return true;
     }
     
@@ -71,80 +80,47 @@ export class SkillsManager {
             return;
         }
 
-        // Check if player has the skill
+        // Check if skill is on cooldown
+        if (this.skills.martial_arts.lastUsed > 0 && Date.now() - this.skills.martial_arts.lastUsed < this.skills.martial_arts.cooldown) {
+            return;
+        }
+
+        // Check if player has the skill - for light path players, we should always have this skill
+        // This check is only needed for validation
         if (!this.game.activeSkills || !this.game.activeSkills.has('martial_arts')) {
-            console.log('Player does not have martial arts skill');
+            // If player is on light path but doesn't have the skill, add it
+            if (this.game.karmaManager && this.game.karmaManager.chosenPath === 'light') {
+                this.game.activeSkills.add('martial_arts');
+            } else {
+                return;
+            }
+        }
+        
+        // Check if player is on light path - use karmaManager.chosenPath for consistency
+        // This is the key fix - we need to check the path in the karmaManager, not playerStats
+        if (this.game.karmaManager.chosenPath !== 'light') {
             return;
         }
         
-        // Check if player is on light path
-        if (this.game.playerStats && this.game.playerStats.path !== 'light') {
-            console.log('Only light path players can use martial arts');
+        // Use the skill
+        if (!this.useSkill('martial_arts')) {
             return;
         }
-
-        // Prevent Illuminated players from using martial arts
-        if (this.game.playerStats && this.game.playerStats.currentKarma === 0) {
-            console.log('Illuminated players cannot use direct damage skills');
+        
+        // Find targets in range
+        const targets = this.findTargetsInRange(this.skills.martial_arts.range);
+        if (targets.length === 0) {
+            console.log('No targets in range');
             return;
         }
-
-        const skill = this.skills.martial_arts;
-        const now = Date.now();
-
-        // Check cooldown
-        if (now - skill.lastUsed < skill.cooldown) {
-            console.log('Martial arts skill is on cooldown');
-            return;
-        }
-
-        // Find nearby players
-        if (!this.game.localPlayer) {
-            console.log('Local player not found');
-            return;
-        }
-
-        const playerPos = this.game.localPlayer.position;
-        let targetFound = false;
-
-        // Check each player for potential targets
-        this.game.players.forEach((otherPlayer, playerId) => {
-            if (playerId === this.game.socket?.id) return; // Skip self
-            
-            // Skip dead players
-            if (!otherPlayer.userData?.stats?.life || 
-                otherPlayer.userData.stats.life <= 0 || 
-                otherPlayer.userData.isDead) {
-                console.log('Skipping dead player:', playerId);
-                return;
-            }
-
-            const dx = otherPlayer.position.x - playerPos.x;
-            const dz = otherPlayer.position.z - playerPos.z;
-            const distance = Math.sqrt(dx * dx + dz * dz);
-
-            if (distance <= skill.range) {
-                targetFound = true;
-                console.log('Target found in range, emitting damage event');
-                
-                // Emit damage event to server
-                this.game.socket.emit('skillDamage', {
-                    targetId: playerId,
-                    damage: skill.damage,
-                    skillName: 'martial_arts'
-                });
-            }
+        
+        // Apply damage to targets
+        targets.forEach(target => {
+            this.applyDamageEffect(target, this.skills.martial_arts.damage);
         });
-
-        // Always create the effect regardless of target found
+        
+        // Create visual effect
         this.createMartialArtsEffect();
-
-        if (targetFound) {
-            skill.lastUsed = now;
-            console.log('Martial arts skill used successfully');
-        } else {
-            console.log('No targets in range for martial arts');
-        }
     }
     
     createMartialArtsEffect() {
@@ -216,34 +192,81 @@ export class SkillsManager {
     }
     
     update() {
-        // Update skill cooldowns
-        const now = Date.now();
-        
-        // Update skill UI if needed
-        if (this.game.uiManager && typeof this.game.uiManager.updateSkillBar === 'function') {
+        // Update skill cooldowns and UI
+        if (this.game.uiManager) {
             this.game.uiManager.updateSkillBar();
+        }
+    }
+    
+    // Get active skills for UI
+    getActiveSkills() {
+        if (!this.game.activeSkills) {
+            return [];
+        }
+        
+        return Array.from(this.game.activeSkills);
+    }
+    
+    // Get skill by slot
+    getSkillBySlot(slot) {
+        return Object.values(this.skills).find(skill => skill.slot === slot);
+    }
+    
+    // Use skill by slot
+    useSkillBySlot(slot) {
+        const skill = this.getSkillBySlot(slot);
+        if (skill) {
+            this.useSkill(skill.id);
         }
     }
     
     // Add method to add skills to the player's active skills
     addSkill(skillId) {
         if (!this.skills[skillId]) {
-            console.warn(`Cannot add skill ${skillId}: skill not found`);
+            console.warn(`Skill ${skillId} not found`);
             return false;
         }
         
-        // Initialize activeSkills if it doesn't exist
-        this.game.activeSkills = this.game.activeSkills || new Set();
+        // Check if skill is already added
+        if (this.game.activeSkills.has(skillId)) {
+            return true; 
+        }
         
-        // Add the skill to the player's active skills
+        // Add skill only if player is on the correct path or if the skill has no path requirement
+        const skill = this.skills[skillId];
+        if (skill.path && this.game.karmaManager.chosenPath !== skill.path) {
+            console.log(`Only ${skill.path} path players can learn ${skillId}`);
+            return false;
+        }
+        
+        // Add the skill to active skills
         this.game.activeSkills.add(skillId);
-        console.log(`Added skill ${skillId} to player's active skills`);
         
-        // Update the skill bar
-        if (this.game.uiManager && typeof this.game.uiManager.updateSkillBar === 'function') {
+        // Update UI
+        if (this.game.uiManager) {
             this.game.uiManager.updateSkillBar();
+            
+            // Show notification
+            const skillName = skill.name || skillId;
+            this.game.uiManager.showNotification(`You have learned ${skillName}!`, '#00cc00');
         }
         
         return true;
+    }
+    
+    // Add method to clear all active skills (used during reconnection)
+    clearSkills() {
+        console.log('Clearing all active skills');
+        this.game.activeSkills.clear();
+        
+        // Reset cooldowns
+        for (const skillId in this.skills) {
+            this.skills[skillId].lastUsed = 0;
+        }
+        
+        // Update UI
+        if (this.game.uiManager) {
+            this.game.uiManager.updateSkillBar();
+        }
     }
 } 

@@ -22,28 +22,18 @@ export class UIManager {
     createUI() {
         console.log('Creating UI elements');
         
-        // Create UI container for XP ring
+        // Create main UI container
         const uiContainer = document.createElement('div');
         uiContainer.style.position = 'fixed';
         uiContainer.style.bottom = '20px';
-        uiContainer.style.left = '20px';
+        uiContainer.style.left = '50%';
+        uiContainer.style.transform = 'translateX(-50%)';
         uiContainer.style.display = 'flex';
+        uiContainer.style.flexDirection = 'column';
         uiContainer.style.alignItems = 'center';
         uiContainer.style.gap = '10px';
         uiContainer.style.zIndex = '1000';
         document.body.appendChild(uiContainer);
-
-        // Create and add the skill bar container with Life and Mana rings
-        const skillBarWrapper = document.createElement('div');
-        skillBarWrapper.style.position = 'fixed';
-        skillBarWrapper.style.bottom = '20px';
-        skillBarWrapper.style.left = '50%';
-        skillBarWrapper.style.transform = 'translateX(-50%)';
-        skillBarWrapper.style.display = 'flex';
-        skillBarWrapper.style.flexDirection = 'column';
-        skillBarWrapper.style.alignItems = 'center';
-        skillBarWrapper.style.gap = '2px'; // Reduced from 5px to make elements almost touching
-        document.body.appendChild(skillBarWrapper);
 
         // Create Karma bar container
         const karmaContainer = document.createElement('div');
@@ -141,16 +131,16 @@ export class UIManager {
         this.manaTooltip = manaRing.querySelector('.tooltip');
 
         // Create skill bar
-        const skillBarContainer = this.createSkillBar();
+        const skillBar = this.createSkillBar();
 
         // Assemble the gameplay container
         gameplayContainer.appendChild(lifeRing);
-        gameplayContainer.appendChild(skillBarContainer);
+        gameplayContainer.appendChild(skillBar);
         gameplayContainer.appendChild(manaRing);
 
         // Add to skill bar wrapper
-        skillBarWrapper.appendChild(karmaContainer);
-        skillBarWrapper.appendChild(gameplayContainer);
+        uiContainer.appendChild(karmaContainer);
+        uiContainer.appendChild(gameplayContainer);
 
         // Create XP ring and level indicator
         this.createLevelIndicator();
@@ -159,9 +149,11 @@ export class UIManager {
         this.createDarknessOverlay();
         
         // Store references for UI elements
-        this.statusElements.skillBarWrapper = skillBarWrapper;
-        this.statusElements.uiContainer = uiContainer;
-        this.statusElements.karmaContainer = karmaContainer;
+        this.statusElements = {
+            skillBarContainer: skillBar,
+            uiContainer: uiContainer,
+            karmaContainer: karmaContainer
+        };
     }
     
     // Helper method to create status bars with modern styling
@@ -337,6 +329,356 @@ export class UIManager {
         return container;
     }
     
+    createSkillBar() {
+        // Create skill bar container that matches original style
+        const skillBarContainer = document.createElement('div');
+        skillBarContainer.style.display = 'flex';
+        skillBarContainer.style.gap = '10px';
+        skillBarContainer.style.padding = '5px 10px';
+        skillBarContainer.style.background = 'rgba(0, 0, 0, 0.6)';
+        skillBarContainer.style.borderRadius = '8px';
+        skillBarContainer.style.border = '1px solid #444';
+        
+        // Initialize skill slots
+        const keybinds = ['SPACE', 'Q', 'E', 'R', 'F'];
+        this.skillElements = {};
+        
+        for (let i = 1; i <= 5; i++) {
+            // Create skill container (button + keybind)
+            const skillContainer = document.createElement('div');
+            skillContainer.style.position = 'relative';
+            skillContainer.style.display = 'flex';
+            skillContainer.style.flexDirection = 'column';
+            skillContainer.style.alignItems = 'center';
+            
+            // Create the skill button
+            const skillButton = document.createElement('div');
+            skillButton.className = 'skill-slot'; // Add skill-slot class for selector
+            skillButton.style.width = '45px';
+            skillButton.style.height = '45px';
+            skillButton.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            skillButton.style.border = '1px solid #666';
+            skillButton.style.borderRadius = '5px';
+            skillButton.style.display = 'flex';
+            skillButton.style.justifyContent = 'center';
+            skillButton.style.alignItems = 'center';
+            skillButton.style.color = '#ccc';
+            skillButton.style.fontSize = '22px';
+            skillButton.style.overflow = 'hidden';
+            skillButton.style.position = 'relative';
+            skillButton.dataset.empty = 'true';
+            skillButton.dataset.slotNumber = i; // Add slot number for easier debugging
+            
+            // Add keybind label under the button
+            const keyLabel = document.createElement('div');
+            keyLabel.style.marginTop = '4px';
+            keyLabel.style.color = '#999';
+            keyLabel.style.fontSize = '10px';
+            keyLabel.style.fontWeight = 'bold';
+            keyLabel.style.textShadow = '1px 1px 1px rgba(0,0,0,0.5)';
+            keyLabel.textContent = keybinds[i-1];
+            
+            // Add tooltip for the skill
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.style.position = 'absolute';
+            tooltip.style.top = '-40px';
+            tooltip.style.left = '50%';
+            tooltip.style.transform = 'translateX(-50%)';
+            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            tooltip.style.color = '#ffffff';
+            tooltip.style.padding = '5px 8px';
+            tooltip.style.borderRadius = '4px';
+            tooltip.style.fontSize = '12px';
+            tooltip.style.whiteSpace = 'nowrap';
+            tooltip.style.display = 'none';
+            tooltip.style.zIndex = '1500';
+            tooltip.style.pointerEvents = 'none';
+            tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
+            
+            // Store elements for later updates
+            this.skillElements[i] = {
+                container: skillContainer,
+                button: skillButton,
+                label: keyLabel,
+                tooltip: tooltip,
+                cooldownOverlay: null, // Will be added when needed
+                isOnCooldown: false
+            };
+            
+            // Show tooltip on hover
+            skillButton.addEventListener('mouseenter', () => {
+                if (skillButton.dataset.empty !== 'true') {
+                    tooltip.style.display = 'block';
+                }
+            });
+            
+            skillButton.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+            
+            // Assemble skill UI elements
+            skillContainer.appendChild(skillButton);
+            skillContainer.appendChild(tooltip);
+            skillContainer.appendChild(keyLabel);
+            skillBarContainer.appendChild(skillContainer);
+        }
+        
+        // Store the skill bar container for later reference
+        this.statusElements.skillBarContainer = skillBarContainer;
+        
+        return skillBarContainer;
+    }
+    
+    updateStatusBars(playerStats) {
+        if (!playerStats) return;
+        
+        // Update health/life ring
+        if (this.lifeRingFill && this.lifeTooltip) {
+            const healthPercent = (playerStats.currentLife / playerStats.maxLife) * 100;
+            // Update linear style fill from bottom to top (more like original)
+            this.lifeRingFill.style.clipPath = `inset(${100 - healthPercent}% 0 0 0)`;
+            
+            const lifeValue = this.lifeRingFill.parentElement.parentElement.querySelector('.value');
+            if (lifeValue) {
+                lifeValue.textContent = Math.round(playerStats.currentLife);
+            }
+            
+            this.lifeTooltip.textContent = `Life: ${Math.round(playerStats.currentLife)}/${playerStats.maxLife}`;
+        }
+        
+        // Update mana ring
+        if (this.manaRingFill && this.manaTooltip) {
+            const manaPercent = (playerStats.currentMana / playerStats.maxMana) * 100;
+            // Update linear style fill from bottom to top (more like original)
+            this.manaRingFill.style.clipPath = `inset(${100 - manaPercent}% 0 0 0)`;
+            
+            const manaValue = this.manaRingFill.parentElement.parentElement.querySelector('.value');
+            if (manaValue) {
+                manaValue.textContent = Math.round(playerStats.currentMana);
+            }
+            
+            this.manaTooltip.textContent = `Mana: ${Math.round(playerStats.currentMana)}/${playerStats.maxMana}`;
+        }
+        
+        // Update karma bar
+        if (this.karmaBarFill && this.karmaTooltip) {
+            const karmaPercent = (playerStats.currentKarma / playerStats.maxKarma) * 100;
+            this.karmaBarFill.style.width = `${karmaPercent}%`;
+            
+            // Update karma tooltip with path information
+            let karmaPath = 'Neutral';
+            if (karmaPercent < 30) {
+                karmaPath = 'Light';
+                this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
+            } else if (karmaPercent > 70) {
+                karmaPath = 'Dark';
+                this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
+            } else {
+                this.updateDarknessOverlay(0, 'transparent');
+            }
+            
+            this.karmaTooltip.textContent = `Karma: ${karmaPath} (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
+        }
+        
+        // Update XP fill
+        if (playerStats.level && this.levelText) {
+            this.levelText.textContent = playerStats.level;
+        }
+        
+        if (playerStats.experience !== undefined && 
+            playerStats.experienceToNextLevel !== undefined && 
+            this.xpRingFill && this.xpTooltip) {
+            
+            const xpPercent = (playerStats.experience / playerStats.experienceToNextLevel) * 100;
+            // Update linear fill from bottom to top - matching original style
+            this.xpRingFill.style.clipPath = `inset(${100 - xpPercent}% 0 0 0)`;
+            
+            this.xpTooltip.textContent = `Level ${playerStats.level}: ${playerStats.experience}/${playerStats.experienceToNextLevel} XP`;
+        }
+    }
+    
+    updateSkillBar() {
+        if (!this.game.skillsManager || !this.statusElements?.skillBarContainer) {
+            return;
+        }
+        
+        // Clear existing skill elements
+        const slots = this.statusElements.skillBarContainer.querySelectorAll('.skill-slot');
+        slots.forEach(slot => slot.innerHTML = '');
+        
+        // Get active skills
+        const activeSkills = this.game.skillsManager.getActiveSkills();
+        
+        // Create new skill elements
+        activeSkills.forEach(skillId => {
+            const skill = this.game.skillsManager.skills[skillId];
+            if (!skill) {
+                return;
+            }
+            
+            // Get the slot for this skill
+            const slotIndex = skill.slot - 1; // Convert to 0-based index
+            const slot = this.statusElements.skillBarContainer.querySelector(`.skill-slot:nth-child(${skill.slot})`);
+            
+            if (!slot) {
+                // Fallback: try to find the slot by index
+                const allSlots = this.statusElements.skillBarContainer.querySelectorAll('.skill-slot');
+                if (slotIndex >= 0 && slotIndex < allSlots.length) {
+                    allSlots[slotIndex].innerHTML = ''; // Clear the slot
+                    this.addSkillToElement(allSlots[slotIndex], skill);
+                }
+                return;
+            }
+            
+            // Add skill to the slot
+            this.addSkillToElement(slot, skill);
+        });
+    }
+    
+    // Helper method to add a skill to a slot element
+    addSkillToElement(slotElement, skill) {
+        // Create skill button
+        const skillElement = document.createElement('div');
+        skillElement.className = 'skill';
+        skillElement.style.display = 'flex';
+        skillElement.style.alignItems = 'center';
+        skillElement.style.justifyContent = 'center';
+        skillElement.style.width = '100%';
+        skillElement.style.height = '100%';
+        skillElement.style.fontSize = '24px';
+        skillElement.textContent = skill.icon;
+        
+        // Add tooltip
+        const tooltip = document.createElement('div');
+        tooltip.className = 'skill-tooltip';
+        tooltip.style.position = 'absolute';
+        tooltip.style.bottom = '100%';
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translateX(-50%)';
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        tooltip.style.color = 'white';
+        tooltip.style.padding = '5px 10px';
+        tooltip.style.borderRadius = '4px';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.zIndex = '1000';
+        tooltip.style.display = 'none';
+        tooltip.textContent = `${skill.name}: ${skill.description}`;
+        
+        // Show tooltip on hover
+        skillElement.addEventListener('mouseenter', () => {
+            tooltip.style.display = 'block';
+        });
+        
+        skillElement.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+        
+        // Add elements to slot
+        slotElement.appendChild(skillElement);
+        slotElement.appendChild(tooltip);
+    }
+    
+    updateDarknessOverlay(opacity = 0, color = 'rgba(0, 0, 0, 0.2)') {
+        if (!this.darknessOverlay) return;
+        
+        if (opacity > 0) {
+            this.darknessOverlay.style.backgroundColor = color;
+            this.darknessOverlay.style.opacity = opacity.toString();
+            this.darknessOverlay.style.display = 'block';
+        } else {
+            this.darknessOverlay.style.opacity = '0';
+            setTimeout(() => {
+                this.darknessOverlay.style.display = 'none';
+            }, 300);
+        }
+    }
+    
+    createDarknessOverlay() {
+        // Create overlay for karma effects
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed';
+        overlay.style.top = '0';
+        overlay.style.left = '0';
+        overlay.style.width = '100%';
+        overlay.style.height = '100%';
+        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+        overlay.style.pointerEvents = 'none'; // Allow clicking through
+        overlay.style.zIndex = '500'; // Below UI elements but above game
+        overlay.style.opacity = '0'; // Initially transparent
+        overlay.style.transition = 'opacity 0.5s ease';
+        overlay.style.display = 'none';
+        
+        document.body.appendChild(overlay);
+        this.darknessOverlay = overlay;
+    }
+    
+    createDeathOverlay(onRespawn) {
+        // Create a fullscreen darkened overlay
+        const deathOverlay = document.createElement('div');
+        deathOverlay.style.position = 'fixed';
+        deathOverlay.style.top = '0';
+        deathOverlay.style.left = '0';
+        deathOverlay.style.width = '100%';
+        deathOverlay.style.height = '100%';
+        deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        deathOverlay.style.zIndex = '2000';
+        deathOverlay.style.display = 'flex';
+        deathOverlay.style.flexDirection = 'column';
+        deathOverlay.style.justifyContent = 'center';
+        deathOverlay.style.alignItems = 'center';
+        deathOverlay.style.opacity = '0';
+        deathOverlay.style.transition = 'opacity 1s ease';
+        
+        // Death message
+        const deathMessage = document.createElement('div');
+        deathMessage.textContent = 'YOU DIED';
+        deathMessage.style.color = '#ff0000';
+        deathMessage.style.textShadow = '0 0 10px #ff0000';
+        deathMessage.style.fontFamily = 'Arial, sans-serif';
+        deathMessage.style.fontSize = '72px';
+        deathMessage.style.fontWeight = 'bold';
+        deathMessage.style.marginBottom = '50px';
+        
+        // Respawn button
+        const respawnButton = document.createElement('button');
+        respawnButton.textContent = 'RESPAWN';
+        respawnButton.style.padding = '15px 30px';
+        respawnButton.style.backgroundColor = '#333333';
+        respawnButton.style.color = '#ffffff';
+        respawnButton.style.border = '2px solid #666666';
+        respawnButton.style.borderRadius = '5px';
+        respawnButton.style.fontFamily = 'Arial, sans-serif';
+        respawnButton.style.fontSize = '24px';
+        respawnButton.style.cursor = 'pointer';
+        respawnButton.style.transition = 'all 0.2s ease';
+        
+        respawnButton.addEventListener('mouseover', () => {
+            respawnButton.style.backgroundColor = '#555555';
+        });
+        
+        respawnButton.addEventListener('mouseout', () => {
+            respawnButton.style.backgroundColor = '#333333';
+        });
+        
+        respawnButton.addEventListener('click', () => {
+            deathOverlay.style.opacity = '0';
+            setTimeout(() => {
+                deathOverlay.remove();
+                if (onRespawn) onRespawn();
+            }, 1000);
+        });
+        
+        deathOverlay.appendChild(deathMessage);
+        deathOverlay.appendChild(respawnButton);
+        document.body.appendChild(deathOverlay);
+        
+        // Fade in
+        setTimeout(() => {
+            deathOverlay.style.opacity = '1';
+        }, 100);
+    }
+    
     createLevelIndicator() {
         // Create circular icon with XP ring
         const iconContainer = document.createElement('div');
@@ -429,335 +771,6 @@ export class UIManager {
         
         // Store for reference
         this.statusElements.iconContainer = iconContainer;
-    }
-    
-    createSkillBar() {
-        // Create skill bar container that matches original style
-        const skillBarContainer = document.createElement('div');
-        skillBarContainer.style.display = 'flex';
-        skillBarContainer.style.gap = '10px';
-        skillBarContainer.style.padding = '5px 10px';
-        skillBarContainer.style.background = 'rgba(0, 0, 0, 0.6)';
-        skillBarContainer.style.borderRadius = '8px';
-        skillBarContainer.style.border = '1px solid #444';
-        
-        // Initialize skill slots
-        const keybinds = ['SPACE', 'Q', 'E', 'R', 'F'];
-        this.skillElements = {};
-        
-        for (let i = 1; i <= 5; i++) {
-            // Create skill container (button + keybind)
-            const skillContainer = document.createElement('div');
-            skillContainer.style.position = 'relative';
-            skillContainer.style.display = 'flex';
-            skillContainer.style.flexDirection = 'column';
-            skillContainer.style.alignItems = 'center';
-            
-            // Create the skill button
-            const skillButton = document.createElement('div');
-            skillButton.style.width = '45px';
-            skillButton.style.height = '45px';
-            skillButton.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            skillButton.style.border = '1px solid #666';
-            skillButton.style.borderRadius = '5px';
-            skillButton.style.display = 'flex';
-            skillButton.style.justifyContent = 'center';
-            skillButton.style.alignItems = 'center';
-            skillButton.style.color = '#ccc';
-            skillButton.style.fontSize = '22px';
-            skillButton.style.overflow = 'hidden';
-            skillButton.style.position = 'relative';
-            skillButton.dataset.empty = 'true';
-            
-            // Add keybind label under the button
-            const keyLabel = document.createElement('div');
-            keyLabel.style.marginTop = '4px';
-            keyLabel.style.color = '#999';
-            keyLabel.style.fontSize = '10px';
-            keyLabel.style.fontWeight = 'bold';
-            keyLabel.style.textShadow = '1px 1px 1px rgba(0,0,0,0.5)';
-            keyLabel.textContent = keybinds[i-1];
-            
-            // Add tooltip for the skill
-            const tooltip = document.createElement('div');
-            tooltip.className = 'tooltip';
-            tooltip.style.position = 'absolute';
-            tooltip.style.top = '-40px';
-            tooltip.style.left = '50%';
-            tooltip.style.transform = 'translateX(-50%)';
-            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-            tooltip.style.color = '#ffffff';
-            tooltip.style.padding = '5px 8px';
-            tooltip.style.borderRadius = '4px';
-            tooltip.style.fontSize = '12px';
-            tooltip.style.whiteSpace = 'nowrap';
-            tooltip.style.display = 'none';
-            tooltip.style.zIndex = '1500';
-            tooltip.style.pointerEvents = 'none';
-            tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
-            
-            // Store elements for later updates
-            this.skillElements[i] = {
-                container: skillContainer,
-                button: skillButton,
-                label: keyLabel,
-                tooltip: tooltip,
-                cooldownOverlay: null, // Will be added when needed
-                isOnCooldown: false
-            };
-            
-            // Show tooltip on hover
-            skillButton.addEventListener('mouseenter', () => {
-                if (skillButton.dataset.empty !== 'true') {
-                    tooltip.style.display = 'block';
-                }
-            });
-            
-            skillButton.addEventListener('mouseleave', () => {
-                tooltip.style.display = 'none';
-            });
-            
-            // Assemble skill UI elements
-            skillContainer.appendChild(skillButton);
-            skillContainer.appendChild(tooltip);
-            skillContainer.appendChild(keyLabel);
-            skillBarContainer.appendChild(skillContainer);
-        }
-        
-        return skillBarContainer;
-    }
-    
-    updateStatusBars(playerStats) {
-        if (!playerStats) return;
-        
-        // Update health/life ring
-        if (this.lifeRingFill && this.lifeTooltip) {
-            const healthPercent = (playerStats.currentLife / playerStats.maxLife) * 100;
-            // Update linear style fill from bottom to top (more like original)
-            this.lifeRingFill.style.clipPath = `inset(${100 - healthPercent}% 0 0 0)`;
-            
-            const lifeValue = this.lifeRingFill.parentElement.parentElement.querySelector('.value');
-            if (lifeValue) {
-                lifeValue.textContent = Math.round(playerStats.currentLife);
-            }
-            
-            this.lifeTooltip.textContent = `Life: ${Math.round(playerStats.currentLife)}/${playerStats.maxLife}`;
-        }
-        
-        // Update mana ring
-        if (this.manaRingFill && this.manaTooltip) {
-            const manaPercent = (playerStats.currentMana / playerStats.maxMana) * 100;
-            // Update linear style fill from bottom to top (more like original)
-            this.manaRingFill.style.clipPath = `inset(${100 - manaPercent}% 0 0 0)`;
-            
-            const manaValue = this.manaRingFill.parentElement.parentElement.querySelector('.value');
-            if (manaValue) {
-                manaValue.textContent = Math.round(playerStats.currentMana);
-            }
-            
-            this.manaTooltip.textContent = `Mana: ${Math.round(playerStats.currentMana)}/${playerStats.maxMana}`;
-        }
-        
-        // Update karma bar
-        if (this.karmaBarFill && this.karmaTooltip) {
-            const karmaPercent = (playerStats.currentKarma / playerStats.maxKarma) * 100;
-            this.karmaBarFill.style.width = `${karmaPercent}%`;
-            
-            // Update karma tooltip with path information
-            let karmaPath = 'Neutral';
-            if (karmaPercent < 30) {
-                karmaPath = 'Light';
-                this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
-            } else if (karmaPercent > 70) {
-                karmaPath = 'Dark';
-                this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
-            } else {
-                this.updateDarknessOverlay(0, 'transparent');
-            }
-            
-            this.karmaTooltip.textContent = `Karma: ${karmaPath} (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
-        }
-        
-        // Update XP fill
-        if (playerStats.level && this.levelText) {
-            this.levelText.textContent = playerStats.level;
-        }
-        
-        if (playerStats.experience !== undefined && 
-            playerStats.experienceToNextLevel !== undefined && 
-            this.xpRingFill && this.xpTooltip) {
-            
-            const xpPercent = (playerStats.experience / playerStats.experienceToNextLevel) * 100;
-            // Update linear fill from bottom to top - matching original style
-            this.xpRingFill.style.clipPath = `inset(${100 - xpPercent}% 0 0 0)`;
-            
-            this.xpTooltip.textContent = `Level ${playerStats.level}: ${playerStats.experience}/${playerStats.experienceToNextLevel} XP`;
-        }
-    }
-    
-    updateDarknessOverlay(opacity = 0, color = 'rgba(0, 0, 0, 0.2)') {
-        if (!this.darknessOverlay) return;
-        
-        if (opacity > 0) {
-            this.darknessOverlay.style.backgroundColor = color;
-            this.darknessOverlay.style.opacity = opacity.toString();
-            this.darknessOverlay.style.display = 'block';
-        } else {
-            this.darknessOverlay.style.opacity = '0';
-            setTimeout(() => {
-                this.darknessOverlay.style.display = 'none';
-            }, 300);
-        }
-    }
-    
-    updateSkillBar() {
-        if (!this.game.skills || !this.skillElements) {
-            return;
-        }
-        
-        // Get active skills from the game
-        const activeSkills = this.game.activeSkills || new Set();
-        
-        // Update skill buttons based on player's path and available skills
-        for (let i = 1; i <= 5; i++) {
-            const slotElement = this.skillElements[i];
-            if (!slotElement || !slotElement.button) continue;
-            
-            // Reset slot
-            slotElement.button.innerHTML = '';
-            slotElement.button.dataset.empty = 'true';
-            slotElement.tooltip.textContent = '';
-            
-            // Bind martial arts to slot 1 if player is on light path and has the skill
-            if (i === 1 && 
-                this.game.skills.martial_arts && 
-                this.game.playerStats && 
-                this.game.playerStats.path === 'light' && 
-                activeSkills.has('martial_arts')) {
-                
-                const skill = this.game.skills.martial_arts;
-                
-                // Create skill icon
-                const icon = document.createElement('div');
-                icon.textContent = '👊';
-                icon.style.fontSize = '24px';
-                slotElement.button.appendChild(icon);
-                slotElement.button.dataset.empty = 'false';
-                slotElement.button.dataset.skill = 'martial_arts';
-                
-                // Update tooltip
-                slotElement.tooltip.textContent = `${skill.name} (${skill.damage} dmg)`;
-                
-                // Check cooldown
-                const now = Date.now();
-                const cooldownRemaining = skill.lastUsed + skill.cooldown - now;
-                
-                // Show cooldown overlay if on cooldown
-                if (cooldownRemaining > 0) {
-                    const cooldownOverlay = document.createElement('div');
-                    cooldownOverlay.style.position = 'absolute';
-                    cooldownOverlay.style.top = '0';
-                    cooldownOverlay.style.left = '0';
-                    cooldownOverlay.style.width = '100%';
-                    cooldownOverlay.style.height = '100%';
-                    cooldownOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-                    cooldownOverlay.style.display = 'flex';
-                    cooldownOverlay.style.justifyContent = 'center';
-                    cooldownOverlay.style.alignItems = 'center';
-                    cooldownOverlay.style.color = 'white';
-                    cooldownOverlay.style.fontSize = '16px';
-                    cooldownOverlay.style.fontWeight = 'bold';
-                    cooldownOverlay.textContent = Math.ceil(cooldownRemaining / 1000);
-                    
-                    slotElement.button.appendChild(cooldownOverlay);
-                }
-            }
-        }
-    }
-    
-    createDarknessOverlay() {
-        // Create overlay for karma effects
-        const overlay = document.createElement('div');
-        overlay.style.position = 'fixed';
-        overlay.style.top = '0';
-        overlay.style.left = '0';
-        overlay.style.width = '100%';
-        overlay.style.height = '100%';
-        overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-        overlay.style.pointerEvents = 'none'; // Allow clicking through
-        overlay.style.zIndex = '500'; // Below UI elements but above game
-        overlay.style.opacity = '0'; // Initially transparent
-        overlay.style.transition = 'opacity 0.5s ease';
-        overlay.style.display = 'none';
-        
-        document.body.appendChild(overlay);
-        this.darknessOverlay = overlay;
-    }
-    
-    createDeathOverlay(onRespawn) {
-        // Create a fullscreen darkened overlay
-        const deathOverlay = document.createElement('div');
-        deathOverlay.style.position = 'fixed';
-        deathOverlay.style.top = '0';
-        deathOverlay.style.left = '0';
-        deathOverlay.style.width = '100%';
-        deathOverlay.style.height = '100%';
-        deathOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        deathOverlay.style.zIndex = '2000';
-        deathOverlay.style.display = 'flex';
-        deathOverlay.style.flexDirection = 'column';
-        deathOverlay.style.justifyContent = 'center';
-        deathOverlay.style.alignItems = 'center';
-        deathOverlay.style.opacity = '0';
-        deathOverlay.style.transition = 'opacity 1s ease';
-        
-        // Death message
-        const deathMessage = document.createElement('div');
-        deathMessage.textContent = 'YOU DIED';
-        deathMessage.style.color = '#ff0000';
-        deathMessage.style.textShadow = '0 0 10px #ff0000';
-        deathMessage.style.fontFamily = 'Arial, sans-serif';
-        deathMessage.style.fontSize = '72px';
-        deathMessage.style.fontWeight = 'bold';
-        deathMessage.style.marginBottom = '50px';
-        
-        // Respawn button
-        const respawnButton = document.createElement('button');
-        respawnButton.textContent = 'RESPAWN';
-        respawnButton.style.padding = '15px 30px';
-        respawnButton.style.backgroundColor = '#333333';
-        respawnButton.style.color = '#ffffff';
-        respawnButton.style.border = '2px solid #666666';
-        respawnButton.style.borderRadius = '5px';
-        respawnButton.style.fontFamily = 'Arial, sans-serif';
-        respawnButton.style.fontSize = '24px';
-        respawnButton.style.cursor = 'pointer';
-        respawnButton.style.transition = 'all 0.2s ease';
-        
-        respawnButton.addEventListener('mouseover', () => {
-            respawnButton.style.backgroundColor = '#555555';
-        });
-        
-        respawnButton.addEventListener('mouseout', () => {
-            respawnButton.style.backgroundColor = '#333333';
-        });
-        
-        respawnButton.addEventListener('click', () => {
-            deathOverlay.style.opacity = '0';
-            setTimeout(() => {
-                deathOverlay.remove();
-                if (onRespawn) onRespawn();
-            }, 1000);
-        });
-        
-        deathOverlay.appendChild(deathMessage);
-        deathOverlay.appendChild(respawnButton);
-        document.body.appendChild(deathOverlay);
-        
-        // Fade in
-        setTimeout(() => {
-            deathOverlay.style.opacity = '1';
-        }, 100);
     }
     
     showDialogue(npcType) {
@@ -1148,7 +1161,6 @@ export class UIManager {
             this.notificationElement.style.transform = 'translateX(-50%)';
             this.notificationElement.style.padding = '10px 20px';
             this.notificationElement.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            this.notificationElement.style.borderRadius = '5px';
             this.notificationElement.style.color = 'white';
             this.notificationElement.style.fontFamily = 'Arial, sans-serif';
             this.notificationElement.style.fontSize = '16px';

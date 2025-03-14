@@ -409,6 +409,41 @@ export class PlayerManager {
         });
     }
     
+    // Update player color based on path
+    updatePlayerColor(player) {
+        if (!player) return;
+        
+        // Get the player's path
+        const path = player.userData?.path;
+        
+        // Set color based on path
+        let color = this.defaultPlayerColor; // Default neutral gray
+        
+        if (path === 'light') {
+            color = this.lightPathColor; // Blue for light path
+        } else if (path === 'dark') {
+            color = this.darkPathColor; // Red for dark path
+        }
+        
+        // Apply color to player model if it has a material
+        if (player.children && player.children.length > 0) {
+            player.traverse((child) => {
+                if (child.isMesh && child.material) {
+                    // If material is an array, update all materials
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(mat => {
+                            if (mat.color) mat.color.setHex(color);
+                        });
+                    } else if (child.material.color) {
+                        child.material.color.setHex(color);
+                    }
+                }
+            });
+        }
+        
+        return color;
+    }
+    
     // Add a proper cleanup method
     cleanup() {
         console.log('PlayerManager: Cleaning up player references');
