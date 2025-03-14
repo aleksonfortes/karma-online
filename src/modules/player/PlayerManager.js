@@ -61,7 +61,7 @@ export class PlayerManager {
     
     async loadCharacterModel() {
         try {
-            // If model is already loaded, return it
+            // Check if the model is already loaded and cached
             if (this.characterModel) {
                 return this.characterModel;
             }
@@ -338,7 +338,13 @@ export class PlayerManager {
         
         // Only send position updates for local player at controlled intervals
         const now = Date.now();
-        if (this.game.localPlayer && now - this.lastPositionUpdate > this.updateInterval && !this.pendingPositionUpdate) {
+        if (this.game.localPlayer && 
+            now - this.lastPositionUpdate > this.updateInterval && 
+            !this.pendingPositionUpdate && 
+            this.game.networkManager && 
+            this.game.networkManager.socket && 
+            this.game.networkManager.socket.connected) {
+            
             this.lastPositionUpdate = now;
             
             // Send position update to server
@@ -435,47 +441,43 @@ export class PlayerManager {
      * @param {THREE.Object3D} player - The player object
      */
     createHealthBar(player) {
-        if (!player || player.userData.healthBar) {
-            return; // Skip if player doesn't exist or already has a health bar
+        if (!player) return;
+        
+        // If player already has a health bar, remove it first to recreate it
+        if (player.userData.healthBar) {
+            player.remove(player.userData.healthBar);
+            player.userData.healthBar = null;
         }
         
-        console.log('Creating health bar for player:', player.userData.name || 'Unknown');
+        // Store the player ID for debugging
+        if (player.userData && player.userData.playerId) {
+            player.userData.healthBarPlayerId = player.userData.playerId;
+        }
         
-        // Create a sprite for the health bar to ensure it always faces the camera
-        const healthBarWidth = 1.0;
-        const healthBarHeight = 0.12;
-        
-        // Create a canvas for the health bar
+        // Create canvas for health bar
         const canvas = document.createElement('canvas');
-        canvas.width = 100;
-        canvas.height = 12;
+        canvas.width = 64;
+        canvas.height = 8;
         const context = canvas.getContext('2d');
         
-        // Draw the background (dark backing)
-        context.fillStyle = '#222222';
-        context.fillRect(0, 0, 100, 12);
-        
-        // Draw the health bar (red)
-        context.fillStyle = '#ff0000';
-        context.fillRect(0, 0, 100, 12);
-        
-        // Create a texture from the canvas
+        // Create sprite for health bar
         const texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
-        
-        // Create a sprite material
-        const spriteMaterial = new THREE.SpriteMaterial({
+        const material = new THREE.SpriteMaterial({
             map: texture,
             transparent: true,
+            sizeAttenuation: true, // Make the sprite maintain consistent size regardless of distance
             depthTest: false // Ensure it renders on top
         });
         
-        // Create the sprite
-        const healthBarSprite = new THREE.Sprite(spriteMaterial);
+        const healthBarSprite = new THREE.Sprite(material);
+        
+        // Set size and position
+        const healthBarWidth = 0.7;  // Smaller width
+        const healthBarHeight = 0.08; // Smaller height
         healthBarSprite.scale.set(healthBarWidth, healthBarHeight, 1);
         
-        // Position the health bar directly on top of the player's head
-        let playerHeight = 1.8; // Default height
+        // Calculate the proper height for positioning the health bar
+        let playerHeight = 1.8; // Default height for a standard character
         
         // Try to determine actual player height from the mesh
         if (player.children && player.children.length > 0) {
@@ -483,28 +485,38 @@ export class PlayerManager {
             const bbox = new THREE.Box3().setFromObject(player);
             if (bbox.max.y !== Infinity && bbox.min.y !== -Infinity) {
                 playerHeight = bbox.max.y - bbox.min.y;
-                console.log(`Calculated player height: ${playerHeight}`);
             }
+        } else if (player.geometry && player.geometry.parameters) {
+            playerHeight = player.geometry.parameters.height || 1.8;
+        } else if (player.userData.height) {
+            playerHeight = player.userData.height;
         }
         
-        // Position the bar directly on top of the head
-        healthBarSprite.position.y = playerHeight - 0.15; // Position closer to the head
+        // Position health bar above player's head
+        healthBarSprite.position.y = playerHeight + 0.2; // Position above the head with some margin
         
-        // Store the original width for scaling
-        healthBarSprite.userData = {
-            originalWidth: healthBarWidth,
-            canvas: canvas,
-            context: context
-        };
+        console.log(`Setting health bar position for player ${player.userData.playerId || 'unknown'} at height ${playerHeight + 0.2}`);
+        
+        // Store references in player userData
+        player.userData.healthBarCanvas = canvas;
+        player.userData.healthBarContext = context;
+        player.userData.healthBar = healthBarSprite;
         
         // Add the health bar to the player
         player.add(healthBarSprite);
         
-        // Store a reference to the health bar in the player's userData
-        player.userData.healthBar = healthBarSprite;
+        // Initialize with default health if not set
+        if (!player.userData.stats) {
+            player.userData.stats = {
+                life: 100,
+                maxLife: 100
+            };
+        }
         
         // Update the health bar initially
         this.updateHealthBar(player);
+        
+        console.log(`Created health bar for player ${player.userData.healthBarPlayerId || player.userData.playerId || 'unknown'}`);
     }
     
     /**
@@ -512,18 +524,74 @@ export class PlayerManager {
      * @param {THREE.Object3D} player - The player object
      */
     updateHealthBar(player) {
-        if (!player || !player.userData.healthBar) {
+        if (!player || !player.userData) {
+            return;
+        }
+        
+        // Create health bar if it doesn't exist
+        if (!player.userData.healthBar) {
+            this.createHealthBar(player);
             return;
         }
         
         const healthBarSprite = player.userData.healthBar;
-        const canvas = healthBarSprite.userData.canvas;
-        const context = healthBarSprite.userData.context;
+        const canvas = player.userData.healthBarCanvas;
+        const context = player.userData.healthBarContext;
         
-        // Get health percentage (default to 100% if not available)
+        if (!canvas || !context) {
+            console.warn('Missing canvas or context for health bar, recreating...');
+            this.createHealthBar(player);
+            return;
+        }
+        
+        // Calculate health percentage
         let healthPercent = 1.0;
         if (player.userData.stats && player.userData.stats.life !== undefined && player.userData.stats.maxLife !== undefined) {
-            healthPercent = Math.max(0, Math.min(1, player.userData.stats.life / player.userData.stats.maxLife));
+            // Store the current health values to prevent unexpected changes
+            const currentLife = player.userData.stats.life;
+            const maxLife = player.userData.stats.maxLife;
+            
+            // Calculate percentage with bounds checking
+            healthPercent = Math.max(0, Math.min(1, currentLife / maxLife));
+            
+            // Get player ID for debugging
+            const playerId = player.userData.healthBarPlayerId || player.userData.playerId || 'unknown';
+            
+            // Only log significant changes to reduce spam
+            if (player.userData.lastHealthPercent === undefined || 
+                Math.abs(player.userData.lastHealthPercent - healthPercent) > 0.05) {
+                
+                // Only log if this is a new value or a significant change
+                if (player.userData.lastHealthPercent !== undefined) {
+                    console.log(`Health bar updated for player ${playerId}: ${Math.round(player.userData.lastHealthPercent * 100)}% -> ${Math.round(healthPercent * 100)}%`);
+                }
+                
+                // Store the current health percentage for comparison in future updates
+                player.userData.lastHealthPercent = healthPercent;
+                
+                // Force the health bar to be visible
+                if (healthBarSprite.material) {
+                    healthBarSprite.material.visible = true;
+                    healthBarSprite.visible = true;
+                }
+                
+                // CRITICAL FIX: Lock the health value to prevent oscillation
+                // This ensures that once we've updated to a value, we don't update again for a short period
+                if (!player.userData.healthLocked) {
+                    player.userData.healthLocked = true;
+                    
+                    // Unlock after a delay to allow for new legitimate updates
+                    setTimeout(() => {
+                        player.userData.healthLocked = false;
+                    }, 1000); // 1 second lock to prevent oscillation
+                } else {
+                    // If we're locked, don't update the visual
+                    return;
+                }
+            } else {
+                // No significant change, so don't update the visual
+                return;
+            }
         }
         
         // Clear the canvas
@@ -533,13 +601,15 @@ export class PlayerManager {
         context.fillStyle = '#222222';
         context.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Draw the health bar (red)
+        // Always use red for health bar to match original design
         context.fillStyle = '#ff0000';
         const healthWidth = Math.floor(canvas.width * healthPercent);
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
-        healthBarSprite.material.map.needsUpdate = true;
+        if (healthBarSprite.material && healthBarSprite.material.map) {
+            healthBarSprite.material.map.needsUpdate = true;
+        }
     }
     
     /**
@@ -649,9 +719,16 @@ export class PlayerManager {
         if (player === this.game.localPlayer) {
             this.game.isAlive = false;
             
-            // Show death screen
+            // Show death message using the UI manager
             if (this.game.uiManager) {
-                this.game.uiManager.showDeathScreen();
+                // Check if showDeathScreen exists, otherwise use showNotification
+                if (typeof this.game.uiManager.showDeathScreen === 'function') {
+                    this.game.uiManager.showDeathScreen();
+                } else if (typeof this.game.uiManager.showNotification === 'function') {
+                    this.game.uiManager.showNotification('You have died! Respawning in ' + (this.respawnDelay / 1000) + ' seconds...', '#ff0000');
+                } else {
+                    console.warn('No UI method available to show death message');
+                }
             }
             
             // Notify server

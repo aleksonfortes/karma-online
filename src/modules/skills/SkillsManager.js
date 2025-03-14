@@ -14,8 +14,8 @@ export class SkillsManager {
                 cooldown: 2000,
                 lastUsed: 0,
                 damage: 75,
-                range: 3,
-                description: 'Basic martial arts attack',
+                range: 1.5,
+                description: 'Close-range martial arts attack. Requires target and proximity.',
                 path: 'light'
             },
             dark_strike: {
@@ -82,6 +82,7 @@ export class SkillsManager {
 
         // Check if skill is on cooldown
         if (this.skills.martial_arts.lastUsed > 0 && Date.now() - this.skills.martial_arts.lastUsed < this.skills.martial_arts.cooldown) {
+            console.log('Martial Arts is on cooldown');
             return;
         }
 
@@ -92,13 +93,48 @@ export class SkillsManager {
             if (this.game.karmaManager && this.game.karmaManager.chosenPath === 'light') {
                 this.game.activeSkills.add('martial_arts');
             } else {
+                console.log('Player does not have the Martial Arts skill');
                 return;
             }
         }
         
         // Check if player is on light path - use karmaManager.chosenPath for consistency
-        // This is the key fix - we need to check the path in the karmaManager, not playerStats
         if (this.game.karmaManager.chosenPath !== 'light') {
+            console.log('Only Light path players can use Martial Arts');
+            return;
+        }
+        
+        // Check if a target is selected
+        if (!this.game.targetingManager || !this.game.targetingManager.currentTarget) {
+            console.log('No target selected for Martial Arts');
+            return;
+        }
+        
+        // Check if the target is a player
+        if (this.game.targetingManager.currentTarget.type !== 'player') {
+            console.log('Martial Arts can only be used on players');
+            return;
+        }
+        
+        // Get the target player directly from the currentTarget object
+        const targetId = this.game.targetingManager.currentTarget.id;
+        const targetPlayer = this.game.targetingManager.currentTarget.object;
+        
+        if (!targetPlayer) {
+            console.log('Target player object not found');
+            return;
+        }
+        
+        // Check if the target is in range
+        const playerPos = this.game.localPlayer.position;
+        const targetPos = targetPlayer.position;
+        
+        const dx = targetPos.x - playerPos.x;
+        const dz = targetPos.z - playerPos.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
+        if (distance > this.skills.martial_arts.range) {
+            console.log(`Target is too far away (${distance.toFixed(2)} units). Need to be within ${this.skills.martial_arts.range} units.`);
             return;
         }
         
@@ -107,20 +143,15 @@ export class SkillsManager {
             return;
         }
         
-        // Find targets in range
-        const targets = this.findTargetsInRange(this.skills.martial_arts.range);
-        if (targets.length === 0) {
-            console.log('No targets in range');
-            return;
-        }
-        
-        // Apply damage to targets
-        targets.forEach(target => {
-            this.applyDamageEffect(target, this.skills.martial_arts.damage);
-        });
+        // Apply damage to the target
+        this.applyDamageEffect({
+            player: targetPlayer,
+            playerId: targetId,
+            distance: distance
+        }, this.skills.martial_arts.damage);
         
         // Create visual effect
-        this.createMartialArtsEffect();
+        this.createMartialArtsEffect(targetPlayer);
     }
     
     useDarkStrike() {
@@ -171,39 +202,65 @@ export class SkillsManager {
         this.createDarkStrikeEffect();
     }
     
-    createMartialArtsEffect() {
+    createMartialArtsEffect(targetPlayer) {
         if (!this.game.localPlayer || !this.game.scene) return;
         
-        // Create a visual effect for the martial arts attack - simpler version matching original
-        const effectGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        // Create a visual effect for the martial arts attack - more dynamic close-range effect
+        const effectGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
         const effectMaterial = new THREE.MeshBasicMaterial({
             color: 0xffcc00,
             transparent: true,
             opacity: 0.7
         });
         
-        const effect = new THREE.Mesh(effectGeometry, effectMaterial);
+        // Create multiple particles for a more dynamic effect
+        const particleCount = 5;
+        const particles = [];
         
-        // Position in front of player
-        const playerPos = this.game.localPlayer.position.clone();
-        const forwardVec = new THREE.Vector3(0, 0, -1).applyQuaternion(this.game.localPlayer.quaternion);
-        effect.position.copy(playerPos);
-        effect.position.y += 1; // At chest level
-        effect.position.add(forwardVec.multiplyScalar(1));
-        
-        this.game.scene.add(effect);
+        for (let i = 0; i < particleCount; i++) {
+            const particle = new THREE.Mesh(effectGeometry, effectMaterial.clone());
+            
+            // Position between player and target
+            const playerPos = this.game.localPlayer.position.clone();
+            const targetPos = targetPlayer ? targetPlayer.position.clone() : playerPos.clone().add(new THREE.Vector3(0, 0, -1.5));
+            
+            // Calculate position between player and target with some randomness
+            const lerpFactor = 0.5 + (Math.random() * 0.3 - 0.15); // 0.35 to 0.65
+            particle.position.lerpVectors(playerPos, targetPos, lerpFactor);
+            
+            // Add some height and randomness
+            particle.position.y += 1 + Math.random() * 0.5; // Between 1 and 1.5 units high
+            particle.position.x += Math.random() * 0.4 - 0.2; // Random x offset
+            particle.position.z += Math.random() * 0.4 - 0.2; // Random z offset
+            
+            this.game.scene.add(particle);
+            particles.push(particle);
+        }
         
         // Animate and remove
         let scale = 1;
         const animate = () => {
-            scale -= 0.1;
-            effect.scale.set(scale, scale, scale);
-            effect.material.opacity = scale;
+            scale -= 0.05;
+            
+            for (const particle of particles) {
+                particle.scale.set(scale, scale, scale);
+                particle.material.opacity = scale;
+                
+                // Add some movement
+                particle.position.y -= 0.02;
+            }
             
             if (scale <= 0) {
-                this.game.scene.remove(effect);
+                // Remove all particles
+                for (const particle of particles) {
+                    this.game.scene.remove(particle);
+                }
                 effectGeometry.dispose();
-                effectMaterial.dispose();
+                
+                // Dispose all materials
+                for (const particle of particles) {
+                    particle.material.dispose();
+                }
                 return;
             }
             
@@ -300,17 +357,19 @@ export class SkillsManager {
             return;
         }
         
-        // Send damage event to server
+        // Send skill use event to server (not skillDamage)
         if (this.game.networkManager && this.game.networkManager.socket) {
-            this.game.networkManager.socket.emit('skillDamage', {
+            this.game.networkManager.socket.emit('useSkill', {
                 targetId: target.playerId,
                 damage: damage,
                 skillName: 'martial_arts'
             });
         }
         
-        // Create visual effect
-        this.createDamageEffect(target.player, damage);
+        // Create visual effect only if the target player exists
+        if (target.player) {
+            this.createDamageEffect(target.player, damage);
+        }
     }
     
     createDamageEffect(targetPlayer, damage) {
@@ -346,36 +405,58 @@ export class SkillsManager {
         
         // Convert 3D position to screen coordinates
         const vector = targetPosition.clone();
-        vector.project(this.game.camera);
         
-        const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
-        
-        damageText.style.left = `${x}px`;
-        damageText.style.top = `${y}px`;
-        
-        // Animate damage number
-        let startTime = Date.now();
-        let duration = 1000; // 1 second
-        
-        const animateDamage = () => {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            
-            damageText.style.opacity = 1 - progress;
-            damageText.style.transform = `translateY(${-50 * progress}px)`;
-            
-            if (progress < 1) {
-                requestAnimationFrame(animateDamage);
+        // Safely project the vector
+        try {
+            if (this.game.camera) {
+                vector.project(this.game.camera);
+            } else if (this.game.cameraManager && this.game.cameraManager.getCamera()) {
+                vector.project(this.game.cameraManager.getCamera());
             } else {
+                // If no camera is available, don't show the damage number
                 const element = document.getElementById(damageId);
                 if (element) {
                     document.body.removeChild(element);
                 }
+                return;
             }
-        };
-        
-        animateDamage();
+            
+            const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+            const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+            
+            damageText.style.left = `${x}px`;
+            damageText.style.top = `${y}px`;
+            
+            // Animate damage number
+            let startTime = Date.now();
+            let duration = 1000; // 1 second
+            
+            const animateDamage = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                
+                damageText.style.opacity = 1 - progress;
+                damageText.style.transform = `translateY(${-50 * progress}px)`;
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animateDamage);
+                } else {
+                    const element = document.getElementById(damageId);
+                    if (element) {
+                        document.body.removeChild(element);
+                    }
+                }
+            };
+            
+            animateDamage();
+        } catch (error) {
+            console.error('Error displaying damage effect:', error);
+            // Clean up if there was an error
+            const element = document.getElementById(damageId);
+            if (element) {
+                document.body.removeChild(element);
+            }
+        }
     }
     
     cleanup() {

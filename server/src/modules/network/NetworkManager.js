@@ -13,6 +13,7 @@ export class NetworkManager {
         this.lastUpdateTime = new Map();
         this.playerLastPositions = new Map();
         this._lastLogs = {};
+        this.sockets = new Map();
         
         // Initialize socket server
         this.io = new Server(httpServer, {
@@ -40,6 +41,9 @@ export class NetworkManager {
             
             // Log player connection with total count
             console.log(`Player connected: ${socket.id} (Total Players: ${this.playerManager.getPlayerCount()})`);
+            
+            // Store the socket
+            this.sockets.set(socket.id, socket);
             
             // Send current game state to new player including NPCs
             socket.emit('initGameState', {
@@ -166,83 +170,133 @@ export class NetworkManager {
                 console.log(`Player ${socket.id} successfully chose path: ${data.path}`);
             });
 
-            // Handle skill damage (PVP)
-            socket.on('skillDamage', (data) => {
-                // Validate data
-                if (!data || !data.targetId || typeof data.damage !== 'number' || !data.skillName) {
-                    this.logSecurityEvent(`Invalid skill damage data from ${socket.id}`, `invalid-skill-damage-${socket.id}`);
+            // Handle skill use
+            socket.on('useSkill', (data) => {
+                // Validate skill data
+                if (!data || !data.skillName) {
+                    console.warn(`Invalid skill data from player ${socket.id}`);
                     return;
                 }
                 
-                // Get target player
-                const targetPlayer = this.playerManager.getPlayer(data.targetId);
-                if (!targetPlayer) {
-                    console.log(`Target player ${data.targetId} not found for skill damage`);
+                console.log(`Player ${socket.id} is using skill: ${data.skillName}`);
+                
+                // Get player and target
+                const player = this.playerManager.getPlayer(socket.id);
+                
+                if (!player) {
+                    console.warn(`Player ${socket.id} not found for skill use`);
                     return;
                 }
                 
-                // Get source player
-                const sourcePlayer = this.playerManager.getPlayer(socket.id);
-                if (!sourcePlayer) {
-                    console.log(`Source player ${socket.id} not found for skill damage`);
-                    return;
-                }
-                
-                // Validate range (prevent cheating)
-                const sourcePos = sourcePlayer.position;
-                const targetPos = targetPlayer.position;
-                const dx = targetPos.x - sourcePos.x;
-                const dz = targetPos.z - sourcePos.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                // Get skill range from skill definition
-                let skillRange = 3; // Default range
-                if (data.skillName === 'martial_arts') {
-                    skillRange = 3;
-                } else if (data.skillName === 'dark_strike') {
-                    skillRange = 3;
-                }
-                
-                if (distance > skillRange) {
-                    console.log(`Player ${socket.id} tried to attack ${data.targetId} but is out of range (${distance} > ${skillRange})`);
-                    return;
-                }
-                
-                // Apply damage to target
-                targetPlayer.stats.life = Math.max(0, targetPlayer.stats.life - data.damage);
-                
-                // Check if target died
-                if (targetPlayer.stats.life <= 0) {
-                    targetPlayer.isDead = true;
-                    console.log(`Player ${data.targetId} was killed by ${socket.id}`);
+                // Handle different skill types
+                if (data.skillName === 'martial_arts' || data.skillName === 'dark_strike') {
+                    // Validate target
+                    if (!data.targetId) {
+                        console.warn(`No target specified for skill ${data.skillName} by player ${socket.id}`);
+                        return;
+                    }
                     
-                    // Emit death event to target
-                    this.io.to(data.targetId).emit('playerDied', {
-                        killerId: socket.id
+                    const targetPlayer = this.playerManager.getPlayer(data.targetId);
+                    
+                    if (!targetPlayer) {
+                        console.warn(`Target player ${data.targetId} not found for skill ${data.skillName} by player ${socket.id}`);
+                        return;
+                    }
+                    
+                    // Check if target is in range
+                    const distance = this.calculateDistance(player.position, targetPlayer.position);
+                    let skillRange = 1.5; // Default range
+                    
+                    if (data.skillName === 'martial_arts') {
+                        skillRange = 3;
+                    } else if (data.skillName === 'dark_strike') {
+                        skillRange = 3;
+                    }
+                    
+                    if (distance > skillRange) {
+                        console.log(`Player ${socket.id} tried to attack ${data.targetId} but is out of range (${distance} > ${skillRange})`);
+                        return;
+                    }
+                    
+                    // Apply damage to target
+                    if (!targetPlayer.stats) {
+                        targetPlayer.stats = {
+                            life: 100,
+                            maxLife: 100,
+                            level: 1
+                        };
+                    }
+                    
+                    // Ensure attacker has stats initialized
+                    if (!player.stats) {
+                        player.stats = {
+                            life: 100,
+                            maxLife: 100,
+                            level: 1
+                        };
+                    }
+                    
+                    // Calculate and apply damage
+                    const previousLife = targetPlayer.stats.life;
+                    targetPlayer.stats.life = Math.max(0, targetPlayer.stats.life - data.damage);
+                    const damageDealt = previousLife - targetPlayer.stats.life;
+                    
+                    console.log(`Player ${socket.id} dealt ${damageDealt} damage to ${data.targetId} using ${data.skillName}. Target health: ${targetPlayer.stats.life}/${targetPlayer.stats.maxLife}`);
+                    
+                    // Check if target died
+                    if (targetPlayer.stats.life <= 0) {
+                        targetPlayer.isDead = true;
+                        console.log(`Player ${data.targetId} was killed by ${socket.id}`);
+                        
+                        // Emit death event to target
+                        this.io.to(data.targetId).emit('playerDied', {
+                            killerId: socket.id
+                        });
+                        
+                        // Handle player death on server
+                        this.playerManager.handlePlayerDeath(data.targetId, socket.id);
+                    }
+                    
+                    // Notify target of damage
+                    this.io.to(data.targetId).emit('skillDamage', {
+                        sourceId: socket.id,
+                        targetId: data.targetId,
+                        damage: damageDealt,
+                        skillName: data.skillName
                     });
                     
-                    // Handle player death on server
-                    this.playerManager.handlePlayerDeath(data.targetId, socket.id);
+                    // Store the last health update time for this player to prevent rapid oscillations
+                    if (!targetPlayer.lastHealthUpdateTime) {
+                        targetPlayer.lastHealthUpdateTime = {};
+                    }
+                    targetPlayer.lastHealthUpdateTime[data.targetId] = Date.now();
+                    
+                    // IMPORTANT: Broadcast health update to ALL players immediately
+                    // This ensures everyone sees the updated health bars in real-time
+                    this.io.emit('lifeUpdate', {
+                        id: data.targetId,
+                        life: targetPlayer.stats.life,
+                        maxLife: targetPlayer.stats.maxLife || 100,
+                        timestamp: Date.now() // Add timestamp for client-side validation
+                    });
+                    
+                    // Also broadcast the attacker's stats to ensure everyone has the latest data
+                    this.io.emit('lifeUpdate', {
+                        id: socket.id,
+                        life: player.stats.life,
+                        maxLife: player.stats.maxLife || 100,
+                        timestamp: Date.now() // Add timestamp for client-side validation
+                    });
+                    
+                    // Broadcast damage effect to all players
+                    this.io.emit('damageEffect', {
+                        sourceId: socket.id,
+                        targetId: data.targetId,
+                        damage: damageDealt,
+                        skillName: data.skillName,
+                        isCritical: false
+                    });
                 }
-                
-                // Notify target of damage
-                this.io.to(data.targetId).emit('skillDamage', {
-                    sourceId: socket.id,
-                    targetId: data.targetId,
-                    damage: data.damage,
-                    skillName: data.skillName
-                });
-                
-                // Broadcast damage effect to all players
-                this.io.emit('damageEffect', {
-                    sourceId: socket.id,
-                    targetId: data.targetId,
-                    damage: data.damage,
-                    skillName: data.skillName,
-                    isCritical: false
-                });
-                
-                console.log(`Player ${socket.id} dealt ${data.damage} damage to ${data.targetId} using ${data.skillName}`);
             });
             
             // Handle player death notification
@@ -257,29 +311,48 @@ export class NetworkManager {
             });
             
             // Handle player respawn request
-            socket.on('requestRespawn', () => {
+            socket.on('respawn', () => {
+                console.log(`Player ${socket.id} requested respawn`);
+                
+                // Get the player
                 const player = this.playerManager.getPlayer(socket.id);
                 if (!player) {
+                    console.warn(`Player ${socket.id} not found for respawn`);
                     return;
                 }
                 
-                // Respawn player
-                this.playerManager.respawnPlayer(socket.id);
+                // Reset player stats
+                if (!player.stats) {
+                    player.stats = {};
+                }
                 
-                // Send respawn confirmation with new position
-                socket.emit('respawnConfirmed', {
-                    position: player.position,
-                    life: player.life,
-                    maxLife: player.maxLife
-                });
+                player.stats.life = 100;
+                player.stats.maxLife = 100;
+                player.isDead = false;
                 
-                // Broadcast to other players
-                socket.broadcast.emit('playerRespawned', {
+                // Choose a random spawn point
+                const spawnPoints = this.playerManager.getSpawnPoints();
+                const randomSpawn = spawnPoints[Math.floor(Math.random() * spawnPoints.length)];
+                
+                if (randomSpawn) {
+                    player.position = { ...randomSpawn };
+                }
+                
+                // Notify all clients about the respawn
+                this.io.emit('playerRespawned', {
                     id: socket.id,
-                    position: player.position
+                    position: player.position,
+                    stats: player.stats
                 });
                 
-                console.log(`Player ${socket.id} respawned`);
+                // Also send a life update to ensure health bars are updated
+                this.io.emit('lifeUpdate', {
+                    id: socket.id,
+                    life: player.stats.life,
+                    maxLife: player.stats.maxLife
+                });
+                
+                console.log(`Player ${socket.id} respawned at position:`, player.position);
             });
 
             // Handle player reset request (for reconnections)
@@ -302,6 +375,25 @@ export class NetworkManager {
                 }
             });
 
+            // Handle request for life update
+            socket.on('requestLifeUpdate', (data) => {
+                if (!data || !data.playerId) {
+                    return;
+                }
+                
+                const player = this.playerManager.getPlayer(data.playerId);
+                if (!player || !player.stats) {
+                    return;
+                }
+                
+                // Broadcast the player's current health to all clients
+                this.io.emit('lifeUpdate', {
+                    id: data.playerId,
+                    life: player.stats.life,
+                    maxLife: player.stats.maxLife || 100
+                });
+            });
+
             // Handle disconnection
             socket.on('disconnect', () => {
                 const player = this.playerManager.removePlayer(socket.id);
@@ -310,6 +402,23 @@ export class NetworkManager {
                     this.io.emit('playerLeft', socket.id);
                     console.log(`Player left: ${player.displayName} (Total Players: ${this.playerManager.getPlayerCount()})`);
                 }
+            });
+            
+            // Broadcast player stats to all clients every second to ensure synchronization
+            const statsInterval = setInterval(() => {
+                const player = this.playerManager.getPlayer(socket.id);
+                if (player && player.stats) {
+                    this.io.emit('lifeUpdate', {
+                        id: socket.id,
+                        life: player.stats.life,
+                        maxLife: player.stats.maxLife || 100
+                    });
+                }
+            }, 1000); // Update every second
+            
+            // Clear interval on disconnect
+            socket.on('disconnect', () => {
+                clearInterval(statsInterval);
             });
         });
     }
@@ -446,6 +555,15 @@ export class NetworkManager {
     verifyMessageSignature(message, signature) {
         // Implementation of message signature verification
         return true; // Placeholder
+    }
+    
+    /**
+     * Calculate distance between two positions
+     */
+    calculateDistance(pos1, pos2) {
+        const dx = pos2.x - pos1.x;
+        const dz = pos2.z - pos1.z;
+        return Math.sqrt(dx * dx + dz * dz);
     }
 }
 
