@@ -87,7 +87,6 @@ export class NPCManager {
      * Update NPC rotations to face nearby players
      */
     update(playerManager) {
-        // Get all players
         const players = playerManager.getAllPlayers();
         
         // Update NPCs to face nearest players
@@ -95,8 +94,8 @@ export class NPCManager {
             let closestPlayer = null;
             let closestDistance = Infinity;
             
-            // Find closest player
-            players.forEach(player => {
+            // Find closest player - use Object.values() since players is now an object, not an array
+            Object.values(players).forEach(player => {
                 const dx = player.position.x - npc.position.x;
                 const dz = player.position.z - npc.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);

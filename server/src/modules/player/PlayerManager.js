@@ -60,18 +60,44 @@ export class PlayerManager {
     /**
      * Get a player by socket ID
      * @param {string} socketId - The socket ID of the player
-     * @returns {Object|undefined} The player object or undefined if not found
+     * @returns {Object|null} The player or null if not found
      */
     getPlayer(socketId) {
-        return this.players.get(socketId);
+        return this.players.get(socketId) || null;
+    }
+
+    /**
+     * Reset a player to default state
+     * @param {string} socketId - The socket ID of the player to reset
+     * @returns {Object|null} The reset player or null if not found
+     */
+    resetPlayer(socketId) {
+        const player = this.getPlayer(socketId);
+        if (!player) return null;
+        
+        // Create a new default player
+        const defaultPlayer = this.createPlayer(socketId);
+        
+        // Preserve only the ID and display name
+        defaultPlayer.displayName = player.displayName;
+        
+        // Replace the existing player with the reset player
+        this.players.set(socketId, defaultPlayer);
+        
+        console.log(`Player ${socketId} has been reset to default state`);
+        return defaultPlayer;
     }
 
     /**
      * Get all players
-     * @returns {Array} Array of all player objects
+     * @returns {Object} Object containing all players
      */
     getAllPlayers() {
-        return Array.from(this.players.values());
+        const players = {};
+        this.players.forEach((player, id) => {
+            players[id] = player;
+        });
+        return players;
     }
 
     /**
@@ -103,6 +129,45 @@ export class PlayerManager {
         } else if (player.path === 'light') {
             player.effects.push('light_path');
         }
+    }
+
+    /**
+     * Handle player death
+     * @param {string} socketId - The socket ID of the player who died
+     * @param {string} killerId - The socket ID of the player who killed them (optional)
+     */
+    handlePlayerDeath(socketId, killerId = null) {
+        const player = this.getPlayer(socketId);
+        if (!player) return;
+        
+        // Mark player as dead
+        player.isDead = true;
+        player.life = 0;
+        
+        console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''}`);
+        
+        // Schedule respawn
+        setTimeout(() => {
+            this.respawnPlayer(socketId);
+        }, 5000); // 5 seconds respawn delay
+    }
+    
+    /**
+     * Respawn a player
+     * @param {string} socketId - The socket ID of the player to respawn
+     */
+    respawnPlayer(socketId) {
+        const player = this.getPlayer(socketId);
+        if (!player) return;
+        
+        // Reset player stats
+        player.isDead = false;
+        player.life = player.maxLife || GameConstants.PLAYER.DEFAULT_MAX_LIFE;
+        
+        // Reset player position to spawn point
+        player.position = { ...GameConstants.PLAYER.SPAWN_POSITION };
+        
+        console.log(`Player ${socketId} respawned`);
     }
 }
 

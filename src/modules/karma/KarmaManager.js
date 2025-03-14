@@ -189,13 +189,17 @@ export class KarmaManager {
             this.game.uiManager.updateSkillBar();
         }
         
-        // Notify server
-        this.game.networkManager.sendPathChoice(path);
+        console.log(`Path chosen: ${path}`);
+        return true;
     }
     
     // Handle server confirmation of path selection
     setChosenPath(path) {
-        // Set the path
+        if (path !== 'light' && path !== 'dark') {
+            console.error('Invalid path choice:', path);
+            return false;
+        }
+        
         this.chosenPath = path;
         
         // Update player stats
@@ -204,40 +208,42 @@ export class KarmaManager {
         }
         
         // Add path-specific skills
-        if (path === 'light') {
-            // Add martial arts skill for light path
-            if (this.game.skillsManager) {
-                const skillAdded = this.game.skillsManager.addSkill('martial_arts');
+        if (this.game.skillsManager) {
+            // Clear existing skills first
+            this.game.activeSkills.clear();
+            
+            if (path === 'light') {
+                // Add light path skills
+                this.game.skillsManager.addSkill('martial_arts');
                 
-                // Double-check that the skill was added successfully
+                // Validate that the skill was added
                 if (!this.game.activeSkills.has('martial_arts')) {
-                    console.warn('Failed to add martial_arts skill, adding it directly');
+                    console.error('Failed to add martial_arts skill');
                     this.game.activeSkills.add('martial_arts');
                 }
-            }
-        } else if (path === 'dark') {
-            // Add dark strike skill for dark path
-            if (this.game.skillsManager) {
-                const skillAdded = this.game.skillsManager.addSkill('dark_strike');
+            } else if (path === 'dark') {
+                // Add dark path skills
+                this.game.skillsManager.addSkill('dark_strike');
                 
-                // Double-check that the skill was added successfully
+                // Validate that the skill was added
                 if (!this.game.activeSkills.has('dark_strike')) {
-                    console.warn('Failed to add dark_strike skill, adding it directly');
+                    console.error('Failed to add dark_strike skill');
                     this.game.activeSkills.add('dark_strike');
                 }
             }
-        }
-        
-        // Update UI
-        if (this.game.uiManager) {
-            this.game.uiManager.updateSkillBar();
             
-            // Show confirmation message
-            if (path === 'light') {
-                this.game.uiManager.showNotification('You have chosen the Light Path. You have learned Martial Arts skill!', '#ffcc00');
-            } else if (path === 'dark') {
-                this.game.uiManager.showNotification('You have chosen the Dark Path. Your power grows with darkness.', '#6600cc');
+            // Update UI
+            if (this.game.uiManager) {
+                this.game.uiManager.updateSkillBar();
             }
         }
+        
+        // Send path choice to server
+        if (this.game.networkManager) {
+            this.game.networkManager.sendPathChoice(path);
+        }
+        
+        console.log(`Path chosen: ${path}`);
+        return true;
     }
 }
