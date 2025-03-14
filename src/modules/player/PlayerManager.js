@@ -368,7 +368,7 @@ export class PlayerManager {
             }, 1000); // 1 second timeout
         }
         
-        // Update all health bars to face the camera
+        // Update all health bars every frame to ensure they face the camera
         this.updateAllHealthBars();
     }
     
@@ -441,31 +441,38 @@ export class PlayerManager {
         
         console.log('Creating health bar for player:', player.userData.name || 'Unknown');
         
-        // Create a group for the health bar
-        const healthBarGroup = new THREE.Group();
+        // Create a sprite for the health bar to ensure it always faces the camera
+        const healthBarWidth = 1.0;
+        const healthBarHeight = 0.12;
         
-        // Create a backing for the health bar (dark background)
-        const backingGeometry = new THREE.PlaneGeometry(1.0, 0.12);
-        const backingMaterial = new THREE.MeshBasicMaterial({
-            color: 0x222222,
-            transparent: true,
-            opacity: 0.7,
-            side: THREE.DoubleSide
-        });
-        const backing = new THREE.Mesh(backingGeometry, backingMaterial);
-        healthBarGroup.add(backing);
+        // Create a canvas for the health bar
+        const canvas = document.createElement('canvas');
+        canvas.width = 100;
+        canvas.height = 12;
+        const context = canvas.getContext('2d');
         
-        // Create the actual health bar that will be scaled
-        const healthBarGeometry = new THREE.PlaneGeometry(1.0, 0.12);
-        const healthBarMaterial = new THREE.MeshBasicMaterial({
-            color: 0xff0000, // Bright red health bar
+        // Draw the background (dark backing)
+        context.fillStyle = '#222222';
+        context.fillRect(0, 0, 100, 12);
+        
+        // Draw the health bar (red)
+        context.fillStyle = '#ff0000';
+        context.fillRect(0, 0, 100, 12);
+        
+        // Create a texture from the canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        
+        // Create a sprite material
+        const spriteMaterial = new THREE.SpriteMaterial({
+            map: texture,
             transparent: true,
-            opacity: 0.9,
-            side: THREE.DoubleSide
+            depthTest: false // Ensure it renders on top
         });
-        const healthBar = new THREE.Mesh(healthBarGeometry, healthBarMaterial);
-        healthBar.position.z = 0.01; // Slightly in front of the backing
-        healthBarGroup.add(healthBar);
+        
+        // Create the sprite
+        const healthBarSprite = new THREE.Sprite(spriteMaterial);
+        healthBarSprite.scale.set(healthBarWidth, healthBarHeight, 1);
         
         // Position the health bar directly on top of the player's head
         let playerHeight = 1.8; // Default height
@@ -481,19 +488,20 @@ export class PlayerManager {
         }
         
         // Position the bar directly on top of the head
-        healthBarGroup.position.y = playerHeight; // Exactly at the top of the head
+        healthBarSprite.position.y = playerHeight - 0.15; // Position closer to the head
         
-        // Store references to elements that need to be updated
-        healthBarGroup.userData = {
-            healthBar: healthBar,
-            healthBarOriginalWidth: healthBarGeometry.parameters.width
+        // Store the original width for scaling
+        healthBarSprite.userData = {
+            originalWidth: healthBarWidth,
+            canvas: canvas,
+            context: context
         };
         
         // Add the health bar to the player
-        player.add(healthBarGroup);
+        player.add(healthBarSprite);
         
         // Store a reference to the health bar in the player's userData
-        player.userData.healthBar = healthBarGroup;
+        player.userData.healthBar = healthBarSprite;
         
         // Update the health bar initially
         this.updateHealthBar(player);
@@ -508,8 +516,9 @@ export class PlayerManager {
             return;
         }
         
-        const healthBarGroup = player.userData.healthBar;
-        const healthBar = healthBarGroup.userData.healthBar;
+        const healthBarSprite = player.userData.healthBar;
+        const canvas = healthBarSprite.userData.canvas;
+        const context = healthBarSprite.userData.context;
         
         // Get health percentage (default to 100% if not available)
         let healthPercent = 1.0;
@@ -517,20 +526,20 @@ export class PlayerManager {
             healthPercent = Math.max(0, Math.min(1, player.userData.stats.life / player.userData.stats.maxLife));
         }
         
-        // Scale the health bar based on health percentage
-        healthBar.scale.x = healthPercent;
+        // Clear the canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Center the health bar based on its new scale
-        const offset = (1 - healthPercent) * healthBarGroup.userData.healthBarOriginalWidth / 2;
-        healthBar.position.x = -offset;
+        // Draw the background (dark backing)
+        context.fillStyle = '#222222';
+        context.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Make sure the health bar faces the camera
-        if (this.game.cameraManager) {
-            healthBarGroup.lookAt(this.game.cameraManager.getCamera().position);
-        }
+        // Draw the health bar (red)
+        context.fillStyle = '#ff0000';
+        const healthWidth = Math.floor(canvas.width * healthPercent);
+        context.fillRect(0, 0, healthWidth, canvas.height);
         
-        // Always ensure the health bar is red
-        healthBar.material.color.set(0xff0000);
+        // Update the texture
+        healthBarSprite.material.map.needsUpdate = true;
     }
     
     /**
