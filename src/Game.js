@@ -232,6 +232,12 @@ export class Game {
             };
         }
 
+        // Delegate to KarmaManager if available
+        if (this.karmaManager) {
+            return this.karmaManager.adjustKarma(amount);
+        }
+        
+        // Fallback implementation if KarmaManager is not available
         const previousKarma = this.playerStats.currentKarma;
         this.playerStats.currentKarma = Math.max(0, Math.min(this.playerStats.maxKarma, this.playerStats.currentKarma + amount));
 
@@ -239,16 +245,16 @@ export class Game {
         if (this.playerStats.currentKarma < this.playerStats.maxKarma * 0.3) {
             if (this.playerStats.path !== "dark") {
                 this.playerStats.path = "dark";
-                this.karmaManager.onKarmaThresholdCrossed();
+                if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
             }
         } else if (this.playerStats.currentKarma > this.playerStats.maxKarma * 0.7) {
             if (this.playerStats.path !== "light") {
                 this.playerStats.path = "light";
-                this.karmaManager.onKarmaThresholdCrossed();
+                if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
             }
         } else if (this.playerStats.path !== null) {
             this.playerStats.path = null;
-            this.karmaManager.onKarmaThresholdCrossed();
+            if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
         }
 
         // Update UI if available
@@ -280,6 +286,32 @@ export class Game {
                 case 'Escape':
                     // Clear current target when pressing Escape
                     this.targetingManager?.clearTarget();
+                    break;
+                case 'KeyK':
+                    // Test karma - increase karma (dark path)
+                    if (this.isAlive && this.karmaManager) {
+                        console.log('Increasing karma - moving toward dark path (testing)');
+                        this.karmaManager.adjustKarma(10);
+                        this.uiManager?.showNotification('Karma increased by 10 (more debt)', '#444444');
+                    }
+                    break;
+                case 'KeyJ':
+                    // Test karma - decrease karma (light path)
+                    if (this.isAlive && this.karmaManager) {
+                        console.log('Decreasing karma - moving toward light path (testing)');
+                        this.karmaManager.adjustKarma(-10);
+                        this.uiManager?.showNotification('Karma decreased by 10 (less debt)', '#ffffff');
+                    }
+                    break;
+                case 'Digit8':
+                    // Test karma - reset karma to default
+                    if (this.isAlive && this.karmaManager) {
+                        console.log('Resetting karma to default (testing)');
+                        // Calculate amount needed to reset to 50
+                        const resetAmount = 50 - this.playerStats.currentKarma;
+                        this.karmaManager.adjustKarma(resetAmount);
+                        this.uiManager?.showNotification('Karma reset to default (50)', '#ffffff');
+                    }
                     break;
             }
         });
