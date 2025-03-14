@@ -329,7 +329,8 @@ export class Game {
             // Check if targeting manager exists
             if (this.targetingManager) {
                 console.log('Targeting manager exists, handling targeting');
-                this.targetingManager.handleTargeting(x, y);
+                const mousePosition = new THREE.Vector2(x, y);
+                this.targetingManager.handleTargeting(mousePosition);
             } else {
                 console.warn('No targeting manager available');
             }

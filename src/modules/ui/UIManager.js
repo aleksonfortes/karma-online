@@ -1259,33 +1259,81 @@ export class UIManager {
         // Create target display container
         const targetDisplay = document.createElement('div');
         targetDisplay.style.position = 'fixed';
-        targetDisplay.style.top = '20px';
-        targetDisplay.style.right = '20px';
-        targetDisplay.style.width = '200px';
-        targetDisplay.style.padding = '10px';
+        targetDisplay.style.top = '10px';
+        targetDisplay.style.left = '50%';
+        targetDisplay.style.transform = 'translateX(-50%)';
+        targetDisplay.style.width = '300px';
+        targetDisplay.style.padding = '5px';
         targetDisplay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        targetDisplay.style.borderRadius = '5px';
+        targetDisplay.style.border = '1px solid #444';
+        targetDisplay.style.borderRadius = '3px';
         targetDisplay.style.color = '#ffffff';
-        targetDisplay.style.fontFamily = 'Arial, sans-serif';
+        targetDisplay.style.fontFamily = '"Segoe UI", Arial, sans-serif';
         targetDisplay.style.zIndex = '1000';
         targetDisplay.style.display = 'none';
+        targetDisplay.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
+        
+        // Target header with name and level
+        const targetHeader = document.createElement('div');
+        targetHeader.style.display = 'flex';
+        targetHeader.style.justifyContent = 'space-between';
+        targetHeader.style.alignItems = 'center';
+        targetHeader.style.marginBottom = '3px';
+        targetDisplay.appendChild(targetHeader);
         
         // Target name
         const targetName = document.createElement('div');
         targetName.style.fontSize = '16px';
         targetName.style.fontWeight = 'bold';
-        targetName.style.marginBottom = '5px';
+        targetName.style.color = '#FFCC00'; // Gold color for name
+        targetName.style.textShadow = '1px 1px 2px black';
         targetName.textContent = 'Target';
-        targetDisplay.appendChild(targetName);
+        targetHeader.appendChild(targetName);
+        
+        // Target level
+        const targetLevel = document.createElement('div');
+        targetLevel.style.fontSize = '14px';
+        targetLevel.style.fontWeight = 'bold';
+        targetLevel.style.padding = '2px 5px';
+        targetLevel.style.backgroundColor = '#333';
+        targetLevel.style.borderRadius = '3px';
+        targetLevel.style.color = '#FFF';
+        targetLevel.textContent = 'Lv. 1';
+        targetHeader.appendChild(targetLevel);
+        
+        // Target health bar container with label
+        const healthContainer = document.createElement('div');
+        healthContainer.style.marginBottom = '3px';
+        targetDisplay.appendChild(healthContainer);
+        
+        // Health label and percentage
+        const healthLabelContainer = document.createElement('div');
+        healthLabelContainer.style.display = 'flex';
+        healthLabelContainer.style.justifyContent = 'space-between';
+        healthLabelContainer.style.marginBottom = '2px';
+        healthContainer.appendChild(healthLabelContainer);
+        
+        const healthLabel = document.createElement('div');
+        healthLabel.style.fontSize = '12px';
+        healthLabel.style.color = '#AAA';
+        healthLabel.textContent = 'HP';
+        healthLabelContainer.appendChild(healthLabel);
+        
+        const healthPercentage = document.createElement('div');
+        healthPercentage.style.fontSize = '12px';
+        healthPercentage.style.color = '#AAA';
+        healthPercentage.textContent = '100%';
+        healthLabelContainer.appendChild(healthPercentage);
         
         // Target health bar container
         const healthBarContainer = document.createElement('div');
         healthBarContainer.style.width = '100%';
-        healthBarContainer.style.height = '10px';
+        healthBarContainer.style.height = '8px';
         healthBarContainer.style.backgroundColor = '#333333';
-        healthBarContainer.style.borderRadius = '5px';
+        healthBarContainer.style.borderRadius = '4px';
         healthBarContainer.style.overflow = 'hidden';
-        targetDisplay.appendChild(healthBarContainer);
+        healthBarContainer.style.border = '1px solid #555';
+        healthContainer.appendChild(healthBarContainer);
         
         // Target health bar
         const healthBar = document.createElement('div');
@@ -1293,22 +1341,42 @@ export class UIManager {
         healthBar.style.height = '100%';
         healthBar.style.backgroundColor = '#ff0000';
         healthBar.style.transition = 'width 0.3s';
+        // Create gradient effect for health bar
+        healthBar.style.background = 'linear-gradient(to bottom, #ff3019 0%,#cf0404 100%)';
         healthBarContainer.appendChild(healthBar);
         
-        // Target type indicator
+        // Target type indicator with icon
+        const targetTypeContainer = document.createElement('div');
+        targetTypeContainer.style.display = 'flex';
+        targetTypeContainer.style.alignItems = 'center';
+        targetTypeContainer.style.marginTop = '3px';
+        targetDisplay.appendChild(targetTypeContainer);
+        
+        // Icon for target type
+        const targetTypeIcon = document.createElement('div');
+        targetTypeIcon.style.width = '16px';
+        targetTypeIcon.style.height = '16px';
+        targetTypeIcon.style.marginRight = '5px';
+        targetTypeIcon.style.backgroundSize = 'contain';
+        targetTypeIcon.style.backgroundRepeat = 'no-repeat';
+        targetTypeContainer.appendChild(targetTypeIcon);
+        
+        // Target type text
         const targetType = document.createElement('div');
         targetType.style.fontSize = '12px';
-        targetType.style.marginTop = '5px';
         targetType.style.color = '#aaaaaa';
-        targetType.textContent = 'Type: Unknown';
-        targetDisplay.appendChild(targetType);
+        targetType.textContent = 'Unknown';
+        targetTypeContainer.appendChild(targetType);
         
         // Store references to elements
         this.targetDisplay = {
             container: targetDisplay,
             name: targetName,
+            level: targetLevel,
             healthBar: healthBar,
-            type: targetType
+            healthPercentage: healthPercentage,
+            type: targetType,
+            typeIcon: targetTypeIcon
         };
         
         // Add to document
@@ -1320,9 +1388,10 @@ export class UIManager {
      * @param {string} name - The name of the target
      * @param {number} health - The current health of the target
      * @param {number} maxHealth - The maximum health of the target
-     * @param {string} type - The type of target ('player' or 'npc')
+     * @param {string} type - The type of target ('player' or 'monster')
+     * @param {number} level - The level of the target (optional)
      */
-    updateTargetDisplay(name, health, maxHealth, type) {
+    updateTargetDisplay(name, health, maxHealth, type, level = 1) {
         // Create the target display if it doesn't exist
         if (!this.targetDisplay) {
             this.createTargetDisplay();
@@ -1330,34 +1399,44 @@ export class UIManager {
         
         // Update target information
         this.targetDisplay.name.textContent = name;
+        this.targetDisplay.level.textContent = `Lv. ${level}`;
         
         // Calculate health percentage
         const healthPercent = Math.max(0, Math.min(100, (health / maxHealth) * 100));
         this.targetDisplay.healthBar.style.width = `${healthPercent}%`;
+        this.targetDisplay.healthPercentage.textContent = `${Math.round(healthPercent)}%`;
         
         // Update color based on health percentage
         if (healthPercent > 60) {
-            this.targetDisplay.healthBar.style.backgroundColor = '#00cc00'; // Green
+            this.targetDisplay.healthBar.style.background = 'linear-gradient(to bottom, #00cc00 0%, #009900 100%)'; // Green gradient
         } else if (healthPercent > 30) {
-            this.targetDisplay.healthBar.style.backgroundColor = '#cccc00'; // Yellow
+            this.targetDisplay.healthBar.style.background = 'linear-gradient(to bottom, #ffcc00 0%, #cc9900 100%)'; // Yellow gradient
         } else {
-            this.targetDisplay.healthBar.style.backgroundColor = '#cc0000'; // Red
+            this.targetDisplay.healthBar.style.background = 'linear-gradient(to bottom, #ff3019 0%, #cf0404 100%)'; // Red gradient
         }
         
-        // Update type
-        this.targetDisplay.type.textContent = `Type: ${type.charAt(0).toUpperCase() + type.slice(1)}`;
+        // Update type with icon
+        this.targetDisplay.type.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        
+        // Set icon based on type
+        if (type === 'player') {
+            this.targetDisplay.typeIcon.style.backgroundImage = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%233366ff\'><circle cx=\'12\' cy=\'7\' r=\'5\'/><path d=\'M17 14h-10c-3.31 0-6 2.69-6 6v1h22v-1c0-3.31-2.69-6-6-6z\'/></svg>")';
+            this.targetDisplay.name.style.color = '#3366FF'; // Blue for players
+        } else if (type === 'monster') {
+            this.targetDisplay.typeIcon.style.backgroundImage = 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'%23ff3300\'><path d=\'M12 2c-5.33 4-8 6.67-8 10 0 4.42 3.58 8 8 8s8-3.58 8-8c0-3.33-2.67-6-8-10zm0 18c-3.31 0-6-2.69-6-6 0-1 0-2 1-3 1 1 2 2 2 2 .83.73 2 1.17 3 1 .17 1.08 1 2 2 2 1.11 0 2-.92 2-2 0 0 1.09-1.82 3-2 0 1 0 2 0 3 0 3.31-2.69 6-6 6z\'/></svg>")';
+            this.targetDisplay.name.style.color = '#FF3300'; // Red for monsters
+        }
         
         // Show the target display
         this.targetDisplay.container.style.display = 'block';
     }
     
     /**
-     * Clear the target display
+     * Clear the target display when no target is selected
      */
     clearTargetDisplay() {
-        if (!this.targetDisplay) return;
-        
-        // Hide the target display
-        this.targetDisplay.container.style.display = 'none';
+        if (this.targetDisplay) {
+            this.targetDisplay.container.style.display = 'none';
+        }
     }
 } 
