@@ -48,6 +48,8 @@ export class UIManager {
         karmaBar.style.marginBottom = '4px';
         karmaBar.style.borderRadius = '6px';
         karmaBar.style.overflow = 'hidden';
+        karmaBar.style.cursor = 'pointer'; // Add cursor to indicate it's interactive
+        karmaBar.style.zIndex = '1000'; // Add z-index for proper stacking
         
         // Black background for karma bar
         const karmaBackground = document.createElement('div');
@@ -72,12 +74,12 @@ export class UIManager {
         karmaFill.style.borderRadius = '6px';
         karmaFill.style.transition = 'width 0.3s ease-out';
         karmaBar.appendChild(karmaFill);
-        
-        // Karma tooltip
+
+        // Create karma tooltip (as a separate element)
         const karmaTooltip = document.createElement('div');
         karmaTooltip.className = 'tooltip';
         karmaTooltip.style.position = 'absolute';
-        karmaTooltip.style.bottom = '120%';
+        karmaTooltip.style.bottom = '25px'; // Position above karma bar
         karmaTooltip.style.left = '50%';
         karmaTooltip.style.transform = 'translateX(-50%)';
         karmaTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
@@ -87,12 +89,21 @@ export class UIManager {
         karmaTooltip.style.fontSize = '12px';
         karmaTooltip.style.whiteSpace = 'nowrap';
         karmaTooltip.style.display = 'none';
-        karmaTooltip.style.zIndex = '10';
+        karmaTooltip.style.zIndex = '1500'; // Very high z-index
         karmaTooltip.textContent = 'Karma: Neutral (50/100)';
-        karmaBar.appendChild(karmaTooltip);
         
-        // Show tooltip on hover
+        // Add tooltip to the document body instead
+        document.body.appendChild(karmaTooltip);
+        
+        // Store reference to tooltip and fill
+        this.karmaBarFill = karmaFill;
+        this.karmaTooltip = karmaTooltip;
+        
+        // Direct event listeners for karma bar
         karmaBar.addEventListener('mouseenter', () => {
+            const rect = karmaBar.getBoundingClientRect();
+            karmaTooltip.style.left = `${rect.left + rect.width / 2}px`;
+            karmaTooltip.style.bottom = `${window.innerHeight - rect.top + 5}px`;
             karmaTooltip.style.display = 'block';
         });
         
@@ -101,22 +112,27 @@ export class UIManager {
         });
         
         karmaContainer.appendChild(karmaBar);
-        this.karmaBarFill = karmaFill;
-        this.karmaTooltip = karmaTooltip;
 
         // Create container for Life ring, skills, and Mana ring
         const gameplayContainer = document.createElement('div');
         gameplayContainer.style.display = 'flex';
         gameplayContainer.style.alignItems = 'center';
+        gameplayContainer.style.justifyContent = 'center';
         gameplayContainer.style.gap = '30px'; // Increased from 20px for better spacing with larger rings
 
         // Create Life ring
-        const lifeRing = this.createStatRing('#ff3333', '#660000', 'Life');
+        const lifeRing = this.createStatRing('#ff6666', '#990000', 'Life');
+        uiContainer.appendChild(lifeRing);
+        
+        // Store the life ring elements for later access
         this.lifeRingFill = lifeRing.querySelector('.fill');
         this.lifeTooltip = lifeRing.querySelector('.tooltip');
 
         // Create Mana ring
-        const manaRing = this.createStatRing('#3333ff', '#000066', 'Mana');
+        const manaRing = this.createStatRing('#6699ff', '#000099', 'Mana');
+        uiContainer.appendChild(manaRing);
+        
+        // Store the mana ring elements for later access
         this.manaRingFill = manaRing.querySelector('.fill');
         this.manaTooltip = manaRing.querySelector('.tooltip');
 
@@ -227,8 +243,8 @@ export class UIManager {
     // Create a stat ring (life, mana) with modern styling
     createStatRing(primaryColor, secondaryColor, statType) {
         const container = document.createElement('div');
-        container.style.width = '80px';
-        container.style.height = '80px';
+        container.style.width = '100px'; // Increased from 80px for consistent size
+        container.style.height = '100px'; // Increased from 80px for consistent size
         container.style.position = 'relative';
         container.style.borderRadius = '50%';
         container.style.background = 'rgba(0, 0, 0, 0.7)';
@@ -303,11 +319,11 @@ export class UIManager {
         tooltip.style.fontSize = '12px';
         tooltip.style.whiteSpace = 'nowrap';
         tooltip.style.display = 'none';
-        tooltip.style.zIndex = '10';
+        tooltip.style.zIndex = '1010'; // Increased z-index to ensure visibility
         tooltip.textContent = `${statType}: 100/100`;
         container.appendChild(tooltip);
         
-        // Show tooltip on hover
+        // Show tooltip on hover - ensure they're visible
         container.addEventListener('mouseenter', () => {
             tooltip.style.display = 'block';
         });
@@ -747,19 +763,19 @@ export class UIManager {
         xpTooltip.style.fontWeight = '500';
         xpTooltip.style.whiteSpace = 'nowrap';
         xpTooltip.style.display = 'none';
-        xpTooltip.style.zIndex = '1001';
+        xpTooltip.style.zIndex = '1101'; // Increased z-index for visibility
         xpTooltip.textContent = 'Level 1: 0/100 XP';
-        document.body.appendChild(xpTooltip);
+        iconContainer.appendChild(xpTooltip); // Attach to container instead of body
         this.xpTooltip = xpTooltip;
 
-        // Show tooltip on hover
-        iconContainer.addEventListener('mouseenter', () => {
+        // Show tooltip on hover with more direct reference
+        iconContainer.onmouseenter = () => {
             this.xpTooltip.style.display = 'block';
-        });
+        };
         
-        iconContainer.addEventListener('mouseleave', () => {
+        iconContainer.onmouseleave = () => {
             this.xpTooltip.style.display = 'none';
-        });
+        };
         
         // Store for reference
         this.statusElements.iconContainer = iconContainer;
@@ -1245,6 +1261,7 @@ export class UIManager {
             karmaStatus = 'Very Dark';
         }
         
+        // Update tooltip text
         this.karmaTooltip.textContent = `Karma: ${karmaStatus} (${currentKarma}/${maxKarma})`;
     }
     
