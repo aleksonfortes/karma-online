@@ -16,6 +16,13 @@ export class TargetingManager {
         this.lastValidationTime = 0; // Time of last target validation
         this.validationFrequency = 5000; // Only validate target every 5 seconds
         this.playerUpdateTimeout = null; // Timeout for player updates
+        this.targetValidationInterval = null;
+        
+        // Set up the escape key handler to clear target
+        this.setupEscapeKeyHandler();
+        
+        // Start the target validation interval
+        this.startTargetValidation();
     }
     
     /**
@@ -23,9 +30,6 @@ export class TargetingManager {
      */
     async init() {
         console.log('Initializing TargetingManager');
-        
-        // Set up escape key handler to clear target
-        this.setupEscapeKeyHandler();
         
         console.log('TargetingManager initialized');
     }
@@ -320,6 +324,108 @@ export class TargetingManager {
         } else if (this.game.uiManager && this.game.uiManager.updateTargetDisplay) {
             // Fallback if clearTargetDisplay doesn't exist
             this.game.uiManager.updateTargetDisplay('', 0, 0, '', 0);
+        }
+    }
+    
+    /**
+     * Start periodic validation of the current target
+     */
+    startTargetValidation() {
+        // Clear any existing interval
+        if (this.targetValidationInterval) {
+            clearInterval(this.targetValidationInterval);
+        }
+        
+        // Check target validity every 500ms
+        this.targetValidationInterval = setInterval(() => {
+            this.validateCurrentTarget();
+        }, 500);
+    }
+    
+    /**
+     * Validate if the current target is still valid
+     * Clears the target if:
+     * 1. The target is dead
+     * 2. The target is invisible
+     * 3. The target is off-screen
+     * 4. The target no longer exists
+     */
+    validateCurrentTarget() {
+        if (!this.currentTarget || !this.currentTarget.object) {
+            return;
+        }
+        
+        const target = this.currentTarget.object;
+        const camera = this.game.cameraManager.getCamera();
+        
+        // Check if target still exists in the scene
+        if (!target.parent) {
+            console.log('Target no longer in scene, clearing target');
+            this.clearTarget();
+            return;
+        }
+        
+        // Check if target is dead (multiple checks to ensure we catch all cases)
+        if (target.userData) {
+            // Check direct stats
+            if (target.userData.stats && 
+                (target.userData.stats.currentLife <= 0 || 
+                 target.userData.stats.life <= 0)) {
+                console.log('Target has 0 health, clearing target');
+                this.clearTarget();
+                return;
+            }
+            
+            // Check isDead flag
+            if (target.userData.isDead === true) {
+                console.log('Target is marked as dead, clearing target');
+                this.clearTarget();
+                return;
+            }
+            
+            // Check game.isAlive for local player
+            if (this.game.localPlayer === target && this.game.isAlive === false) {
+                console.log('Local player is dead, clearing target');
+                this.clearTarget();
+                return;
+            }
+        }
+        
+        // Check if target is invisible
+        if (target.userData && target.userData.isInvisible) {
+            console.log('Target is invisible, clearing target');
+            this.clearTarget();
+            return;
+        }
+        
+        // Check if target is off-screen
+        if (camera) {
+            // Get target position in screen space
+            const targetPosition = new THREE.Vector3();
+            target.getWorldPosition(targetPosition);
+            
+            // Convert to normalized device coordinates (NDC)
+            targetPosition.project(camera);
+            
+            // Check if the target is outside the view frustum
+            if (targetPosition.x < -1.1 || targetPosition.x > 1.1 || 
+                targetPosition.y < -1.1 || targetPosition.y > 1.1 || 
+                targetPosition.z < -1 || targetPosition.z > 1) {
+                console.log('Target is off-screen, clearing target');
+                this.clearTarget();
+                return;
+            }
+            
+            // Check if target is too far away (optional, adjust distance as needed)
+            const playerPosition = this.game.localPlayer.position;
+            const distanceToTarget = playerPosition.distanceTo(target.position);
+            const maxTargetDistance = 50; // Maximum distance to keep a target
+            
+            if (distanceToTarget > maxTargetDistance) {
+                console.log('Target is too far away, clearing target');
+                this.clearTarget();
+                return;
+            }
         }
     }
     
