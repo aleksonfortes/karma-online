@@ -30,44 +30,8 @@ export class EnvironmentManager {
     setupEnvironment() {
         console.log('Setting up environment...');
         
-        // Create ground plane with grass texture
-        const groundGeometry = new THREE.PlaneGeometry(500, 500);
-        const textureLoader = new THREE.TextureLoader();
-        const groundMaterial = new THREE.MeshStandardMaterial({
-            color: 0x336633,
-            roughness: 0.8,
-            metalness: 0.2,
-            side: THREE.DoubleSide
-        });
-        
-        // Load and apply grass texture
-        textureLoader.load('/textures/grass.jpg', (texture) => {
-            texture.wrapS = THREE.RepeatWrapping;
-            texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(50, 50);
-            groundMaterial.map = texture;
-            groundMaterial.needsUpdate = true;
-        });
-        
-        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-        ground.rotation.x = -Math.PI / 2;
-        ground.receiveShadow = true;
-        this.scene.add(ground);
-        
-        // Create water plane
-        const waterGeometry = new THREE.PlaneGeometry(1000, 1000);
-        const waterMaterial = new THREE.MeshStandardMaterial({
-            color: 0x004488,
-            transparent: true,
-            opacity: 0.8,
-            roughness: 0.1,
-            metalness: 0.8
-        });
-        
-        const water = new THREE.Mesh(waterGeometry, waterMaterial);
-        water.rotation.x = -Math.PI / 2;
-        water.position.y = -0.5;
-        this.scene.add(water);
+        // No longer creating water plane here - it's handled by TerrainManager
+        // This prevents the duplicate water plane that was causing the gap
         
         // Create temple (placeholder)
         this.createTemple();
@@ -199,7 +163,7 @@ export class EnvironmentManager {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: baseWidth // Maintain the same collision radius
+                radius: 1.5 // Reduced from baseWidth (2) to make it more precise and match the actual statue size
             });
         });
 
@@ -327,11 +291,11 @@ export class EnvironmentManager {
             this.statueColliders.push(
                 {
                     position: new THREE.Vector3(darkConfig.POSITION.x, 0, darkConfig.POSITION.z),
-                    radius: GameConstants.NPC.DARK.COLLISION_RADIUS
+                    radius: GameConstants.NPC.DARK.COLLISION_RADIUS * 0.7 // Reduced radius for better movement
                 },
                 {
                     position: new THREE.Vector3(lightConfig.POSITION.x, 0, lightConfig.POSITION.z),
-                    radius: GameConstants.NPC.LIGHT.COLLISION_RADIUS
+                    radius: GameConstants.NPC.LIGHT.COLLISION_RADIUS * 0.7 // Reduced radius for better movement
                 }
             );
 
@@ -440,7 +404,9 @@ export class EnvironmentManager {
 
     // Get all colliders for collision detection
     getColliders() {
-        return this.statueColliders;
+        // Temporarily disable all colliders to allow free movement in the temple
+        return [];
+        // return this.statueColliders;
     }
 
     update(delta) {

@@ -824,26 +824,9 @@ export class PlayerManager {
     }
     
     checkCollision(newPosition, previousPosition) {
-        const templeRadius = 15; // Temple platform radius
-        const templeCenter = new THREE.Vector3(0, 0, 0);
-        
-        // Check if player is on temple platform
-        const distanceFromTemple = newPosition.distanceTo(templeCenter);
-        const wasOnTemple = previousPosition.distanceTo(templeCenter) <= templeRadius;
-        
-        // Check for temple cross shape with precise dimensions
-        const isOnVertical = Math.abs(newPosition.x) <= 4.5 && Math.abs(newPosition.z) <= 12.5;
-        const isOnHorizontal = Math.abs(newPosition.x) <= 12.5 && Math.abs(newPosition.z) <= 4.5;
-        
-        if (distanceFromTemple <= templeRadius || isOnVertical || isOnHorizontal) {
-            // On temple platform - set height to 3
-            newPosition.y = 3;
-            return true;
-        } else {
-            // On grass - set height to 1.5
-            newPosition.y = 1.5;
-            return true;
-        }
+        // This method is now just a stub that returns false
+        // All collision detection is now handled by TerrainManager
+        return false;
     }
 
     updatePlayerHeight(position) {

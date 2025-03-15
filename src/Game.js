@@ -131,6 +131,10 @@ export class Game {
             this.environmentManager = new EnvironmentManager(this);
             await this.environmentManager.init();
             
+            // Initialize terrain
+            this.terrainManager = new TerrainManager(this);
+            await this.terrainManager.init();
+            
             // Initialize NPCManager last
             this.npcManager = new NPCManager(this);
             await this.npcManager.init();
@@ -401,8 +405,23 @@ export class Game {
             this.localPlayer.position.x += moveX;
             this.localPlayer.position.z += moveZ;
             
-            // Check collisions
-            if (this.checkCollision(this.localPlayer.position)) {
+            let collision = false;
+            
+            // First check entity collisions
+            if (this.checkCollisionWithEntities(this.localPlayer.position)) {
+                collision = true;
+            }
+            
+            // Then check terrain collision (this will adjust height but not block movement unless at map edge)
+            if (this.terrainManager) {
+                const terrainCollision = this.terrainManager.checkCollision(this.localPlayer.position, previousPosition);
+                if (terrainCollision) {
+                    collision = true;
+                }
+            }
+            
+            // If there was a collision with entities, reset position
+            if (collision) {
                 this.localPlayer.position.copy(previousPosition);
             }
 
@@ -417,15 +436,7 @@ export class Game {
         }
     }
 
-    checkCollision(position) {
-        // Check terrain boundaries
-        const terrainSize = 100;
-        const halfTerrainSize = terrainSize / 2 - 1;
-        
-        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
-            return true;
-        }
-        
+    checkCollisionWithEntities(position) {
         // Check collision with statues and temple elements from EnvironmentManager
         if (this.environmentManager) {
             const environmentColliders = this.environmentManager.getColliders();
@@ -450,7 +461,10 @@ export class Game {
                 const dz = position.z - npcPos.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                if (distance < npcData.collisionRadius + 0.5) {
+                // Use the collision radius from the NPC data or a default value
+                const collisionRadius = npcData.collisionRadius || 1.0;
+                
+                if (distance < collisionRadius + 0.5) {
                     return true;
                 }
             }
