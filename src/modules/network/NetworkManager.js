@@ -48,6 +48,7 @@ export class NetworkManager {
         this.lastServerPositions = new Map();
         this.pendingInputs = [];
         this.pendingUpdates = new Map();
+        this.lastHealthLog = {};
     }
 
     async init() {
@@ -609,72 +610,144 @@ export class NetworkManager {
 
         // Handle life update
         this.socket.on('lifeUpdate', (data) => {
-            // Get the player mesh
-            const playerMesh = this.game.playerManager.players.get(data.id);
-            if (!playerMesh) {
-                // During reconnection or when players join, the player mesh might not be available yet
-                // Queue this update to be applied once the player is created
-                if (!this.pendingUpdates) {
-                    this.pendingUpdates = new Map();
-                }
+            // Only log significant health changes (more than 5% change)
+            const isSignificantChange = !this.lastHealthLog || 
+                !this.lastHealthLog[data.id] || 
+                Math.abs(this.lastHealthLog[data.id] - data.life) > (data.maxLife * 0.05);
+            
+            if (isSignificantChange) {
+                // Store this health value for future comparison
+                if (!this.lastHealthLog) this.lastHealthLog = {};
+                this.lastHealthLog[data.id] = data.life;
                 
-                if (!this.pendingUpdates.has(data.id)) {
-                    this.pendingUpdates.set(data.id, []);
-                }
-                
-                this.pendingUpdates.get(data.id).push({
-                    type: 'lifeUpdate',
-                    data: { ...data }
-                });
-                
-                console.log(`Stored life update for future player: ${data.id}`);
-                return;
+                // Only log significant health changes
+                console.log(`Life update received for ${data.id}: ${data.life}/${data.maxLife}`);
             }
             
-            // Update the player's stats
-            if (!playerMesh.userData.stats) {
-                playerMesh.userData.stats = {};
-            }
-            
-            playerMesh.userData.stats.life = data.life;
-            playerMesh.userData.stats.maxLife = data.maxLife;
-            
-            // Update the player's health bar
-            if (this.game.playerManager.updateHealthBar) {
+            try {
+                // Get the player mesh
+                const playerMesh = this.game.playerManager.players.get(data.id);
+                
+                if (!playerMesh) {
+                    if (isSignificantChange) {
+                        console.warn(`Player mesh not found for life update: ${data.id}`);
+                    }
+                    
+                    // Store the update for later application if this player doesn't exist yet
+                    if (!this.pendingUpdates.has(data.id)) {
+                        this.pendingUpdates.set(data.id, []);
+                    }
+                    this.pendingUpdates.get(data.id).push({
+                        type: 'lifeUpdate',
+                        data: { ...data }
+                    });
+                    
+                    if (isSignificantChange) {
+                        console.log(`Stored life update for future player: ${data.id}`);
+                    }
+                    return;
+                }
+                
+                // Skip if we're currently processing a damage effect for this player
+                if (playerMesh.userData.processingDamageEffect) {
+                    if (isSignificantChange) {
+                        console.log(`Skipping life update for ${data.id} - processing damage effect`);
+                    }
+                    return;
+                }
+                
+                // Update the player's stats
+                if (!playerMesh.userData.stats) {
+                    playerMesh.userData.stats = {};
+                }
+                
+                // Store previous life value to detect death
+                const previousLife = playerMesh.userData.stats.life || data.maxLife;
+                
+                // Update life values
+                playerMesh.userData.stats.life = data.life;
+                playerMesh.userData.stats.maxLife = data.maxLife;
+                playerMesh.userData.stats.currentLife = data.life; // Ensure currentLife is also updated
+                
+                // Update the health bar
                 this.game.playerManager.updateHealthBar(playerMesh);
-            }
-            
-            // If this is the local player, update the UI
-            if (data.id === this.socket.id) {
-                if (this.game.playerStats) {
-                    this.game.playerStats.currentLife = data.life;
-                    this.game.playerStats.maxLife = data.maxLife;
+                
+                // If health is zero or less, mark player as dead
+                if (data.life <= 0) {
+                    playerMesh.userData.isDead = true;
+                    
+                    // If this player is the current target, clear the target display immediately
+                    if (this.game.targetingManager && 
+                        this.game.targetingManager.currentTarget && 
+                        this.game.targetingManager.currentTarget.id === data.id) {
+                        console.log(`Clearing target display for dead player: ${data.id}`);
+                        this.game.targetingManager.clearTarget();
+                    }
+                    
+                    // If this is our player, handle death
+                    if (data.id === this.socket.id && this.game.isAlive) {
+                        this.game.isAlive = false;
+                        this.playerDead = true;
+                        
+                        // Clear any target the player might have when they die
+                        if (this.game.targetingManager) {
+                            this.game.targetingManager.clearTarget();
+                        }
+                        
+                        if (this.game.playerManager) {
+                            this.game.playerManager.handlePlayerDeath(this.game.localPlayer);
+                        }
+                        
+                        // Show death screen
+                        if (this.game.uiManager) {
+                            this.game.uiManager.showDeathScreen();
+                        }
+                    }
+                } else {
+                    // If player was previously marked as dead but now has health, remove dead flag
+                    if (playerMesh.userData.isDead) {
+                        playerMesh.userData.isDead = false;
+                    }
+                    
+                    // Always update the target display if this player is our current target
+                    if (this.game.targetingManager && 
+                        this.game.targetingManager.currentTarget && 
+                        this.game.targetingManager.currentTarget.id === data.id) {
+                        
+                        // Get the target's name and level
+                        const name = playerMesh.userData.name || `Player ${data.id}`;
+                        const level = playerMesh.userData.stats.level || 1;
+                        
+                        // Update the target display with new health values
+                        if (this.game.uiManager) {
+                            if (isSignificantChange) {
+                                console.log(`Updating target display for player ${data.id}: ${data.life}/${data.maxLife}`);
+                            }
+                            this.game.uiManager.updateTargetDisplay(
+                                name, 
+                                data.life, 
+                                data.maxLife, 
+                                'player', 
+                                level
+                            );
+                        }
+                    }
                 }
                 
-                if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars();
+                // If this is our player, update the UI
+                if (data.id === this.socket.id) {
+                    if (this.game.playerStats) {
+                        this.game.playerStats.currentLife = data.life;
+                        this.game.playerStats.maxLife = data.maxLife;
+                        
+                        // Update UI
+                        if (this.game.uiManager) {
+                            this.game.uiManager.updateStatusBars();
+                        }
+                    }
                 }
-            }
-            
-            // If this player is our current target, update the target display
-            if (this.game.targetingManager && 
-                this.game.targetingManager.currentTarget && 
-                this.game.targetingManager.currentTarget.id === data.id) {
-                
-                // Get the target's name and level
-                const name = playerMesh.userData.name || `Player ${data.id}`;
-                const level = playerMesh.userData.stats.level || 1;
-                
-                // Update the target display with new health values
-                this.game.uiManager.updateTargetDisplay(
-                    name, 
-                    data.life, 
-                    data.maxLife, 
-                    'player', 
-                    level
-                );
-                
-                console.log(`Updated target display for player ${data.id}: ${data.life}/${data.maxLife}`);
+            } catch (error) {
+                console.error('Error in lifeUpdate handler:', error);
             }
         });
 
@@ -841,92 +914,6 @@ export class NetworkManager {
         // Handle reconnect
         this.socket.on('reconnect', () => {
             this.handleReconnect();
-        });
-
-        // Handle life updates from server
-        this.socket.on('lifeUpdate', (data) => {
-            // Get the player mesh
-            const playerMesh = this.game.playerManager.players.get(data.id);
-            if (!playerMesh) {
-                console.warn(`Player mesh not found for life update: ${data.id}`);
-                
-                // Store the update for later application if this player doesn't exist yet
-                if (!this.pendingUpdates.has(data.id)) {
-                    this.pendingUpdates.set(data.id, []);
-                }
-                this.pendingUpdates.get(data.id).push({
-                    type: 'lifeUpdate',
-                    data: { ...data }
-                });
-                console.log(`Stored life update for future player: ${data.id}`);
-                return;
-            }
-            
-            // Skip if we're currently processing a damage effect for this player
-            if (playerMesh.userData.processingDamageEffect) {
-                console.log(`Skipping life update for ${data.id} - processing damage effect`);
-                return;
-            }
-            
-            // Update the player's stats
-            if (!playerMesh.userData.stats) {
-                playerMesh.userData.stats = {};
-            }
-            
-            playerMesh.userData.stats.life = data.life;
-            playerMesh.userData.stats.maxLife = data.maxLife;
-            
-            // Update the health bar
-            this.game.playerManager.updateHealthBar(playerMesh);
-            
-            // If this is our player, update the UI
-            if (data.id === this.socket.id) {
-                if (this.game.playerStats) {
-                    this.game.playerStats.currentLife = data.life;
-                    this.game.playerStats.maxLife = data.maxLife;
-                    
-                    // Update UI
-                    if (this.game.uiManager) {
-                        this.game.uiManager.updateStatusBars();
-                    }
-                    
-                    // Check for death
-                    if (data.life <= 0 && this.game.isAlive) {
-                        this.game.isAlive = false;
-                        this.playerDead = true;
-                        
-                        if (this.game.playerManager) {
-                            this.game.playerManager.handlePlayerDeath(this.game.localPlayer);
-                        }
-                        
-                        // Show death screen
-                        if (this.game.uiManager) {
-                            this.game.uiManager.showDeathScreen();
-                        }
-                    }
-                }
-            }
-            
-            // If this player is our current target, update the target display
-            if (this.game.targetingManager && 
-                this.game.targetingManager.currentTarget && 
-                this.game.targetingManager.currentTarget.id === data.id) {
-                
-                // Get the target's name and level
-                const name = playerMesh.userData.name || `Player ${data.id}`;
-                const level = playerMesh.userData.stats.level || 1;
-                
-                // Update the target display with new health values
-                this.game.uiManager.updateTargetDisplay(
-                    name, 
-                    data.life, 
-                    data.maxLife, 
-                    'player', 
-                    level
-                );
-                
-                console.log(`Updated target display for player ${data.id}: ${data.life}/${data.maxLife}`);
-            }
         });
 
         // Handle player died event
