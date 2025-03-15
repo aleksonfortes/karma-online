@@ -167,110 +167,60 @@ export class TerrainManager {
                 Math.cos(x * 0.8 + z * 1.3) * Math.cos(x * 1.2 - z * 0.9)) * 0.5 + 0.5;
     }
     
+    // Check if a position is outside the terrain bounds
+    checkTerrainBoundaries(position) {
+        // Check terrain boundaries
+        const halfSize = this.terrain.size / 2;
+        return Math.abs(position.x) > halfSize || Math.abs(position.z) > halfSize;
+    }
+
+    // Apply the correct height based on position
+    // This is the ONLY place where player height should be set
+    applyTerrainHeight(position) {
+        // Set all terrain to the same height (3 units) to match the temple floor
+        // This prevents the player from stepping down when moving from temple to grass
+        position.y = 3;
+    }
+
+    // Check for terrain collisions and apply height
+    // Returns true if there is a collision with terrain boundaries
+    handleTerrainCollision(position) {
+        // Check terrain boundaries first
+        const collision = this.checkTerrainBoundaries(position);
+        
+        // Always apply the correct height regardless of collision
+        this.applyTerrainHeight(position);
+        
+        return collision;
+    }
+    
+    // Check if a position is outside the terrain bounds or colliding with objects
+    // This method is kept for backward compatibility but should be avoided
     checkCollision(position, previousPosition) {
-        // Check terrain boundaries first (water/edge collision)
-        const terrainSize = this.terrain.size;
-        const halfTerrainSize = (terrainSize / 2) - 1;
+        // Check terrain boundaries
+        const collision = this.handleTerrainCollision(position);
         
-        // Strict boundary check for water - using the actual terrain size now
-        // The terrain size is 200 as defined in generateTerrain()
-        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
-            if (previousPosition) {
-                position.x = previousPosition.x;
-                position.z = previousPosition.z;
-            }
-            return true;
-        }
-        
-        // Check if player is on temple platform
-        const templeRadius = 15; // Temple platform radius
-        const templeCenter = new THREE.Vector3(0, 0, 0);
-        
-        // Check if player is on temple platform
-        const distanceFromTemple = position.distanceTo(templeCenter);
-        
-        // Check for temple cross shape with precise dimensions
-        const isOnVertical = Math.abs(position.x) <= 4.5 && Math.abs(position.z) <= 12.5;
-        const isOnHorizontal = Math.abs(position.x) <= 12.5 && Math.abs(position.z) <= 4.5;
-        
-        // Set player height based on position, but don't return true (which would indicate collision)
-        if (distanceFromTemple <= templeRadius || isOnVertical || isOnHorizontal) {
-            // On temple platform - set height to 3
-            position.y = 3;
-        } else {
-            // On grass - set height to properly position the player on top of the grass
-            // The player model has a Y offset of -1.65, so we need to compensate for that
-            // by setting the position.y to a value that will place the feet on top of the grass
-            position.y = 1.65; // Increased from 1.5 to prevent sinking
-        }
-        
-        // Check statue and NPC collisions with larger buffer
-        if (false && this.game.npcManager && this.game.npcManager.statueColliders) {
-            for (const collider of this.game.npcManager.statueColliders) {
+        // Check statue collisions
+        if (this.game.environmentManager) {
+            const statueColliders = this.game.environmentManager.getColliders();
+            for (const collider of statueColliders) {
                 const dx = position.x - collider.position.x;
                 const dz = position.z - collider.position.z;
                 const distance = Math.sqrt(dx * dx + dz * dz);
                 
-                // Increased buffer from 0.1 to 1.0 for more noticeable collisions
-                if (distance < collider.radius + 1.0) {
+                if (distance < collider.radius) {
                     if (previousPosition) {
                         // Push player away from the collision point
                         const angle = Math.atan2(dz, dx);
-                        const pushDistance = (collider.radius + 1.0) - distance;
-                        position.x = collider.position.x + (Math.cos(angle) * (collider.radius + 1.0));
-                        position.z = collider.position.z + (Math.sin(angle) * (collider.radius + 1.0));
+                        position.x = collider.position.x + (Math.cos(angle) * (collider.radius + 0.1));
+                        position.z = collider.position.z + (Math.sin(angle) * (collider.radius + 0.1));
                     }
                     return true;
                 }
             }
         }
         
-        // Check collisions with other players
-        const players = this.game.playerManager.players;
-        const localPlayer = this.game.playerManager.localPlayer;
-        
-        if (false && players) {
-            const playerRadius = 1.0; // Radius for player collision
-            const spawnRadius = 3.0; // Radius around temple center where collisions are more lenient
-            const isInSpawnArea = Math.abs(position.x) < spawnRadius && Math.abs(position.z) < spawnRadius;
-            
-            // Check collision with other players
-            for (const [id, otherPlayer] of players) {
-                // Skip self-collision check
-                if (localPlayer && otherPlayer === localPlayer) continue;
-                
-                const dx = position.x - otherPlayer.position.x;
-                const dz = position.z - otherPlayer.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                // If in spawn area, allow more movement to prevent getting stuck
-                if (isInSpawnArea) {
-                    // Only collide if extremely close and moving closer
-                    if (distance < playerRadius && previousPosition) {
-                        const prevDx = previousPosition.x - otherPlayer.position.x;
-                        const prevDz = previousPosition.z - otherPlayer.position.z;
-                        const prevDistance = Math.sqrt(prevDx * prevDx + prevDz * prevDz);
-                        
-                        // If moving away from other player, allow movement
-                        if (distance >= prevDistance) {
-                            continue;
-                        }
-                    } else {
-                        continue;
-                    }
-                } else if (distance < playerRadius * 2) { // Normal collision outside spawn area
-                    if (previousPosition) {
-                        // Push players apart
-                        const angle = Math.atan2(dz, dx);
-                        position.x = otherPlayer.position.x + (Math.cos(angle) * playerRadius * 2);
-                        position.z = otherPlayer.position.z + (Math.sin(angle) * playerRadius * 2);
-                    }
-                    return true;
-                }
-            }
-        }
-        
-        return false;
+        return collision;
     }
     
     update() {
@@ -282,18 +232,6 @@ export class TerrainManager {
             const { mesh, baseY, phase, amplitude } = ring;
             mesh.position.y = baseY + (Math.sin(this.waterTime + phase) * amplitude);
         }
-    }
-    
-    isOnTemplePlatform(position) {
-        // Use the EnvironmentManager's implementation if available
-        if (this.game.environmentManager) {
-            return this.game.environmentManager.isOnTemplePlatform(position);
-        }
-        
-        // Fallback implementation if EnvironmentManager is not available
-        const platformRadius = 5; // Radius of the temple platform
-        const distance = Math.sqrt(position.x * position.x + position.z * position.z);
-        return distance <= platformRadius;
     }
     
     cleanup() {

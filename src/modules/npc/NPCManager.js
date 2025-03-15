@@ -573,6 +573,60 @@ export class NPCManager {
         });
     }
     
+    // Get colliders for all NPCs for collision detection
+    getNPCColliders() {
+        const colliders = [];
+        
+        // Add colliders for all NPCs
+        for (const [id, npcData] of this.npcs) {
+            if (!npcData.mesh) continue;
+            
+            colliders.push({
+                position: npcData.mesh.position,
+                radius: npcData.collisionRadius || 1.0
+            });
+        }
+        
+        return colliders;
+    }
+    
+    // Check for collisions with NPCs and handle them
+    // Returns true if there is a collision
+    checkNPCCollisions(position, previousPosition) {
+        for (const [id, npcData] of this.npcs) {
+            if (!npcData.mesh) continue;
+            
+            const npcPos = npcData.mesh.position;
+            const dx = position.x - npcPos.x;
+            const dz = position.z - npcPos.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Use the collision radius from the NPC data or a default value
+            const collisionRadius = npcData.collisionRadius || 1.0;
+            
+            if (distance < collisionRadius) {
+                if (previousPosition) {
+                    // Calculate the angle and push the player away in the opposite direction
+                    const angle = Math.atan2(dz, dx);
+                    
+                    // Use a larger buffer and ensure consistent handling in all directions
+                    const pushDistance = collisionRadius + 0.8; // Increased buffer for better separation
+                    
+                    // Set position directly based on angle from NPC center
+                    position.x = npcPos.x + (Math.cos(angle) * pushDistance);
+                    position.z = npcPos.z + (Math.sin(angle) * pushDistance);
+                    
+                    // Add some randomness to prevent getting stuck in specific positions
+                    position.x += (Math.random() * 0.1) - 0.05;
+                    position.z += (Math.random() * 0.1) - 0.05;
+                }
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
     update() {
         // If game is not initialized or player is not loaded, skip update
         if (!this.game.localPlayer) return;
