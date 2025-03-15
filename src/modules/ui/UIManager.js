@@ -90,7 +90,7 @@ export class UIManager {
         karmaTooltip.style.whiteSpace = 'nowrap';
         karmaTooltip.style.display = 'none';
         karmaTooltip.style.zIndex = '1500'; // Very high z-index
-        karmaTooltip.textContent = 'Karma: Neutral (50/100)';
+        karmaTooltip.textContent = 'Karma: (50/100)';
         
         // Add tooltip to the document body instead
         document.body.appendChild(karmaTooltip);
@@ -473,18 +473,37 @@ export class UIManager {
             this.karmaBarFill.style.width = `${karmaPercent}%`;
             
             // Update karma tooltip with path information
-            let karmaPath = 'Neutral';
-            if (karmaPercent < 30) {
-                karmaPath = 'Light';
-                this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
-            } else if (karmaPercent > 70) {
-                karmaPath = 'Dark';
-                this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
+            let karmaPath = '';
+            
+            // If a path has been explicitly chosen, use that instead of calculating based on karma percentage
+            if (playerStats.path) {
+                karmaPath = playerStats.path.charAt(0).toUpperCase() + playerStats.path.slice(1);
+                
+                if (karmaPath === 'Light') {
+                    this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
+                } else if (karmaPath === 'Dark') {
+                    this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
+                }
             } else {
-                this.updateDarknessOverlay(0, 'transparent');
+                // Fall back to the percentage-based calculation if no path is chosen
+                if (karmaPercent < 30) {
+                    karmaPath = 'Light';
+                    this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
+                } else if (karmaPercent > 70) {
+                    karmaPath = 'Dark';
+                    this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
+                } else {
+                    karmaPath = 'Neutral';
+                    this.updateDarknessOverlay(0, 'transparent');
+                }
             }
             
-            this.karmaTooltip.textContent = `Karma: ${karmaPath} (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
+            // Update the tooltip text with or without the path name based on user preference
+            if (karmaPath) {
+                this.karmaTooltip.textContent = `Karma: ${karmaPath} (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
+            } else {
+                this.karmaTooltip.textContent = `Karma: (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
+            }
         }
         
         // Update XP fill

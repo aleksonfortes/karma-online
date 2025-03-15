@@ -223,48 +223,6 @@ export class Game {
         console.log('Scene setup complete');
     }
 
-    adjustKarma(amount) {
-        if (!this.playerStats) {
-            this.playerStats = {
-                currentKarma: 50,
-                maxKarma: 100,
-                path: null
-            };
-        }
-
-        // Delegate to KarmaManager if available
-        if (this.karmaManager) {
-            return this.karmaManager.adjustKarma(amount);
-        }
-        
-        // Fallback implementation if KarmaManager is not available
-        const previousKarma = this.playerStats.currentKarma;
-        this.playerStats.currentKarma = Math.max(0, Math.min(this.playerStats.maxKarma, this.playerStats.currentKarma + amount));
-
-        // Update player path based on karma level
-        if (this.playerStats.currentKarma < this.playerStats.maxKarma * 0.3) {
-            if (this.playerStats.path !== "dark") {
-                this.playerStats.path = "dark";
-                if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
-            }
-        } else if (this.playerStats.currentKarma > this.playerStats.maxKarma * 0.7) {
-            if (this.playerStats.path !== "light") {
-                this.playerStats.path = "light";
-                if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
-            }
-        } else if (this.playerStats.path !== null) {
-            this.playerStats.path = null;
-            if (this.karmaManager) this.karmaManager.onKarmaThresholdCrossed();
-        }
-
-        // Update UI if available
-        if (this.uiManager) {
-            this.uiManager.updateKarmaDisplay(this.playerStats.currentKarma, this.playerStats.maxKarma);
-        }
-
-        return this.playerStats.currentKarma - previousKarma;
-    }
-
     setupInputHandlers() {
         console.log('Setting up input handlers...');
         
@@ -521,14 +479,5 @@ export class Game {
         
         console.log(`Path chosen: ${path}`);
         return true;
-    }
-    
-    handleInput() {
-        // Handle space key press for martial arts skill
-        if (this.inputManager.isKeyPressed('Space')) {
-            if (this.karmaManager.chosenPath === 'light') {
-                this.skillsManager.useSkillBySlot(1);
-            }
-        }
     }
 }

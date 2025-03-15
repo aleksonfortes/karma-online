@@ -45,7 +45,7 @@ export class NetworkManager {
             console.log(`Player connected: ${socket.id} (Total Players: ${this.playerManager.getPlayerCount()})`);
             
             // Store the socket
-            this.sockets.set(socket.id, socket);
+            this.sockets.set(socket.id, { statsInterval: null });
             
             // Send current game state to new player including NPCs
             socket.emit('initGameState', {
@@ -65,15 +65,29 @@ export class NetworkManager {
                 if (!this.rateLimitMovement(socket.id)) {
                     return;
                 }
-                if (!this.verifyMessageSignature(data, null)) {
-                    this.logSecurityEvent(`Invalid message signature from player ${socket.id}`);
-                    return;
-                }
-                const sanitizedData = this.sanitizeMovementData(data);
-                if (!sanitizedData) {
+                
+                // Validate movement data
+                if (!this.validateMovementData(data)) {
                     this.logSecurityEvent(`Invalid movement data from player ${socket.id}`);
                     return;
                 }
+                
+                // Create a clean copy with only the fields we need
+                const sanitizedData = {
+                    position: {
+                        x: Number(data.position.x),
+                        y: Number(data.position.y),
+                        z: Number(data.position.z)
+                    },
+                    rotation: {
+                        y: Number(data.rotation.y || 0)
+                    },
+                    path: data.path || null,
+                    karma: Number(data.karma || 50),
+                    maxKarma: Number(data.maxKarma || 100),
+                    mana: Number(data.mana || 100),
+                    maxMana: Number(data.maxMana || 100)
+                };
                 
                 // Update player through game manager
                 const success = this.gameManager.updatePlayerMovement(socket.id, sanitizedData);
@@ -209,7 +223,6 @@ export class NetworkManager {
                     return;
                 }
                 
-                // CRITICAL FIX: Use direct player properties instead of stats object
                 // Ensure target has life values initialized
                 if (targetPlayer.life === undefined) {
                     targetPlayer.life = 100;
@@ -261,8 +274,7 @@ export class NetworkManager {
                 }
                 targetPlayer.lastHealthUpdateTime[data.targetId] = Date.now();
                 
-                // IMPORTANT: Broadcast health update to ALL players immediately
-                // This ensures everyone sees the updated health bars in real-time
+                // Broadcast health update to ALL players immediately
                 this.io.emit('lifeUpdate', {
                     id: data.targetId,
                     life: targetPlayer.life,
@@ -272,16 +284,13 @@ export class NetworkManager {
                 });
                 
                 // Also broadcast the attacker's stats to ensure everyone has the latest data
-                // But only if the attacker's stats have changed
-                if (player.life !== undefined) {
-                    this.io.emit('lifeUpdate', {
-                        id: socket.id,
-                        life: player.life,
-                        maxLife: player.maxLife || 100,
-                        timestamp: Date.now(), // Add timestamp for client-side validation
-                        final: false // This is not a damage-related update
-                    });
-                }
+                this.io.emit('lifeUpdate', {
+                    id: socket.id,
+                    life: player.life,
+                    maxLife: player.maxLife || 100,
+                    timestamp: Date.now(), // Add timestamp for client-side validation
+                    final: false // This is not a damage-related update
+                });
                 
                 // Broadcast damage effect to all players
                 this.io.emit('damageEffect', {
@@ -315,7 +324,7 @@ export class NetworkManager {
                     return;
                 }
                 
-                // Reset player stats - use direct properties
+                // Reset player stats
                 player.life = 100;
                 player.maxLife = 100;
                 player.isDead = false;
@@ -422,15 +431,15 @@ export class NetworkManager {
                 }
                 
                 const player = this.playerManager.getPlayer(data.playerId);
-                if (!player || !player.stats) {
+                if (!player) {
                     return;
                 }
                 
                 // Broadcast the player's current health to all clients
                 this.io.emit('lifeUpdate', {
                     id: data.playerId,
-                    life: player.stats.life,
-                    maxLife: player.stats.maxLife || 100
+                    life: player.life,
+                    maxLife: player.maxLife || 100
                 });
             });
 
@@ -441,25 +450,32 @@ export class NetworkManager {
                     this.lastUpdateTime.delete(socket.id);
                     this.io.emit('playerLeft', socket.id);
                     console.log(`Player left: ${player.displayName} (Total Players: ${this.playerManager.getPlayerCount()})`);
+                    
+                    // Clear any intervals associated with this socket
+                    if (this.sockets.has(socket.id)) {
+                        const intervals = this.sockets.get(socket.id);
+                        if (intervals.statsInterval) {
+                            clearInterval(intervals.statsInterval);
+                        }
+                        this.sockets.delete(socket.id);
+                    }
                 }
             });
             
-            // Broadcast player stats to all clients every second to ensure synchronization
+            // Set up a stats interval for this socket and store it for cleanup
             const statsInterval = setInterval(() => {
                 const player = this.playerManager.getPlayer(socket.id);
-                if (player && player.stats) {
+                if (player) {
                     this.io.emit('lifeUpdate', {
                         id: socket.id,
-                        life: player.stats.life,
-                        maxLife: player.stats.maxLife || 100
+                        life: player.life,
+                        maxLife: player.maxLife || 100
                     });
                 }
             }, 1000); // Update every second
             
-            // Clear interval on disconnect
-            socket.on('disconnect', () => {
-                clearInterval(statsInterval);
-            });
+            // Store the interval for cleanup on disconnect
+            this.sockets.set(socket.id, { statsInterval });
         });
     }
     
@@ -501,7 +517,6 @@ export class NetworkManager {
                     return;
                 }
                 
-                // CRITICAL FIX: Use direct player properties instead of stats object
                 // Ensure player has valid health values
                 const life = typeof player.life === 'number' ? player.life : 100;
                 const maxLife = typeof player.maxLife === 'number' ? player.maxLife : 100;
@@ -550,6 +565,49 @@ export class NetworkManager {
     }
     
     /**
+     * Validate player movement data
+     */
+    validateMovementData(data) {
+        // Check if data exists and has position
+        if (!data || !data.position) {
+            return false;
+        }
+        
+        // Check if position has x, y, z coordinates
+        if (typeof data.position.x !== 'number' && typeof data.position.x !== 'string' ||
+            typeof data.position.y !== 'number' && typeof data.position.y !== 'string' ||
+            typeof data.position.z !== 'number' && typeof data.position.z !== 'string') {
+            return false;
+        }
+        
+        // Check for NaN or Infinity values
+        if (isNaN(Number(data.position.x)) || isNaN(Number(data.position.y)) || isNaN(Number(data.position.z)) ||
+            !isFinite(Number(data.position.x)) || !isFinite(Number(data.position.y)) || !isFinite(Number(data.position.z))) {
+            return false;
+        }
+        
+        return true;
+    }
+
+    /**
+     * Rate limiting for player movement
+     */
+    rateLimitMovement(socketId) {
+        const now = Date.now();
+        const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
+        
+        // Check if enough time has passed since the last update
+        if (now - lastUpdate < 50) { // 50ms = 20 updates per second max
+            this.logSecurityEvent(`Rate limit exceeded for player ${socketId}`, socketId);
+            return false;
+        }
+        
+        // Update the last update time
+        this.lastUpdateTime.set(socketId, now);
+        return true;
+    }
+
+    /**
      * Utility logging function with optional throttling
      */
     log(message, level = 'info', throttle = false, throttleKey = null, throttleTime = 30000) {
@@ -569,106 +627,37 @@ export class NetworkManager {
     }
 
     /**
-     * Validate player movement data
-     */
-    validateMovementData(data) {
-        if (!data || typeof data !== 'object') return false;
-        
-        // Check for required fields
-        if (!data.position || !data.rotation) return false;
-        
-        // Validate position values
-        const pos = data.position;
-        if (typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.z !== 'number') {
-            return false;
-        }
-        
-        // Check for NaN or Infinity values
-        if (isNaN(pos.x) || isNaN(pos.y) || isNaN(pos.z) ||
-            !isFinite(pos.x) || !isFinite(pos.y) || !isFinite(pos.z)) {
-            return false;
-        }
-        
-        return true;
-    }
-
-    /**
-     * Sanitize player movement data
-     */
-    sanitizeMovementData(data) {
-        if (!this.validateMovementData(data)) return null;
-        
-        // Create a clean copy with only the fields we need
-        return {
-            position: {
-                x: Number(data.position.x),
-                y: Number(data.position.y),
-                z: Number(data.position.z)
-            },
-            rotation: {
-                y: Number(data.rotation.y || 0)
-            },
-            path: data.path || null,
-            karma: Number(data.karma || 50),
-            maxKarma: Number(data.maxKarma || 100),
-            mana: Number(data.mana || 100),
-            maxMana: Number(data.maxMana || 100)
-        };
-    }
-
-    /**
-     * Rate limiting for player movement
-     */
-    rateLimitMovement(socketId) {
-        const now = Date.now();
-        const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
-        
-        // Check if enough time has passed since the last update
-        if (now - lastUpdate < 50) { // 50ms = 20 updates per second max
-            this.logSecurityEvent(`Rate limit exceeded for player ${socketId}`, socketId);
-            return false;
-        }
-        
-        return true;
-    }
-
-    /**
      * Enhanced logging with throttling for security events
      */
     logSecurityEvent(message, throttleKey = null) {
-        if (throttleKey) {
-            this.log(message, 'warn', true, `security_${throttleKey}`, 5000);
-        } else {
-            console.warn(`[Security] ${message}`);
-        }
+        // Always log security events, but throttle identical messages
+        const throttleTime = 60000; // 1 minute throttle for identical security events
+        this.log(`SECURITY: ${message}`, 'warn', true, throttleKey || message, throttleTime);
     }
 
     /**
      * Validate session
      */
     validateSession(socketId) {
-        if (!this.playerManager.getPlayer(socketId)) {
-            this.logSecurityEvent(`Invalid session attempt: ${socketId}`);
+        // Check if socket is still connected
+        if (!this.sockets.has(socketId)) {
+            this.logSecurityEvent(`Invalid session: Socket ${socketId} not found`);
             return false;
         }
         return true;
     }
 
     /**
-     * Verify message signature
-     */
-    verifyMessageSignature(message, signature) {
-        // Implementation of message signature verification
-        return true; // Placeholder
-    }
-    
-    /**
      * Calculate distance between two positions
      */
     calculateDistance(pos1, pos2) {
-        const dx = pos2.x - pos1.x;
-        const dz = pos2.z - pos1.z;
-        return Math.sqrt(dx * dx + dz * dz);
+        if (!pos1 || !pos2) return Infinity;
+        
+        const dx = pos1.x - pos2.x;
+        const dy = pos1.y - pos2.y;
+        const dz = pos1.z - pos2.z;
+        
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 }
 
