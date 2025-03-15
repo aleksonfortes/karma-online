@@ -11,6 +11,12 @@ export class TerrainManager {
         this.waveHeight = 0.1;
     }
     
+    async init() {
+        // Initialize the terrain and ocean
+        this.createTerrain();
+        return true;
+    }
+    
     createTerrain() {
         // Create terrain first (it should be above the ocean)
         this.generateTerrain();
@@ -108,17 +114,17 @@ export class TerrainManager {
 
         // Create gradient transition rings
         const transitionSegments = 128;
-        const transitionWidth = 40;
-        const ringCount = 20;
-        const startOpacity = 0.9;
-        const startY = -0.5;
+        const transitionWidth = 20; // Reduced from 40 to make transition tighter
+        const ringCount = 30; // Increased from 20 to create smoother transition
+        const startOpacity = 0.95; // Increased from 0.9 for better blending
+        const startY = -0.1; // Raised from -0.5 to be closer to the grass level
 
         this.waveRings = [];
         
         // Create transition rings from grass to water
         for (let i = 0; i < ringCount; i++) {
             const t = i / (ringCount - 1);
-            const radius = arenaRadius + (t * transitionWidth);
+            const radius = arenaRadius - 1 + (t * transitionWidth); // Subtract 1 to start slightly inside the grass
             
             const ringGeometry = new THREE.RingGeometry(
                 radius,
@@ -129,12 +135,12 @@ export class TerrainManager {
             
             const ringMaterial = waterMaterial.clone();
             // More gradual opacity transition
-            ringMaterial.opacity = startOpacity * Math.pow(1 - t, 2);
+            ringMaterial.opacity = startOpacity * Math.pow(1 - t, 1.5); // Adjusted power curve
             
             const ring = new THREE.Mesh(ringGeometry, ringMaterial);
             ring.rotation.x = -Math.PI / 2;
             
-            const yOffset = -t * 2;
+            const yOffset = -t * 2.4; // Increased from 2 to create steeper drop-off
             ring.position.y = startY + yOffset;
             
             this.game.scene.add(ring);
@@ -166,8 +172,9 @@ export class TerrainManager {
         const terrainSize = this.terrain.size;
         const halfTerrainSize = (terrainSize / 2) - 1;
         
-        // Strict boundary check for water
-        if (Math.abs(position.x) > halfTerrainSize - 1 || Math.abs(position.z) > halfTerrainSize - 1) {
+        // Strict boundary check for water - using the actual terrain size now
+        // The terrain size is 200 as defined in generateTerrain()
+        if (Math.abs(position.x) > halfTerrainSize || Math.abs(position.z) > halfTerrainSize) {
             if (previousPosition) {
                 position.x = previousPosition.x;
                 position.z = previousPosition.z;
@@ -175,8 +182,30 @@ export class TerrainManager {
             return true;
         }
         
+        // Check if player is on temple platform
+        const templeRadius = 15; // Temple platform radius
+        const templeCenter = new THREE.Vector3(0, 0, 0);
+        
+        // Check if player is on temple platform
+        const distanceFromTemple = position.distanceTo(templeCenter);
+        
+        // Check for temple cross shape with precise dimensions
+        const isOnVertical = Math.abs(position.x) <= 4.5 && Math.abs(position.z) <= 12.5;
+        const isOnHorizontal = Math.abs(position.x) <= 12.5 && Math.abs(position.z) <= 4.5;
+        
+        // Set player height based on position, but don't return true (which would indicate collision)
+        if (distanceFromTemple <= templeRadius || isOnVertical || isOnHorizontal) {
+            // On temple platform - set height to 3
+            position.y = 3;
+        } else {
+            // On grass - set height to properly position the player on top of the grass
+            // The player model has a Y offset of -1.65, so we need to compensate for that
+            // by setting the position.y to a value that will place the feet on top of the grass
+            position.y = 1.65; // Increased from 1.5 to prevent sinking
+        }
+        
         // Check statue and NPC collisions with larger buffer
-        if (this.game.npcManager.statueColliders) {
+        if (false && this.game.npcManager && this.game.npcManager.statueColliders) {
             for (const collider of this.game.npcManager.statueColliders) {
                 const dx = position.x - collider.position.x;
                 const dz = position.z - collider.position.z;
@@ -200,7 +229,7 @@ export class TerrainManager {
         const players = this.game.playerManager.players;
         const localPlayer = this.game.playerManager.localPlayer;
         
-        if (players) {
+        if (false && players) {
             const playerRadius = 1.0; // Radius for player collision
             const spawnRadius = 3.0; // Radius around temple center where collisions are more lenient
             const isInSpawnArea = Math.abs(position.x) < spawnRadius && Math.abs(position.z) < spawnRadius;
