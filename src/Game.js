@@ -465,6 +465,20 @@ export class Game {
                 }
             }
             
+            // 4. Check player collisions
+            if (!collision && this.playerManager) {
+                const playerCollision = this.playerManager.checkPlayerCollisions(
+                    this.localPlayer.position
+                );
+                if (playerCollision) {
+                    collision = true;
+                    // Ensure height is correct after player collision resolution
+                    if (this.terrainManager) {
+                        this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                    }
+                }
+            }
+            
             // If there was a collision, reset position
             if (collision) {
                 this.localPlayer.position.copy(previousPosition);

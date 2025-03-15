@@ -926,4 +926,56 @@ export class PlayerManager {
             healthBarSprite.material.map.needsUpdate = true;
         }
     }
+    
+    // Check for collisions with other players
+    // Returns true if there is a collision
+    checkPlayerCollisions(position) {
+        if (!this.players || this.players.size <= 1) {
+            return false; // No other players to collide with
+        }
+        
+        const playerRadius = 1.0; // Radius for player collision
+        const spawnRadius = 3.0; // Radius around temple center where collisions are more lenient
+        const isInSpawnArea = Math.abs(position.x) < spawnRadius && Math.abs(position.z) < spawnRadius;
+        
+        // Check collision with other players
+        for (const [id, otherPlayer] of this.players.entries()) {
+            // Skip self-collision check
+            if (this.game.localPlayer && otherPlayer === this.game.localPlayer) continue;
+            
+            // Skip dead players
+            if (otherPlayer.userData?.stats?.life <= 0 || otherPlayer.userData?.isDead) continue;
+            
+            const dx = position.x - otherPlayer.position.x;
+            const dz = position.z - otherPlayer.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // If in spawn area, allow more movement to prevent getting stuck
+            if (isInSpawnArea) {
+                // Only collide if extremely close and moving closer
+                if (distance < playerRadius && position.previousPosition) {
+                    const prevDx = position.previousPosition.x - otherPlayer.position.x;
+                    const prevDz = position.previousPosition.z - otherPlayer.position.z;
+                    const prevDistance = Math.sqrt(prevDx * prevDx + prevDz * prevDz);
+                    
+                    // If moving away from other player, allow movement
+                    if (distance >= prevDistance) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            } else if (distance < playerRadius * 2) { // Normal collision outside spawn area
+                if (position.previousPosition) {
+                    // Push players apart
+                    const angle = Math.atan2(dz, dx);
+                    position.x = otherPlayer.position.x + (Math.cos(angle) * playerRadius * 2);
+                    position.z = otherPlayer.position.z + (Math.sin(angle) * playerRadius * 2);
+                }
+                return true;
+            }
+        }
+        
+        return false;
+    }
 }
