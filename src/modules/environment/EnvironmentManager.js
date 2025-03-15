@@ -116,8 +116,8 @@ export class EnvironmentManager {
 
         // Create statue material
         const statueMaterial = new THREE.MeshStandardMaterial({
-            color: 0x808080,
-            roughness: 0.8,
+            color: 0xffffff, // Changed from 0x808080 (gray) to 0xffffff (white)
+            roughness: 0.6,  // Slightly reduced roughness for a smoother marble-like appearance
         });
 
         this.statueColliders = [];
@@ -163,7 +163,8 @@ export class EnvironmentManager {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: 1.5 // Reduced from baseWidth (2) to make it more precise and match the actual statue size
+                radius: 2.0, // Significantly increased from 1.5 to 2.0 for better collision detection
+                height: baseStatueHeight + bodyHeight + headSize // Store the total height for reference
             });
         });
 
@@ -356,57 +357,72 @@ export class EnvironmentManager {
         return sprite;
     }
 
-    // Add temple proximity checking
-    checkTempleProximity() {
-        if (!this.game.localPlayer || !this.temple) return false;
-        
-        const playerPos = this.game.localPlayer.position;
-        const templePos = this.temple.position;
-        
-        // Check if player is within the temple base platform bounds
-        const baseHalfWidth = 15; // 30/2 for base platform
-        return Math.abs(playerPos.x - templePos.x) <= baseHalfWidth && 
-               Math.abs(playerPos.z - templePos.z) <= baseHalfWidth;
-    }
-
-    // Add method to check if player is on temple platform
-    isOnTemplePlatform(position) {
-        if (!this.temple) return false;
-        
-        // Get temple dimensions
+    // Check if a position is on the temple platform
+    isOnTemple(position) {
+        // Temple dimensions - EXACTLY matching the original implementation
         const baseHalfWidth = 15; // 30/2 for base platform
         const crossVerticalHalfWidth = 4; // 8/2 for vertical part
         const crossHorizontalHalfWidth = 12; // 24/2 for horizontal part
         const crossVerticalHalfLength = 12; // 24/2 for vertical part
         const crossHorizontalHalfLength = 4; // 8/2 for horizontal part
-
+        
         // Check if position is within base platform bounds
         const isOnBase = Math.abs(position.x) <= baseHalfWidth && 
                         Math.abs(position.z) <= baseHalfWidth;
-
+        
         // Check if position is within cross vertical part
         const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && 
-                            Math.abs(position.z) <= crossVerticalHalfLength;
-
+                           Math.abs(position.z) <= crossVerticalHalfLength;
+        
         // Check if position is within cross horizontal part
         const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
                               Math.abs(position.z) <= crossHorizontalHalfLength;
 
-        // If on any part of the temple platform, player should be at temple height
-        if (isOnBase || isOnVertical || isOnHorizontal) {
-            position.y = 3; // Temple height (1.5 base height + 1.5 character height)
-        } else {
-            position.y = 1.5; // Ground level height
-        }
-
         return isOnBase || isOnVertical || isOnHorizontal;
     }
 
-    // Get all colliders for collision detection
+    // Get all statue colliders
     getColliders() {
-        // Temporarily disable all colliders to allow free movement in the temple
-        return [];
-        // return this.statueColliders;
+        return this.statueColliders;
+    }
+
+    // Check for collisions with statues and handle them
+    // Returns true if there is a collision
+    checkStatueCollisions(position, previousPosition) {
+        let collisionDetected = false;
+        
+        for (const collider of this.statueColliders) {
+            const dx = position.x - collider.position.x;
+            const dz = position.z - collider.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Use a larger collision radius for more aggressive detection
+            const effectiveRadius = collider.radius * 1.2; // 20% larger for safety
+            
+            if (distance < effectiveRadius) {
+                collisionDetected = true;
+                
+                // Always push the player away, even if no previous position is provided
+                // Calculate the angle from statue center to player
+                const angle = Math.atan2(dz, dx);
+                
+                // Use a much larger buffer to ensure the player is pushed well away from the statue
+                const pushDistance = effectiveRadius + 1.0; // Full 1.0 unit buffer
+                
+                // Set position directly based on angle from statue center
+                position.x = collider.position.x + (Math.cos(angle) * pushDistance);
+                position.z = collider.position.z + (Math.sin(angle) * pushDistance);
+                
+                // Add some randomness to prevent getting stuck in specific positions
+                position.x += (Math.random() * 0.2) - 0.1;
+                position.z += (Math.random() * 0.2) - 0.1;
+                
+                // Break after handling the first collision to avoid multiple corrections
+                break;
+            }
+        }
+        
+        return collisionDetected;
     }
 
     update(delta) {

@@ -371,6 +371,20 @@ export class Game {
         this.cameraManager?.update(delta);
         this.targetingManager?.update(delta);
         
+        // Continuous collision check - ensure player is never inside a pillar
+        if (this.localPlayer && this.environmentManager) {
+            // Force check statue collisions every frame
+            this.environmentManager.checkStatueCollisions(
+                this.localPlayer.position,
+                this.localPlayer.position.clone() // Use current position as previous
+            );
+            
+            // Always apply terrain height after collision checks
+            if (this.terrainManager) {
+                this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+            }
+        }
+        
         // Update camera
         if (this.localPlayer) {
             this.cameraManager.update(delta);
@@ -407,70 +421,66 @@ export class Game {
             
             let collision = false;
             
-            // First check entity collisions
-            if (this.checkCollisionWithEntities(this.localPlayer.position)) {
-                collision = true;
-            }
+            // Check for collisions with each system
+            // Each manager is responsible for its own collision detection
             
-            // Then check terrain collision (this will adjust height but not block movement unless at map edge)
+            // 1. Check terrain boundaries and apply height
             if (this.terrainManager) {
-                const terrainCollision = this.terrainManager.checkCollision(this.localPlayer.position, previousPosition);
+                const terrainCollision = this.terrainManager.handleTerrainCollision(this.localPlayer.position);
                 if (terrainCollision) {
                     collision = true;
                 }
             }
             
-            // If there was a collision with entities, reset position
+            // 2. Check statue collisions
+            if (this.environmentManager) {
+                const statueCollision = this.environmentManager.checkStatueCollisions(
+                    this.localPlayer.position, 
+                    previousPosition
+                );
+                if (statueCollision) {
+                    collision = true;
+                    // Ensure height is correct after statue collision resolution
+                    if (this.terrainManager) {
+                        this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                    }
+                }
+            }
+            
+            // 3. Check NPC collisions
+            if (!collision && this.npcManager) {
+                const npcCollision = this.npcManager.checkNPCCollisions(
+                    this.localPlayer.position, 
+                    previousPosition
+                );
+                if (npcCollision) {
+                    collision = true;
+                    // Ensure height is correct after NPC collision resolution
+                    if (this.terrainManager) {
+                        this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                    }
+                }
+            }
+            
+            // If there was a collision, reset position
             if (collision) {
                 this.localPlayer.position.copy(previousPosition);
+                // Ensure height is correct after position reset
+                if (this.terrainManager) {
+                    this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                }
             }
-
+            
             // Send position update to server
             this.networkManager?.sendPlayerState({
                 x: this.localPlayer.position.x,
                 y: this.localPlayer.position.y,
                 z: this.localPlayer.position.z,
-                rotation: this.localPlayer.rotation.y,
-                animation: 'running'
+                rotation: {
+                    y: this.localPlayer.rotation.y
+                }
             });
         }
-    }
-
-    checkCollisionWithEntities(position) {
-        // Check collision with statues and temple elements from EnvironmentManager
-        if (this.environmentManager) {
-            const environmentColliders = this.environmentManager.getColliders();
-            for (const collider of environmentColliders) {
-                const dx = position.x - collider.position.x;
-                const dz = position.z - collider.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                if (distance < collider.radius + 0.5) {
-                    return true;
-                }
-            }
-        }
-        
-        // Check collision with NPCs from NPCManager
-        if (this.npcManager && this.npcManager.npcs) {
-            for (const [id, npcData] of this.npcManager.npcs) {
-                if (!npcData.mesh) continue;
-                
-                const npcPos = npcData.mesh.position;
-                const dx = position.x - npcPos.x;
-                const dz = position.z - npcPos.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
-                
-                // Use the collision radius from the NPC data or a default value
-                const collisionRadius = npcData.collisionRadius || 1.0;
-                
-                if (distance < collisionRadius + 0.5) {
-                    return true;
-                }
-            }
-        }
-        
-        return false;
     }
 
     /**

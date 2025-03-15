@@ -34,7 +34,8 @@ export class KarmaManager {
     
     update() {
         // Handle karma recovery timer in the temple
-        if (this.game.environmentManager && this.game.environmentManager.checkTempleProximity()) {
+        if (this.game.environmentManager && this.game.localPlayer && 
+            this.game.environmentManager.isOnTemple(this.game.localPlayer.position)) {
             const currentTime = Date.now();
             const timeSinceLastRecovery = currentTime - this.lastKarmaRecoveryTime;
             
@@ -52,7 +53,8 @@ export class KarmaManager {
         
         if (timeSinceLastUpdate >= this.karmaUpdateInterval) {
             // If in temple proximity, slowly reduce karma (move toward light/0)
-            if (this.game.environmentManager && this.game.environmentManager.checkTempleProximity()) {
+            if (this.game.environmentManager && this.game.localPlayer && 
+                this.game.environmentManager.isOnTemple(this.game.localPlayer.position)) {
                 this.adjustKarma(-1);
             }
             

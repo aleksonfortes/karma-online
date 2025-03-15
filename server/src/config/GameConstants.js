@@ -26,7 +26,7 @@ const GameConstants = {
         
         // Model properties
         MODEL_SCALE: 4.5, // Matches the Light NPC scale
-        MODEL_POSITION_Y_OFFSET: -1.65, // Vertical offset to ensure feet touch ground
+        MODEL_POSITION_Y_OFFSET: -1.5, // Adjusted from -1.65 to prevent sinking into the ground
     },
     
     // NPC model scaling - these values match the original implementation
@@ -35,12 +35,12 @@ const GameConstants = {
         DARK: {
             SCALE: 0.4,
             INTERACTION_TEXT_OFFSET: 0.3,
-            COLLISION_RADIUS: 0.8
+            COLLISION_RADIUS: 1.2  // Increased from 0.8 to 1.2 for better collision detection
         },
         LIGHT: {
             SCALE: 4.5,
             INTERACTION_TEXT_OFFSET: 1.2,
-            COLLISION_RADIUS: 2.0
+            COLLISION_RADIUS: 2.5  // Increased from 2.0 to 2.5 for better collision detection
         }
     },
     
