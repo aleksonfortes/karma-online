@@ -14,7 +14,7 @@ export class SkillsManager {
                 cooldown: 2000,
                 lastUsed: 0,
                 damage: 75,
-                range: 1.5,
+                range: 3,
                 description: 'Close-range martial arts attack. Requires target and proximity.',
                 path: 'light'
             },

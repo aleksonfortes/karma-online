@@ -163,7 +163,7 @@ export class EnvironmentManager {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: 1.5, // Significantly increased from 1.5 to 2.0 for better collision detection
+                radius: 2.0, // Significantly increased from 1.5 to 2.0 for better collision detection
                 height: baseStatueHeight + bodyHeight + headSize // Store the total height for reference
             });
         });
