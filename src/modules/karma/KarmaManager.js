@@ -458,50 +458,15 @@ export class KarmaManager {
     
     // Method to handle path selection
     choosePath(path) {
-        if (this.chosenPath) return;
+        if (this.chosenPath) return false;
         
         if (path !== 'light' && path !== 'dark') {
             console.error('Invalid path choice:', path);
             return false;
         }
         
-        this.chosenPath = path;
-        
-        // Update player stats
-        if (this.game.playerStats) {
-            this.game.playerStats.path = path;
-        }
-        
-        // Add path-specific skills
-        if (this.game.skillsManager) {
-            // Clear existing skills first
-            this.game.activeSkills.clear();
-            
-            if (path === 'light') {
-                // Add light path skills
-                this.game.skillsManager.addSkill('martial_arts');
-                
-                // Validate that the skill was added
-                if (!this.game.activeSkills.has('martial_arts')) {
-                    console.error('Failed to add martial_arts skill');
-                    this.game.activeSkills.add('martial_arts');
-                }
-            } else if (path === 'dark') {
-                // Add dark path skills
-                this.game.skillsManager.addSkill('dark_strike');
-                
-                // Validate that the skill was added
-                if (!this.game.activeSkills.has('dark_strike')) {
-                    console.error('Failed to add dark_strike skill');
-                    this.game.activeSkills.add('dark_strike');
-                }
-            }
-            
-            // Update UI
-            if (this.game.uiManager) {
-                this.game.uiManager.updateSkillBar();
-            }
-        }
+        // Apply the path and send to server
+        this._applyPathChoice(path);
         
         // Send path choice to server
         if (this.game.networkManager) {
@@ -515,10 +480,16 @@ export class KarmaManager {
     // Handle server confirmation of path selection
     setChosenPath(path) {
         if (path !== 'light' && path !== 'dark') {
-            console.error('Invalid path choice:', path);
+            console.error('Invalid path choice from server:', path);
             return false;
         }
         
+        // Apply the path without sending back to server
+        return this._applyPathChoice(path);
+    }
+    
+    // Internal method to apply path choice effects
+    _applyPathChoice(path) {
         this.chosenPath = path;
         
         // Update player stats
@@ -557,12 +528,6 @@ export class KarmaManager {
             }
         }
         
-        // Send path choice to server
-        if (this.game.networkManager) {
-            this.game.networkManager.sendPathChoice(path);
-        }
-        
-        console.log(`Path chosen: ${path}`);
         return true;
     }
 }
