@@ -624,13 +624,10 @@ export class NetworkManager {
                 
                 this.pendingUpdates.get(data.id).push({
                     type: 'lifeUpdate',
-                    data: data
+                    data: { ...data }
                 });
-                return;
-            }
-            
-            // Skip if we're currently processing a damage effect for this player
-            if (playerMesh.userData.processingDamageEffect) {
+                
+                console.log(`Stored life update for future player: ${data.id}`);
                 return;
             }
             
@@ -642,35 +639,42 @@ export class NetworkManager {
             playerMesh.userData.stats.life = data.life;
             playerMesh.userData.stats.maxLife = data.maxLife;
             
-            // Update the health bar
-            this.game.playerManager.updateHealthBar(playerMesh);
+            // Update the player's health bar
+            if (this.game.playerManager.updateHealthBar) {
+                this.game.playerManager.updateHealthBar(playerMesh);
+            }
             
-            // If this is our player, update the UI
+            // If this is the local player, update the UI
             if (data.id === this.socket.id) {
                 if (this.game.playerStats) {
                     this.game.playerStats.currentLife = data.life;
                     this.game.playerStats.maxLife = data.maxLife;
-                    
-                    // Update UI
-                    if (this.game.uiManager) {
-                        this.game.uiManager.updateStatusBars();
-                    }
-                    
-                    // Check for death
-                    if (data.life <= 0 && this.game.isAlive) {
-                        this.game.isAlive = false;
-                        this.playerDead = true;
-                        
-                        if (this.game.playerManager) {
-                            this.game.playerManager.handlePlayerDeath(this.game.localPlayer);
-                        }
-                        
-                        // Show death screen
-                        if (this.game.uiManager) {
-                            this.game.uiManager.showDeathScreen();
-                        }
-                    }
                 }
+                
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateStatusBars();
+                }
+            }
+            
+            // If this player is our current target, update the target display
+            if (this.game.targetingManager && 
+                this.game.targetingManager.currentTarget && 
+                this.game.targetingManager.currentTarget.id === data.id) {
+                
+                // Get the target's name and level
+                const name = playerMesh.userData.name || `Player ${data.id}`;
+                const level = playerMesh.userData.stats.level || 1;
+                
+                // Update the target display with new health values
+                this.game.uiManager.updateTargetDisplay(
+                    name, 
+                    data.life, 
+                    data.maxLife, 
+                    'player', 
+                    level
+                );
+                
+                console.log(`Updated target display for player ${data.id}: ${data.life}/${data.maxLife}`);
             }
         });
 
@@ -845,6 +849,16 @@ export class NetworkManager {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
                 console.warn(`Player mesh not found for life update: ${data.id}`);
+                
+                // Store the update for later application if this player doesn't exist yet
+                if (!this.pendingUpdates.has(data.id)) {
+                    this.pendingUpdates.set(data.id, []);
+                }
+                this.pendingUpdates.get(data.id).push({
+                    type: 'lifeUpdate',
+                    data: { ...data }
+                });
+                console.log(`Stored life update for future player: ${data.id}`);
                 return;
             }
             
@@ -891,6 +905,27 @@ export class NetworkManager {
                         }
                     }
                 }
+            }
+            
+            // If this player is our current target, update the target display
+            if (this.game.targetingManager && 
+                this.game.targetingManager.currentTarget && 
+                this.game.targetingManager.currentTarget.id === data.id) {
+                
+                // Get the target's name and level
+                const name = playerMesh.userData.name || `Player ${data.id}`;
+                const level = playerMesh.userData.stats.level || 1;
+                
+                // Update the target display with new health values
+                this.game.uiManager.updateTargetDisplay(
+                    name, 
+                    data.life, 
+                    data.maxLife, 
+                    'player', 
+                    level
+                );
+                
+                console.log(`Updated target display for player ${data.id}: ${data.life}/${data.maxLife}`);
             }
         });
 
@@ -1407,7 +1442,7 @@ export class NetworkManager {
                 
                 // Update UI
                 if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    this.game.uiManager.updateStatusBars();
                 }
             };
             deathMessage.appendChild(respawnButton);
