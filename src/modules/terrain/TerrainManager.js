@@ -49,7 +49,7 @@ export class TerrainManager {
     
     generateTerrain() {
         // Terrain size (more like LoL)
-        const size = 200; // Increased from 120 to 200 for a larger arena
+        const size = 250; // Increased from 200 to 250 for an even larger arena
         const segments = 128;
         
         // Create plane geometry
@@ -59,7 +59,7 @@ export class TerrainManager {
         const grassTexture = new THREE.TextureLoader().load('/textures/grass.jpg');
         grassTexture.wrapS = THREE.RepeatWrapping;
         grassTexture.wrapT = THREE.RepeatWrapping;
-        grassTexture.repeat.set(25, 25); // Increased texture repeat to match larger size
+        grassTexture.repeat.set(30, 30); // Increased texture repeat to match larger size
         
         const material = new THREE.MeshPhongMaterial({
             map: grassTexture,
@@ -169,9 +169,20 @@ export class TerrainManager {
     
     // Check if a position is outside the terrain bounds
     checkTerrainBoundaries(position) {
-        // Check terrain boundaries
-        const halfSize = this.terrain.size / 2;
-        return Math.abs(position.x) > halfSize || Math.abs(position.z) > halfSize;
+        // Check terrain boundaries to allow player to get right up to the water's edge on all sides
+        const terrainSize = this.terrain.size;
+        
+        // Calculate the playable area boundary with minimal buffer
+        // We need to handle all sides equally
+        const buffer = 0.5; // Minimal buffer to prevent falling into water
+        const maxX = (terrainSize / 2) - buffer;
+        const maxZ = (terrainSize / 2) - buffer;
+        
+        // Check each boundary separately for more precise control
+        const beyondX = Math.abs(position.x) > maxX;
+        const beyondZ = Math.abs(position.z) > maxZ;
+        
+        return beyondX || beyondZ;
     }
 
     // Apply the correct height based on position
@@ -187,6 +198,25 @@ export class TerrainManager {
     handleTerrainCollision(position) {
         // Check terrain boundaries first
         const collision = this.checkTerrainBoundaries(position);
+        
+        if (collision && position.previousPosition) {
+            // If there's a collision with the water boundary, clamp the position to the edge
+            // rather than pushing all the way back to the previous position
+            const terrainSize = this.terrain.size;
+            const buffer = 0.5;
+            const maxX = (terrainSize / 2) - buffer;
+            const maxZ = (terrainSize / 2) - buffer;
+            
+            // Clamp X position to the edge
+            if (Math.abs(position.x) > maxX) {
+                position.x = Math.sign(position.x) * maxX;
+            }
+            
+            // Clamp Z position to the edge
+            if (Math.abs(position.z) > maxZ) {
+                position.z = Math.sign(position.z) * maxZ;
+            }
+        }
         
         // Always apply the correct height regardless of collision
         this.applyTerrainHeight(position);

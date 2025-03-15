@@ -419,6 +419,9 @@ export class Game {
             this.localPlayer.position.x += moveX;
             this.localPlayer.position.z += moveZ;
             
+            // Store previous position reference for terrain boundary handling
+            this.localPlayer.position.previousPosition = previousPosition;
+            
             let collision = false;
             
             // Check for collisions with each system

@@ -163,7 +163,7 @@ export class EnvironmentManager {
             // Create collider for the statue
             this.statueColliders.push({
                 position: new THREE.Vector3(pos.x, 0, pos.z),
-                radius: 2.0, // Significantly increased from 1.5 to 2.0 for better collision detection
+                radius: 1.5, // Significantly increased from 1.5 to 2.0 for better collision detection
                 height: baseStatueHeight + bodyHeight + headSize // Store the total height for reference
             });
         });
@@ -396,26 +396,23 @@ export class EnvironmentManager {
             const dz = position.z - collider.position.z;
             const distance = Math.sqrt(dx * dx + dz * dz);
             
-            // Use a larger collision radius for more aggressive detection
-            const effectiveRadius = collider.radius * 1.2; // 20% larger for safety
-            
-            if (distance < effectiveRadius) {
+            // Match the original implementation's collision detection
+            // Original used: distance < collider.radius + 1.0
+            if (distance < collider.radius + 1.0) {
                 collisionDetected = true;
                 
                 // Always push the player away, even if no previous position is provided
                 // Calculate the angle from statue center to player
                 const angle = Math.atan2(dz, dx);
                 
-                // Use a much larger buffer to ensure the player is pushed well away from the statue
-                const pushDistance = effectiveRadius + 1.0; // Full 1.0 unit buffer
+                // Match the original implementation's push distance calculation
+                // Original directly set position to radius + 1.0 from center
+                position.x = collider.position.x + (Math.cos(angle) * (collider.radius + 1.0));
+                position.z = collider.position.z + (Math.sin(angle) * (collider.radius + 1.0));
                 
-                // Set position directly based on angle from statue center
-                position.x = collider.position.x + (Math.cos(angle) * pushDistance);
-                position.z = collider.position.z + (Math.sin(angle) * pushDistance);
-                
-                // Add some randomness to prevent getting stuck in specific positions
-                position.x += (Math.random() * 0.2) - 0.1;
-                position.z += (Math.random() * 0.2) - 0.1;
+                // Add a small amount of randomness to prevent getting stuck
+                position.x += (Math.random() * 0.1) - 0.05;
+                position.z += (Math.random() * 0.1) - 0.05;
                 
                 // Break after handling the first collision to avoid multiple corrections
                 break;
