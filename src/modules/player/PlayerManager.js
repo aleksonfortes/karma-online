@@ -14,7 +14,7 @@ export class PlayerManager {
         this.defaultPlayerColor = 0x999999; // Neutral gray
         this.lightPathColor = 0x3366ff; // Blue for light path
         this.darkPathColor = 0x990000; // Red for dark path
-        this.respawnDelay = 5000; // 5 seconds
+        this.respawnDelay = 10000; // 10 seconds
         this.moveSpeed = 10;
         this.rotateSpeed = 3;
         this.lastPositionUpdate = 0;
@@ -717,10 +717,9 @@ export class PlayerManager {
     }
     
     handlePlayerDeath(player) {
-        if (!player || !player.userData) return;
+        if (!player) return;
         
-        // Mark as dead
-        player.userData.isDead = true;
+        console.log(`Handling death for player: ${player.userData.id || 'unknown'}`);
         
         // Visual changes for dead player
         player.traverse((child) => {
@@ -730,39 +729,22 @@ export class PlayerManager {
             }
         });
         
-        // Lower to ground
-        player.position.y = 0.1;
-        
-        // Rotate to lie down
-        player.rotation.x = Math.PI / 2;
-        
-        // If this is the local player, handle death UI
+        // If this is the local player, show death UI
         if (player === this.game.localPlayer) {
             this.game.isAlive = false;
             
-            // Show death message using the UI manager
+            // Show notification
             if (this.game.uiManager) {
-                // Check if showDeathScreen exists, otherwise use showNotification
-                if (typeof this.game.uiManager.showDeathScreen === 'function') {
+                this.game.uiManager.showNotification('You have died! Respawning in ' + (this.respawnDelay / 1000) + ' seconds...', '#ff0000');
+                
+                // Show death screen
+                if (this.game.uiManager.showDeathScreen) {
                     this.game.uiManager.showDeathScreen();
-                } else if (typeof this.game.uiManager.showNotification === 'function') {
-                    this.game.uiManager.showNotification('You have died! Respawning in ' + (this.respawnDelay / 1000) + ' seconds...', '#ff0000');
-                } else {
-                    console.warn('No UI method available to show death message');
                 }
             }
             
-            // Notify server
-            if (this.game.socket && this.game.socket.connected) {
-                this.game.socket.emit('playerDeath', {
-                    id: this.game.socket.id
-                });
-            }
-            
-            // Set respawn timer
-            setTimeout(() => {
-                this.respawnPlayer(player);
-            }, this.respawnDelay);
+            // The respawn will now be handled by the UI's countdown timer
+            // No need to set a timeout here as the UI will call respawnPlayer when ready
         }
     }
     

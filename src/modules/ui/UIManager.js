@@ -12,6 +12,7 @@ export class UIManager {
         this.notificationElement = null;
         this.errorScreen = null;
         this.targetDisplay = null;
+        this.deathScreen = null;
     }
     
     // Add init method
@@ -1471,6 +1472,120 @@ export class UIManager {
     clearTargetDisplay() {
         if (this.targetDisplay) {
             this.targetDisplay.container.style.display = 'none';
+        }
+    }
+
+    /**
+     * Show death screen when player dies
+     */
+    showDeathScreen() {
+        console.log('Showing death screen');
+        
+        // Create death screen if it doesn't exist
+        if (!this.deathScreen) {
+            // Create death screen container
+            const deathScreen = document.createElement('div');
+            deathScreen.style.position = 'fixed';
+            deathScreen.style.top = '0';
+            deathScreen.style.left = '0';
+            deathScreen.style.width = '100%';
+            deathScreen.style.height = '100%';
+            deathScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            deathScreen.style.display = 'flex';
+            deathScreen.style.flexDirection = 'column';
+            deathScreen.style.justifyContent = 'center';
+            deathScreen.style.alignItems = 'center';
+            deathScreen.style.zIndex = '2000';
+            deathScreen.style.transition = 'opacity 0.5s ease-in-out';
+            deathScreen.style.opacity = '0';
+            
+            // Death message
+            const deathMessage = document.createElement('div');
+            deathMessage.style.color = '#ff3019';
+            deathMessage.style.fontSize = '36px';
+            deathMessage.style.fontWeight = 'bold';
+            deathMessage.style.textShadow = '0 0 10px #ff3019';
+            deathMessage.style.marginBottom = '20px';
+            deathMessage.textContent = 'YOU DIED';
+            deathScreen.appendChild(deathMessage);
+            
+            // Countdown timer
+            const countdownTimer = document.createElement('div');
+            countdownTimer.style.color = '#ffffff';
+            countdownTimer.style.fontSize = '18px';
+            countdownTimer.style.marginBottom = '20px';
+            countdownTimer.textContent = 'Respawning in 10 seconds...';
+            deathScreen.appendChild(countdownTimer);
+            
+            // Store references
+            this.deathScreen = {
+                container: deathScreen,
+                message: deathMessage,
+                timer: countdownTimer
+            };
+            
+            // Add to document
+            document.body.appendChild(deathScreen);
+        }
+        
+        // Show the death screen with fade-in effect
+        this.deathScreen.container.style.display = 'flex';
+        setTimeout(() => {
+            this.deathScreen.container.style.opacity = '1';
+        }, 10);
+        
+        // Start the countdown timer
+        let secondsLeft = 10;
+        this.deathScreen.timer.textContent = `Respawning in ${secondsLeft} seconds...`;
+        
+        // Clear any existing countdown
+        if (this.respawnCountdown) {
+            clearInterval(this.respawnCountdown);
+        }
+        
+        // Set up the countdown
+        this.respawnCountdown = setInterval(() => {
+            secondsLeft--;
+            
+            // Update the countdown text
+            this.deathScreen.timer.textContent = `Respawning in ${secondsLeft} seconds...`;
+            
+            if (secondsLeft <= 0) {
+                // Clear the interval
+                clearInterval(this.respawnCountdown);
+                this.respawnCountdown = null;
+                
+                // Trigger respawn
+                console.log('Countdown reached zero, triggering respawn');
+                if (this.game && this.game.playerManager) {
+                    this.game.playerManager.respawnPlayer(this.game.localPlayer);
+                } else {
+                    console.error('Cannot respawn: playerManager not found');
+                }
+            }
+        }, 1000);
+    }
+    
+    /**
+     * Hide death screen when player respawns
+     */
+    hideDeathScreen() {
+        console.log('Hiding death screen');
+        
+        if (this.deathScreen) {
+            // Clear any existing countdown
+            if (this.respawnCountdown) {
+                clearInterval(this.respawnCountdown);
+                this.respawnCountdown = null;
+            }
+            
+            // Fade out
+            this.deathScreen.container.style.opacity = '0';
+            
+            // Hide after animation completes
+            setTimeout(() => {
+                this.deathScreen.container.style.display = 'none';
+            }, 500);
         }
     }
 } 
