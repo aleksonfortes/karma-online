@@ -109,8 +109,8 @@ describe('PlayerManager', () => {
         domElement: {}
       },
       networkManager: {
+        isConnected: true,
         socket: mockSocket,
-        isOfflineMode: false,
         pendingUpdates: new Map(),
         applyPendingUpdates: jest.fn(),
         requestInitialPosition: jest.fn().mockResolvedValue({
