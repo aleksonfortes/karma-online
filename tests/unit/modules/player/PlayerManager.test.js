@@ -609,4 +609,78 @@ describe('PlayerManager', () => {
       expect(height).toBe(2.0);
     });
   });
+  
+  // Health and status update system tests - critical based on the memory about real-time health updates
+  describe('Health and Status Update System', () => {
+    let mockHealthBar;
+    let testPlayer;
+    
+    beforeEach(() => {
+      mockHealthBar = { update: jest.fn() };
+      
+      testPlayer = {
+        userData: { 
+          id: 'health-test-player', 
+          isDead: false, 
+          stats: {} 
+        },
+        traverse: jest.fn(),
+        healthBar: mockHealthBar
+      };
+      
+      playerManager.players.set('health-test-player', testPlayer);
+    });
+    
+    it('should update player stats when life changes', () => {
+      // Update life
+      playerManager.updatePlayerLife(testPlayer, 75, 100);
+      
+      // Verify player stats were updated
+      expect(testPlayer.userData.stats.currentLife).toBe(75);
+      expect(testPlayer.userData.stats.maxLife).toBe(100);
+    });
+    
+    it('should handle player death when health reaches 0', () => {
+      // Spy on handlePlayerDeath
+      const spy = jest.spyOn(playerManager, 'handlePlayerDeath');
+      
+      // Set health to 0
+      playerManager.updatePlayerLife(testPlayer, 0, 100);
+      
+      // Verify death handler was called
+      expect(testPlayer.userData.stats.currentLife).toBe(0);
+      expect(spy).toHaveBeenCalled();
+      
+      // Clean up spy
+      spy.mockRestore();
+    });
+    
+    it('should apply visual effects on player death', () => {
+      // Call the death handler directly
+      playerManager.handlePlayerDeath(testPlayer);
+      
+      // Verify traverse was called to update visuals
+      expect(testPlayer.traverse).toHaveBeenCalled();
+    });
+  });
+    
+  describe('Player State Management', () => {
+    it('should update player color based on path', () => {
+      // Setup a player with path
+      const testPlayer = {
+        userData: { path: 'light' },
+        children: [{ isMesh: true, material: { color: { setHex: jest.fn() } } }],
+        traverse: jest.fn(callback => {
+          // Simulate traversing through child meshes
+          testPlayer.children.forEach(child => callback(child));
+        })
+      };
+      
+      // Update player color
+      playerManager.updatePlayerColor(testPlayer);
+      
+      // Verify traverse was called
+      expect(testPlayer.traverse).toHaveBeenCalled();
+    });
+  });
 });
