@@ -6,6 +6,12 @@ class SocketMock {
     this.id = 'test-socket-id';
     this.connected = true;
     this.disconnected = false;
+    
+    // Convert emit to a jest.fn so it can be spied on
+    this.emit = jest.fn((event, ...args) => {
+      this.emittedEvents.push({ event, args });
+      return this;
+    });
   }
 
   on(event, callback) {
@@ -31,11 +37,6 @@ class SocketMock {
     return this;
   }
 
-  emit(event, ...args) {
-    this.emittedEvents.push({ event, args });
-    return this;
-  }
-
   // Helper methods for testing
   triggerEvent(event, ...args) {
     if (this.handlers[event]) {
@@ -54,6 +55,11 @@ class SocketMock {
 
   clearEmittedEvents() {
     this.emittedEvents = [];
+  }
+
+  // Helper method to check if a specific event was emitted
+  hasEmitted(eventName) {
+    return this.emittedEvents.some(e => e.event === eventName);
   }
 
   connect() {

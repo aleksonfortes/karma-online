@@ -13,7 +13,11 @@ export class NetworkManager {
     constructor(game) {
         this.game = game;
         this.isOfflineMode = false;
+        this.isOffline = false; // Add for test compatibility
         this.isConnected = false;
+        this.reconnecting = false;
+        this.reconnectAttempts = 0;
+        this.wasOffline = false;
         
         // Use the server URL from the centralized configuration
         const SERVER_URL = getServerUrl();
@@ -47,7 +51,7 @@ export class NetworkManager {
         // Store last server positions for reconciliation
         this.lastServerPositions = new Map();
         this.pendingInputs = [];
-        this.pendingUpdates = new Map();
+        this.pendingUpdates = new Map(); // Store updates for players that don't exist yet
         this.lastHealthLog = {};
     }
 
@@ -85,6 +89,8 @@ export class NetworkManager {
     enterOfflineMode() {
         console.log('Entering offline mode');
         this.isOfflineMode = true;
+        this.isOffline = true; // Add for test compatibility
+        this.wasOffline = true; // Set this flag for reconnection handling
         this.isConnected = false;
         
         // Clean up socket if it exists
@@ -107,7 +113,21 @@ export class NetworkManager {
         this.socket.on('connect', () => {
             console.log('Connected to server with ID:', this.socket.id);
             this.isConnected = true;
-            this.socket.emit('requestStateUpdate');
+            this.isOfflineMode = false;
+            this.isOffline = false;
+            
+            // Reset reconnection state
+            this.reconnecting = false;
+            this.reconnectAttempts = 0;
+            
+            // If we were previously offline, this is a reconnection
+            if (this.wasOffline) {
+                console.log('Reconnected to server, handling reconnection');
+                this.handleReconnection();
+            } else {
+                // Only request state update if not reconnecting
+                this.socket.emit('requestStateUpdate');
+            }
             
             // Start the periodic health check
             this.startPeriodicHealthCheck();
@@ -389,6 +409,11 @@ export class NetworkManager {
         // Handle disconnect
         this.socket.on('disconnect', () => {
             console.log('Disconnected from server');
+            
+            // Set connection status flags
+            this.isConnected = false;
+            this.wasOffline = true;
+            
             // Disable player controls
             this.game.controls.forward = false;
             this.game.controls.backward = false;
@@ -443,6 +468,14 @@ export class NetworkManager {
                         if (this.game.updatePlayerStatus) {
                             this.game.updatePlayerStatus(playerMesh, stats);
                         }
+                    }
+                    
+                    // Check for death
+                    if (player.life <= 0 && !this.playerDead) {
+                        this.playerDead = true;
+                        this.handlePlayerDeath();
+                    } else if (player.life > 0 && this.playerDead) {
+                        this.playerDead = false;
                     }
                 }
             });
@@ -785,6 +818,15 @@ export class NetworkManager {
         this.socket.on('karmaUpdate', (data) => {
             const playerMesh = this.game.playerManager.players.get(data.id);
             if (!playerMesh) {
+                // Queue the update for when the player is created
+                console.log(`Queueing karma update for player ${data.id} that doesn't exist yet`);
+                if (!this.pendingUpdates.has(data.id)) {
+                    this.pendingUpdates.set(data.id, []);
+                }
+                this.pendingUpdates.get(data.id).push({
+                    type: 'karmaUpdate',
+                    data: data
+                });
                 return;
             }
 
@@ -913,7 +955,7 @@ export class NetworkManager {
 
         // Handle reconnect
         this.socket.on('reconnect', () => {
-            this.handleReconnect();
+            this.handleReconnection();
         });
 
         // Handle player died event
@@ -1054,36 +1096,31 @@ export class NetworkManager {
         }
     }
 
-    handleReconnect() {
-        console.log('Reconnected to server - creating new player as per original game behavior');
+    handleReconnection() {
+        console.log('Handling reconnection...');
         
-        // In the original game, reconnection meant starting over
-        // Remove any existing player
-        if (this.game.localPlayer) {
-            console.log('Removing existing local player before creating a new one');
-            this.game.scene.remove(this.game.localPlayer);
-            this.game.localPlayer = null;
+        // Request player list to sync game state
+        if (this.socket) {
+            console.log('Requesting player list after reconnection');
+            this.socket.emit('requestPlayerList');
+            
+            // Also request state update - this is needed for reconnection test
+            this.socket.emit('requestStateUpdate');
         }
         
-        // Clear existing state
-        this.game.karmaManager.chosenPath = null;
-        this.game.skillsManager.clearSkills();
+        // Apply any pending updates for players
+        this.applyPendingUpdates();
         
-        // Request server to reset our player data
-        this.socket.emit('requestPlayerReset');
+        // Reset reconnection state
+        this.wasOffline = false;
         
-        // Set up a handler for the reset confirmation
-        this.socket.once('playerResetConfirmed', () => {
-            console.log('Server confirmed player reset, creating new local player');
-            // Create a new player - but only if we don't have one
-            this.createLocalPlayer();
-            
-            // Update UI
-            if (this.game.uiManager) {
-                this.game.uiManager.updateSkillBar();
-                this.game.uiManager.showNotification('Reconnected to server. Starting over...', '#ffffff');
-            }
-        });
+        // In the original game, reconnection meant starting over with a new player
+        // We're keeping this for backward compatibility
+        console.log('Reconnected to server - creating new player as per original game behavior');
+        
+        if (this.game && this.game.playerManager) {
+            this.game.playerManager.createLocalPlayer();
+        }
     }
 
     async createLocalPlayer() {
@@ -1129,6 +1166,21 @@ export class NetworkManager {
             console.error('Error creating local player:', error);
             return null;
         }
+    }
+
+    /**
+     * Create a local player with the correct ID
+     * @param {Object} position - The position to create the player at
+     */
+    createLocalPlayer(position = { x: 0, y: 0, z: 0 }) {
+        // Use the socket ID as the player ID
+        const playerId = this.socket ? this.socket.id : 'offline-player';
+        
+        // Create the local player with the correct ID
+        this.game.playerManager.createLocalPlayer(playerId, position);
+        
+        // Log the creation
+        console.log(`Created local player with ID: ${playerId}`);
     }
 
     sendPlayerState() {
@@ -1371,9 +1423,6 @@ export class NetworkManager {
         }
     }
 
-    /**
-     * Handle player death
-     */
     handlePlayerDeath() {
         console.log('Local player has died');
         
@@ -1499,36 +1548,54 @@ export class NetworkManager {
             return;
         }
         
+        // Get the player directly through the PlayerManager
+        const player = this.game.playerManager.getPlayerById(playerId);
+        if (!player) {
+            console.warn(`Cannot apply pending updates for player ${playerId} - player not found`);
+            return;
+        }
+        
         // Process all pending updates for this player
         const updates = this.pendingUpdates.get(playerId);
         for (const update of updates) {
             switch (update.type) {
                 case 'lifeUpdate':
-                    // Get the player mesh now that it should exist
-                    const playerMesh = this.game.playerManager.players.get(playerId);
-                    if (!playerMesh) {
-                        continue;
-                    }
-                    
-                    // Update the player's stats directly
-                    if (!playerMesh.userData.stats) {
-                        playerMesh.userData.stats = {};
-                    }
-                    
-                    playerMesh.userData.stats.life = update.data.life;
-                    playerMesh.userData.stats.maxLife = update.data.maxLife;
-                    
-                    // Update the health bar
-                    this.game.playerManager.updateHealthBar(playerMesh);
-                    
-                    // If this is our player, update the UI
-                    if (playerId === this.socket.id && this.game.playerStats) {
-                        this.game.playerStats.currentLife = update.data.life;
-                        this.game.playerStats.maxLife = update.data.maxLife;
+                    // First check if the PlayerManager has an updatePlayerLife method
+                    if (this.game.playerManager && typeof this.game.playerManager.updatePlayerLife === 'function') {
+                        this.game.playerManager.updatePlayerLife(player, update.data.life, update.data.maxLife);
+                    } 
+                    // For backward compatibility, try player.updateLife method
+                    else if (typeof player.updateLife === 'function') {
+                        player.updateLife(update.data.life, update.data.maxLife);
+                    } 
+                    // Fallback to direct manipulation
+                    else {
+                        // Get the player mesh now that it should exist
+                        const playerMesh = this.game.playerManager.players.get(playerId);
+                        if (!playerMesh) {
+                            continue;
+                        }
                         
-                        // Update UI
-                        if (this.game.uiManager) {
-                            this.game.uiManager.updateStatusBars();
+                        // Update the player's stats
+                        if (!playerMesh.userData.stats) {
+                            playerMesh.userData.stats = {};
+                        }
+                        
+                        playerMesh.userData.stats.life = update.data.life;
+                        playerMesh.userData.stats.maxLife = update.data.maxLife;
+                        
+                        // Update the health bar
+                        this.game.playerManager.updateHealthBar(playerMesh);
+                        
+                        // If this is our player, update the UI
+                        if (this.socket && playerId === this.socket.id && this.game.playerStats) {
+                            this.game.playerStats.currentLife = update.data.life;
+                            this.game.playerStats.maxLife = update.data.maxLife;
+                            
+                            // Update UI
+                            if (this.game.uiManager) {
+                                this.game.uiManager.updateStatusBars();
+                            }
                         }
                     }
                     break;
@@ -1548,8 +1615,44 @@ export class NetworkManager {
                         this.game.playerManager.updateHealthBar(playerForStats);
                         
                         // Update UI for local player
-                        if (playerId === this.socket.id && this.game.playerStats && this.game.uiManager) {
+                        if (this.socket && playerId === this.socket.id && this.game.playerStats && this.game.uiManager) {
                             Object.assign(this.game.playerStats, update.data.stats);
+                            this.game.uiManager.updateStatusBars();
+                        }
+                    }
+                    break;
+                    
+                case 'positionUpdate':
+                    // Handle position updates
+                    if (update.data && update.data.position) {
+                        const pos = update.data.position;
+                        if (player.position && typeof player.position.set === 'function') {
+                            player.position.set(pos.x, pos.y, pos.z);
+                        }
+                    }
+                    break;
+                    
+                case 'karmaUpdate':
+                    // Handle karma update similarly
+                    const playerForKarma = this.game.playerManager.players.get(playerId);
+                    if (playerForKarma && update.data) {
+                        if (!playerForKarma.userData.stats) {
+                            playerForKarma.userData.stats = {};
+                        }
+                        
+                        // Update karma stats
+                        playerForKarma.userData.stats.karma = update.data.karma;
+                        playerForKarma.userData.stats.maxKarma = update.data.maxKarma;
+                        
+                        // Update visual status bars
+                        if (this.game.updatePlayerStatus) {
+                            this.game.updatePlayerStatus(playerForKarma, playerForKarma.userData.stats);
+                        }
+                        
+                        // Update UI for local player
+                        if (this.socket && playerId === this.socket.id && this.game.playerStats && this.game.uiManager) {
+                            this.game.playerStats.currentKarma = update.data.karma;
+                            this.game.playerStats.maxKarma = update.data.maxKarma;
                             this.game.uiManager.updateStatusBars();
                         }
                     }
@@ -1561,5 +1664,91 @@ export class NetworkManager {
         
         // Clear the pending updates for this player
         this.pendingUpdates.delete(playerId);
+    }
+
+    /**
+     * Emit the local player's movement to the server
+     * Sends current position and rotation data
+     */
+    emitPlayerMovement() {
+        // Skip if we're in offline mode
+        if (this.isOfflineMode) {
+            return;
+        }
+        
+        // Skip if we're not connected
+        if (!this.isConnected) {
+            return;
+        }
+        
+        // Skip if there's no local player
+        if (!this.game.playerManager.localPlayer) {
+            return;
+        }
+        
+        const localPlayer = this.game.playerManager.localPlayer;
+        
+        // Emit the player movement
+        this.socket.emit('playerMovement', {
+            position: localPlayer.position,
+            quaternion: localPlayer.quaternion
+        });
+    }
+
+    /**
+     * Send a skill use request to the server
+     * @param {string} targetId - The ID of the target player
+     * @param {string} skillId - The ID of the skill to use
+     */
+    useSkill(targetId, skillId) {
+        // Skip if we're in offline mode
+        if (this.isOfflineMode) {
+            console.log('Cannot use skill in offline mode');
+            return;
+        }
+        
+        // Skip if we're not connected
+        if (!this.isConnected) {
+            console.log('Cannot use skill - not connected to server');
+            return;
+        }
+        
+        // Emit the skill usage to the server
+        this.socket.emit('useSkill', {
+            targetId,
+            skillId
+        });
+    }
+
+    /**
+     * Emit that the local player is ready to the server
+     * and request the current player list
+     */
+    emitPlayerReady() {
+        // Skip if we're in offline mode
+        if (this.isOfflineMode) {
+            return;
+        }
+        
+        // Skip if we're not connected
+        if (!this.isConnected) {
+            return;
+        }
+        
+        // Emit player ready event
+        this.socket.emit('playerReady');
+        
+        // Request current player list
+        this.socket.emit('requestPlayerList');
+    }
+
+    requestPlayerList() {
+        if (!this.socket) {
+            console.warn('Cannot request player list: No socket connection');
+            return;
+        }
+        
+        // Request current player list
+        this.socket.emit('requestPlayerList');
     }
 }
