@@ -12,12 +12,10 @@ const NETWORK_CONSTANTS = {
 export class NetworkManager {
     constructor(game) {
         this.game = game;
-        this.isOfflineMode = false;
-        this.isOffline = false; // Add for test compatibility
         this.isConnected = false;
         this.reconnecting = false;
         this.reconnectAttempts = 0;
-        this.wasOffline = false;
+        this.wasDisconnected = false;
         
         // Use the server URL from the centralized configuration
         const SERVER_URL = getServerUrl();
@@ -67,7 +65,6 @@ export class NetworkManager {
                 // Listen for connection error
                 this.socket.once('connect_error', () => {
                     console.warn('Failed to connect to server');
-                    this.enterOfflineMode();
                     resolve(false);
                 });
                 
@@ -75,32 +72,13 @@ export class NetworkManager {
                 setTimeout(() => {
                     if (!this.isConnected) {
                         console.warn('Connection timeout');
-                        this.enterOfflineMode();
                         resolve(false);
                     }
                 }, 10000);
             } else {
-                this.enterOfflineMode();
                 resolve(false);
             }
         });
-    }
-
-    enterOfflineMode() {
-        console.log('Entering offline mode');
-        this.isOfflineMode = true;
-        this.isOffline = true; // Add for test compatibility
-        this.wasOffline = true; // Set this flag for reconnection handling
-        this.isConnected = false;
-        
-        // Clean up socket if it exists
-        if (this.socket) {
-            this.socket.disconnect();
-            this.socket = null;
-        }
-        
-        // Clean up game state
-        this.cleanup();
     }
 
     setupSocketHandlers() {
@@ -113,15 +91,14 @@ export class NetworkManager {
         this.socket.on('connect', () => {
             console.log('Connected to server with ID:', this.socket.id);
             this.isConnected = true;
-            this.isOfflineMode = false;
-            this.isOffline = false;
+            this.wasDisconnected = false;
             
             // Reset reconnection state
             this.reconnecting = false;
             this.reconnectAttempts = 0;
             
-            // If we were previously offline, this is a reconnection
-            if (this.wasOffline) {
+            // If we were previously disconnected, this is a reconnection
+            if (this.wasDisconnected) {
                 console.log('Reconnected to server, handling reconnection');
                 this.handleReconnection();
             } else {
@@ -136,7 +113,6 @@ export class NetworkManager {
         // Handle connection error
         this.socket.on('connect_error', (error) => {
             console.error('Failed to connect to server:', error);
-            this.enterOfflineMode();
         });
 
         // Handle initial game state
@@ -412,7 +388,7 @@ export class NetworkManager {
             
             // Set connection status flags
             this.isConnected = false;
-            this.wasOffline = true;
+            this.wasDisconnected = true;
             
             // Disable player controls
             this.game.controls.forward = false;
@@ -1112,7 +1088,7 @@ export class NetworkManager {
         this.applyPendingUpdates();
         
         // Reset reconnection state
-        this.wasOffline = false;
+        this.wasDisconnected = false;
         
         // In the original game, reconnection meant starting over with a new player
         // We're keeping this for backward compatibility
@@ -1671,11 +1647,6 @@ export class NetworkManager {
      * Sends current position and rotation data
      */
     emitPlayerMovement() {
-        // Skip if we're in offline mode
-        if (this.isOfflineMode) {
-            return;
-        }
-        
         // Skip if we're not connected
         if (!this.isConnected) {
             return;
@@ -1701,12 +1672,6 @@ export class NetworkManager {
      * @param {string} skillId - The ID of the skill to use
      */
     useSkill(targetId, skillId) {
-        // Skip if we're in offline mode
-        if (this.isOfflineMode) {
-            console.log('Cannot use skill in offline mode');
-            return;
-        }
-        
         // Skip if we're not connected
         if (!this.isConnected) {
             console.log('Cannot use skill - not connected to server');
@@ -1725,11 +1690,6 @@ export class NetworkManager {
      * and request the current player list
      */
     emitPlayerReady() {
-        // Skip if we're in offline mode
-        if (this.isOfflineMode) {
-            return;
-        }
-        
         // Skip if we're not connected
         if (!this.isConnected) {
             return;
