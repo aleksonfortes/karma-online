@@ -22,6 +22,12 @@ export class MockNetworkManager {
     this.lastPositionUpdate = { x: 0, y: 0, z: 0 };
     this.lastRotationUpdate = { y: 0 };
     this.lastState = '';
+    this.lastMessageTimes = new Map();
+    this.validPlayerIds = new Set(); // For security tests
+    this.offlineQueue = []; // For resilience tests
+    this.lastSequenceNumbers = new Map(); // For handling out-of-order updates
+    this.latency = 50; // Default latency in ms
+    this.highLoad = false; // Flag for high server load
   }
   
   init() {
@@ -69,6 +75,11 @@ export class MockNetworkManager {
     this.wasDisconnected = true;
     this.socket.connected = false;
     this.stopPeriodicHealthCheck();
+    
+    // Schedule reconnection attempt
+    setTimeout(() => {
+      this.attemptReconnect();
+    }, 5000);
   }
   
   handleConnect() {
@@ -79,10 +90,15 @@ export class MockNetworkManager {
     if (this.wasDisconnected) {
       this.handleReconnection();
     } else {
-      this.socket.emit('requestStateUpdate');
+      if (this.socket) {
+        this.socket.emit('requestStateUpdate');
+      }
     }
     
     this.startPeriodicHealthCheck();
+    
+    // Process any queued actions from offline mode
+    this.processOfflineQueue();
   }
   
   handleDisconnect() {
@@ -150,6 +166,12 @@ export class MockNetworkManager {
   
   handlePlayerJoined(playerData) {
     if (!this.game.playerManager) return;
+    
+    // Reject malformed data
+    if (!playerData || !playerData.id) {
+      console.warn('Rejected malformed player data');
+      return;
+    }
     
     this.game.playerManager.createPlayer(
       playerData.id,
@@ -699,5 +721,164 @@ export class MockNetworkManager {
     if (!this.game.npcManager) return;
     
     this.game.npcManager.processServerNPCs(npcList);
+  }
+  
+  // Security methods
+  sanitizePosition(position) {
+    if (!position) return { x: 0, y: 0, z: 0 };
+    
+    return {
+      x: isNaN(Number(position.x)) ? 0 : Number(position.x),
+      y: isNaN(Number(position.y)) || !isFinite(Number(position.y)) ? 0 : Number(position.y),
+      z: isNaN(Number(position.z)) ? 0 : Number(position.z)
+    };
+  }
+  
+  isValidPlayer(playerId) {
+    // In a real implementation, this would check against a list of known players
+    // or validate with the server
+    return this.validPlayerIds.has(playerId);
+  }
+  
+  generateAuthResponse(challenge) {
+    if (!challenge || !challenge.token) {
+      return { error: 'Invalid challenge' };
+    }
+    
+    // In a real implementation, this would use cryptography to sign the challenge
+    return {
+      token: challenge.token,
+      response: `response-for-${challenge.token}`,
+      timestamp: Date.now()
+    };
+  }
+  
+  isRealisticPosition(position) {
+    if (!position) return false;
+    
+    const maxCoord = 10000; // Example boundary
+    return Math.abs(position.x) < maxCoord && 
+           Math.abs(position.y) < maxCoord && 
+           Math.abs(position.z) < maxCoord;
+  }
+  
+  isTimestampValid(timestamp) {
+    if (!timestamp) return false;
+    
+    const maxAge = 30000; // 30 seconds
+    return Date.now() - timestamp < maxAge;
+  }
+  
+  isRateLimited(messageType, minInterval) {
+    const now = Date.now();
+    const lastTime = this.lastMessageTimes.get(messageType) || 0;
+    
+    if (now - lastTime < minInterval) {
+      return true; // Rate limited
+    }
+    
+    // Update last message time
+    this.lastMessageTimes.set(messageType, now);
+    return false;
+  }
+  
+  handleAuthChallenge(challengeData) {
+    const response = this.generateAuthResponse(challengeData);
+    this.socket.emit('authResponse', response);
+  }
+  
+  // Resilience methods
+  handleIncompletePlayerData(data) {
+    if (!data || !data.id) return;
+    
+    // Ensure required fields exist
+    const completeData = {
+      ...data,
+      position: data.position || { x: 0, y: 0, z: 0 },
+      rotation: data.rotation || { y: 0 }
+    };
+    
+    // Create player with complete data
+    if (this.game.playerManager) {
+      this.game.playerManager.createPlayer(
+        completeData.id,
+        completeData.position,
+        completeData.rotation,
+        false
+      );
+    }
+  }
+  
+  handleSequencedUpdate(update) {
+    if (!update || !update.id) return;
+    
+    const lastSeq = this.lastSequenceNumbers.get(update.id) || 0;
+    
+    // Ignore older updates
+    if (update.sequence < lastSeq) {
+      console.log(`Ignoring out-of-order update for player ${update.id}`);
+      return;
+    }
+    
+    // Apply update and store sequence
+    if (this.game.playerManager) {
+      this.game.playerManager.applyServerUpdate(update.id, update);
+      this.lastSequenceNumbers.set(update.id, update.sequence);
+    }
+  }
+  
+  queueOfflineAction(action) {
+    if (!this.offlineQueue) {
+      this.offlineQueue = [];
+    }
+    
+    this.offlineQueue.push({
+      action,
+      timestamp: Date.now()
+    });
+  }
+  
+  processOfflineQueue() {
+    if (!this.isConnected || !this.offlineQueue || this.offlineQueue.length === 0) return;
+    
+    // Process each queued action
+    this.offlineQueue.forEach(item => {
+      // Skip expired actions
+      if (Date.now() - item.timestamp > 30000) return;
+      
+      // Send action to server
+      this.socket.emit('playerAction', item.action);
+    });
+    
+    // Clear queue
+    this.offlineQueue = [];
+  }
+  
+  adaptUpdateRate() {
+    // Increase update interval when latency is high
+    if (this.latency > 200) {
+      this.updateInterval = Math.min(500, this.latency);
+    } else {
+      this.updateInterval = 100; // Default
+    }
+  }
+  
+  isCriticalUpdate(update) {
+    if (!update || !update.type) return false;
+    
+    // Define which update types are critical
+    const criticalTypes = ['critical', 'health', 'damage', 'death'];
+    return criticalTypes.includes(update.type);
+  }
+  
+  sendUpdate(update) {
+    if (!this.isConnected) return;
+    
+    if (this.highLoad && !this.isCriticalUpdate(update)) {
+      // Skip non-critical updates under high load
+      return;
+    }
+    
+    this.socket.emit('update', update);
   }
 } 
