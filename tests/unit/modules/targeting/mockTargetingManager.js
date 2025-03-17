@@ -22,6 +22,72 @@ export class MockTargetingManager {
     // Bind methods
     this.handleMouseMove = this.handleMouseMove.bind(this);
     this.handleMouseClick = this.handleMouseClick.bind(this);
+    
+    // Server authority methods
+    this.validateTargetWithServer = jest.fn().mockImplementation((target) => {
+      if (this.game && this.game.networkManager && this.game.networkManager.validateActionWithServer) {
+        return this.game.networkManager.validateActionWithServer({
+          type: 'target_select',
+          targetId: target.id,
+          targetType: target.userData ? target.userData.type : 'unknown'
+        });
+      }
+      return true;
+    });
+    
+    this.handleServerTargetConfirmation = jest.fn().mockImplementation((response) => {
+      if (response.success) {
+        const target = this.findTargetById(response.targetId);
+        if (target) {
+          this.setTarget(target);
+          return true;
+        }
+      }
+      return false;
+    });
+    
+    this.handleServerTargetRejection = jest.fn().mockImplementation((response) => {
+      this.log(`Target rejected by server: ${response.reason}`);
+      this.clearTarget();
+      return true;
+    });
+    
+    this.synchronizeTargetWithServer = jest.fn().mockImplementation(() => {
+      if (this.game && this.game.networkManager) {
+        this.game.networkManager.requestCurrentTarget();
+        return true;
+      }
+      return false;
+    });
+    
+    this.applyServerTargetUpdate = jest.fn().mockImplementation((data) => {
+      if (data.targetId) {
+        const target = this.findTargetById(data.targetId);
+        if (target) {
+          this.setTarget(target);
+          return true;
+        }
+      } else {
+        this.clearTarget();
+        return true;
+      }
+      return false;
+    });
+    
+    this.handleServerForcedTarget = jest.fn().mockImplementation((data) => {
+      if (!data || !data.targetId) return false;
+      
+      // Find the target object
+      const targetObject = this.game.playerManager.getPlayerById(data.targetId);
+      if (!targetObject) return false;
+      
+      // Set as current target
+      this.currentTarget = targetObject;
+      this.targetIndicator.visible = true;
+      this.targetIndicator.position.copy(targetObject.position);
+      
+      return true;
+    });
   }
   
   init() {
@@ -83,8 +149,15 @@ export class MockTargetingManager {
       if (targetObject) {
         // Check if target is within range
         if (this.isWithinRange(targetObject)) {
-          this.setTarget(targetObject);
-          return targetObject;
+          // Validate target with server before setting
+          const isValid = this.validateTargetWithServer(targetObject);
+          if (isValid) {
+            this.setTarget(targetObject);
+            return targetObject;
+          } else {
+            this.log('Target validation failed');
+            return null;
+          }
         }
       }
     }
@@ -155,6 +228,15 @@ export class MockTargetingManager {
   setTarget(target) {
     this.log(`Setting target: ${target} with ID: ${target ? target.id : undefined}`);
     
+    // Validate target with server if available
+    if (this.validateTargetWithServer && target) {
+      const isValid = this.validateTargetWithServer(target);
+      if (!isValid) {
+        this.log('Target validation failed');
+        return false;
+      }
+    }
+    
     // Set current target
     this.currentTarget = target;
     
@@ -166,6 +248,8 @@ export class MockTargetingManager {
       // Adjust indicator position to be at the target's feet
       this.targetIndicator.position.y = 0.1;
     }
+    
+    return true;
   }
   
   clearTarget() {
@@ -204,5 +288,11 @@ export class MockTargetingManager {
   
   log(message) {
     console.log(message);
+  }
+  
+  findTargetById(targetId) {
+    // Find target by ID from all targetable objects
+    const targetableObjects = this.getTargetableObjects();
+    return targetableObjects.find(obj => obj.id === targetId);
   }
 } 

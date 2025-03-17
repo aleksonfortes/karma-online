@@ -75,6 +75,12 @@ describe('TargetingManager', () => {
     const setup = createTargetingTestSetup();
     mockGame = setup.mockGame;
     targetingManager = setup.targetingManager;
+    
+    // Initialize the targeting manager
+    targetingManager.init();
+    
+    // Mock the targetIndicator.position.copy method for tests
+    targetingManager.targetIndicator.position.copy = jest.fn();
   });
   
   afterEach(() => {
@@ -124,6 +130,9 @@ describe('TargetingManager', () => {
     };
     targetingManager.raycaster.intersectObjects.mockReturnValue([mockIntersection]);
     
+    // Mock validateTargetWithServer to return true
+    targetingManager.validateTargetWithServer.mockReturnValue(true);
+    
     // Call the targeting handler
     const target = targetingManager.handleTargeting();
     
@@ -139,6 +148,9 @@ describe('TargetingManager', () => {
       position: { x: 5, y: 0, z: 5, copy: jest.fn() },
       userData: { isPlayer: true }
     };
+    
+    // Mock validateTargetWithServer to return true
+    targetingManager.validateTargetWithServer.mockReturnValue(true);
     
     // Set target
     targetingManager.setTarget(mockTarget);
@@ -163,11 +175,11 @@ describe('TargetingManager', () => {
       userData: { isPlayer: true }
     };
     
+    // Mock validateTargetWithServer to return true
+    targetingManager.validateTargetWithServer.mockReturnValue(true);
+    
     // Set target
     targetingManager.setTarget(mockTarget);
-    
-    // Mock the targetIndicator.position.copy method
-    targetingManager.targetIndicator.position.copy = jest.fn();
     
     // Update
     targetingManager.update(0.016);
