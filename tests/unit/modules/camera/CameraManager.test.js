@@ -1,9 +1,11 @@
 /**
  * @jest-environment jsdom
  */
-import { jest, describe, test, expect, beforeEach } from '@jest/globals';
+import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { MockCameraManager } from './mockCameraManager';
+import { createCameraTestSetup } from './cameraTestHelpers';
 
-// Mock THREE.js before importing CameraManager
+// Mock THREE.js
 jest.mock('three', () => {
   return {
     PerspectiveCamera: jest.fn().mockImplementation(() => ({
@@ -41,38 +43,28 @@ jest.mock('three', () => {
   };
 });
 
-// Import CameraManager after mocking THREE.js
-import { CameraManager } from '../../../../src/modules/camera/CameraManager.js';
-
 describe('CameraManager', () => {
   let cameraManager;
   let mockGame;
   
   beforeEach(() => {
+    // Reset mocks
     jest.clearAllMocks();
-    
-    // Create a mock game object
-    mockGame = {
-      scene: {
-        add: jest.fn(),
-        remove: jest.fn()
-      },
-      renderer: {
-        domElement: document.createElement('canvas')
-      },
-      playerManager: {
-        player: {
-          position: { x: 0, y: 0, z: 0 }
-        }
-      }
-    };
     
     // Mock window methods
     window.addEventListener = jest.fn();
     window.removeEventListener = jest.fn();
     
-    // Create CameraManager instance
-    cameraManager = new CameraManager(mockGame);
+    // Create test setup
+    const setup = createCameraTestSetup();
+    mockGame = setup.mockGame;
+    cameraManager = setup.cameraManager;
+  });
+  
+  afterEach(() => {
+    // Clean up
+    jest.clearAllMocks();
+    cameraManager.cleanup();
   });
   
   test('should initialize correctly', () => {
@@ -82,6 +74,7 @@ describe('CameraManager', () => {
     expect(cameraManager.cameraOffset).toBeDefined();
     expect(cameraManager.minZoom).toBeDefined();
     expect(cameraManager.maxZoom).toBeDefined();
+    expect(cameraManager.initialized).toBe(true);
   });
   
   test('should set up zoom controls', () => {
@@ -110,9 +103,6 @@ describe('CameraManager', () => {
   });
   
   test('should set up camera', () => {
-    // Mock the setupCamera method to avoid calling the actual implementation
-    cameraManager.setupCamera();
-    
     // Verify that the camera position was set
     expect(cameraManager.camera.position.set).toHaveBeenCalled();
     
@@ -122,34 +112,26 @@ describe('CameraManager', () => {
   });
   
   test('should update camera position', () => {
-    // Set up camera target
-    cameraManager.cameraTarget = {
-      position: { x: 0, y: 0, z: 0, copy: jest.fn() }
-    };
-    
     // Set player position
-    mockGame.playerManager.player.position = { x: 10, y: 5, z: 10 };
-    
-    // Mock the update method
-    const originalUpdate = cameraManager.update;
-    cameraManager.update = jest.fn().mockImplementation((deltaTime) => {
-      // Call the camera lookAt method to simulate the camera following the player
-      cameraManager.camera.lookAt();
-    });
+    mockGame.playerManager.player.position = { x: 10, y: 5, z: 10, copy: jest.fn() };
     
     // Update camera
     cameraManager.update(0.016);
     
     // Camera should follow player
     expect(cameraManager.camera.lookAt).toHaveBeenCalled();
-    
-    // Restore the original method
-    cameraManager.update = originalUpdate;
   });
   
   test('should update aspect ratio', () => {
     cameraManager.updateAspectRatio();
     
     expect(cameraManager.camera.updateProjectionMatrix).toHaveBeenCalled();
+  });
+  
+  test('should clean up properly', () => {
+    cameraManager.cleanup();
+    
+    expect(window.removeEventListener).toHaveBeenCalledWith('wheel', expect.any(Function));
+    expect(mockGame.scene.remove).toHaveBeenCalledWith(cameraManager.cameraTarget);
   });
 }); 
