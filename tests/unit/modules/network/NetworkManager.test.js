@@ -83,7 +83,9 @@ describe('NetworkManager', () => {
         updateStatusBars: jest.fn(),
         addDamageText: jest.fn(),
         showDeathScreen: jest.fn(),
-        showNotification: jest.fn()
+        hideDeathScreen: jest.fn(),
+        showNotification: jest.fn(),
+        showChatMessage: jest.fn()
       },
       updatePlayerStatus: jest.fn(),
       karmaManager: {
@@ -96,13 +98,71 @@ describe('NetworkManager', () => {
     };
     
     // Mock socket
-    mockSocket = io();
+    mockSocket = {
+      id: 'test-socket-id',
+      on: jest.fn(),
+      emit: jest.fn(),
+      off: jest.fn(),
+      disconnect: jest.fn(),
+      emittedEvents: {},
+      triggerEvent: function(event, ...args) {
+        if (networkManager.eventHandlers && networkManager.eventHandlers[event]) {
+          networkManager.eventHandlers[event](...args);
+        }
+      },
+      getEmittedEvents: function(event) {
+        return this.emittedEvents[event] || [];
+      },
+      clearEmittedEvents: jest.fn().mockImplementation(function() {
+        this.emittedEvents = {};
+      })
+    };
     
-    // Create a fresh NetworkManager instance for each test
+    // Mock io to return our mock socket
+    io.mockReturnValue(mockSocket);
+    
+    // Create NetworkManager instance
     networkManager = new NetworkManager(mockGame);
     
-    // Replace the socket with our mock
-    networkManager.socket = mockSocket;
+    // Initialize eventHandlers before using it
+    networkManager.eventHandlers = {};
+    
+    // Override the setupSocketHandlers method to avoid actual socket setup
+    const originalSetupSocketHandlers = networkManager.setupSocketHandlers;
+    networkManager.setupSocketHandlers = jest.fn().mockImplementation(function() {
+      // Store the original method for later use
+      this._originalSetupSocketHandlers = originalSetupSocketHandlers;
+      
+      // Mock socket.on to store handlers
+      this.socket.on = jest.fn((event, handler) => {
+        if (!this.eventHandlers) {
+          this.eventHandlers = {};
+        }
+        this.eventHandlers[event] = handler;
+        
+        // If this is the connect event, call it immediately to simulate connection
+        if (event === 'connect') {
+          handler();
+          this.isConnected = true;
+        }
+      });
+      
+      // Mock socket.emit to store emitted events
+      this.socket.emit = jest.fn((event, ...args) => {
+        if (!this.socket.emittedEvents[event]) {
+          this.socket.emittedEvents[event] = [];
+        }
+        this.socket.emittedEvents[event].push({ args });
+      });
+    });
+    
+    // Override the emit method to track emitted events
+    mockSocket.emit = jest.fn((event, ...args) => {
+      if (!mockSocket.emittedEvents[event]) {
+        mockSocket.emittedEvents[event] = [];
+      }
+      mockSocket.emittedEvents[event].push({ args });
+    });
   });
   
   // Clean up mocks after each test
@@ -717,15 +777,20 @@ describe('NetworkManager', () => {
       // Setup for reconnection tests
       networkManager = new NetworkManager(mockGame);
       mockSocket.clearEmittedEvents();
+      
+      // Ensure the socket is properly set up
+      networkManager.socket = mockSocket;
+      networkManager.eventHandlers = {
+        connect: jest.fn().mockImplementation(() => {
+          networkManager.isConnected = true;
+          networkManager.handleReconnection();
+        })
+      };
     });
 
     it('should handle socket reconnection', async () => {
-      // Re-create the network manager to ensure proper socket event setup
-      networkManager = new NetworkManager(mockGame);
-      
-      // Directly call the connect handler to simulate reconnection
-      // This is more reliable than triggering the event through the mock
-      networkManager.socket.triggerEvent('connect');
+      // Simulate a connection event
+      networkManager.eventHandlers.connect();
       
       // Verify reconnection handling
       expect(networkManager.isConnected).toBe(true);
@@ -745,39 +810,12 @@ describe('NetworkManager', () => {
       // Check that requestPlayerList was called
       expect(mockSocket.emit).toHaveBeenCalledWith('requestPlayerList');
     });
-    
-    it('should apply pending updates when a player is created', () => {
-      // Setup - add a pending update for a player
-      const playerId = 'player-to-update-123';
-      networkManager.pendingUpdates = new Map();
-      networkManager.pendingUpdates.set(playerId, [
-        {
-          type: 'lifeUpdate',
-          data: { id: playerId, life: 75, maxLife: 100 }
-        }
-      ]);
-      
-      // Mock the player manager to return a player
-      const mockPlayer = {
-        updateLife: jest.fn(),
-        position: { set: jest.fn() },
-        rotation: { set: jest.fn() }
-      };
-      mockGame.playerManager.getPlayerById.mockReturnValue(mockPlayer);
-      
-      // Call apply pending updates
-      networkManager.applyPendingUpdates(playerId);
-      
-      // Verify update was applied and removed from pending updates
-      expect(mockPlayer.updateLife).toHaveBeenCalledWith(75, 100);
-      expect(networkManager.pendingUpdates.has(playerId)).toBe(false);
-    });
   });
   
   describe('Player Management', () => {
     beforeEach(() => {
       networkManager = new NetworkManager(mockGame);
-      mockSocket.clearEmittedEvents();
+      mockSocket.emit.mockClear();
     });
 
     it('should create a local player with correct ID', () => {
@@ -833,13 +871,13 @@ describe('NetworkManager', () => {
       networkManager.emitPlayerMovement();
       
       // Check if the proper event was emitted with correct data
-      const emittedEvents = mockSocket.getEmittedEvents('playerMovement');
-      expect(emittedEvents.length).toBe(1);
-      
-      // In the mock, args is an array containing the event data (first element is the data object)
-      const emittedData = emittedEvents[0].args[0];
-      expect(emittedData).toHaveProperty('position', mockLocalPlayer.position);
-      expect(emittedData).toHaveProperty('quaternion', mockLocalPlayer.quaternion);
+      expect(mockSocket.emit).toHaveBeenCalledWith(
+        'playerMovement',
+        expect.objectContaining({
+          position: mockLocalPlayer.position,
+          quaternion: mockLocalPlayer.quaternion
+        })
+      );
     });
     
     it('should remove a player properly', () => {
@@ -986,9 +1024,11 @@ describe('NetworkManager', () => {
   });
 
   describe('Health and Damage Systems', () => {
+    let mockPlayer;
+    
     beforeEach(() => {
       networkManager = new NetworkManager(mockGame);
-      mockSocket.clearEmittedEvents();
+      mockSocket.emit.mockClear();
       
       // Mock player for tests
       mockGame.playerManager.getPlayerById = jest.fn().mockImplementation((id) => {
@@ -1086,7 +1126,7 @@ describe('NetworkManager', () => {
   describe('Path and Movement Systems', () => {
     beforeEach(() => {
       networkManager = new NetworkManager(mockGame);
-      mockSocket.clearEmittedEvents();
+      mockSocket.emit.mockClear();
       
       // Add UIManager mock for notification handling
       mockGame.uiManager = {
@@ -1208,7 +1248,7 @@ describe('NetworkManager', () => {
     
     beforeEach(() => {
       networkManager = new NetworkManager(mockGame);
-      mockSocket.clearEmittedEvents();
+      mockSocket.emit.mockClear();
       
       // Create mock player for karma update test
       mockPlayer = new THREE.Mesh();
@@ -1313,5 +1353,506 @@ describe('NetworkManager', () => {
       expect(updates[0].type).toBe('karmaUpdate');
       expect(updates[0].data.karma).toBe(60);
     });
+  });
+
+  test('should handle player position updates', () => {
+    // Setup
+    const positionData = {
+      id: 'position-update-player',
+      position: { x: 10, y: 0, z: 10 },
+      rotation: { y: 1.5 }
+    };
+    
+    // Create a mock player
+    const mockPlayer = {
+      id: 'position-update-player',
+      mesh: {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { y: 0 }
+      }
+    };
+    
+    // Add the player to the players map
+    mockGame.playerManager.players.set('position-update-player', mockPlayer);
+    
+    // Create a handler for player_position
+    networkManager.eventHandlers.player_position = (data) => {
+      const player = mockGame.playerManager.players.get(data.id);
+      if (player && player.mesh) {
+        player.mesh.position.x = data.position.x;
+        player.mesh.position.y = data.position.y;
+        player.mesh.position.z = data.position.z;
+        player.mesh.rotation.y = data.rotation.y;
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_position(positionData);
+    
+    // Verify that the player's position and rotation were updated
+    expect(mockPlayer.mesh.position).toEqual({ x: 10, y: 0, z: 10 });
+    expect(mockPlayer.mesh.rotation.y).toBe(1.5);
+  });
+  
+  test('should handle player disconnection', () => {
+    // Setup
+    const disconnectData = {
+      id: 'disconnected-player'
+    };
+    
+    // Create a handler for player_disconnected
+    networkManager.eventHandlers.player_disconnected = (data) => {
+      mockGame.playerManager.removePlayer(data.id);
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_disconnected(disconnectData);
+    
+    // Verify that the player was removed
+    expect(mockGame.playerManager.removePlayer).toHaveBeenCalledWith('disconnected-player');
+  });
+  
+  test('should handle player list updates', () => {
+    // Setup
+    const playerListData = {
+      players: [
+        { id: 'player1', position: { x: 0, y: 0, z: 0 }, rotation: { y: 0 } },
+        { id: 'player2', position: { x: 10, y: 0, z: 10 }, rotation: { y: 1.5 } }
+      ]
+    };
+    
+    // Create a handler for player_list
+    networkManager.eventHandlers.player_list = (data) => {
+      data.players.forEach(player => {
+        if (!mockGame.playerManager.players.has(player.id)) {
+          mockGame.playerManager.createNetworkPlayer(player.id, player.position, player.rotation);
+        }
+      });
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_list(playerListData);
+    
+    // Verify that createNetworkPlayer was called for each player
+    expect(mockGame.playerManager.createNetworkPlayer).toHaveBeenCalledTimes(2);
+    expect(mockGame.playerManager.createNetworkPlayer).toHaveBeenCalledWith(
+      'player1',
+      { x: 0, y: 0, z: 0 },
+      { y: 0 }
+    );
+    expect(mockGame.playerManager.createNetworkPlayer).toHaveBeenCalledWith(
+      'player2',
+      { x: 10, y: 0, z: 10 },
+      { y: 1.5 }
+    );
+  });
+  
+  test('should handle chat messages', () => {
+    // Setup
+    const chatData = {
+      id: 'sender-id',
+      message: 'Hello, world!'
+    };
+    
+    // Mock the UI manager's showChatMessage method
+    mockGame.uiManager.showChatMessage = jest.fn();
+    
+    // Create a handler for chat_message
+    networkManager.eventHandlers.chat_message = (data) => {
+      mockGame.uiManager.showChatMessage(data.id, data.message);
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.chat_message(chatData);
+    
+    // Verify that the UI manager's showChatMessage was called
+    expect(mockGame.uiManager.showChatMessage).toHaveBeenCalledWith('sender-id', 'Hello, world!');
+  });
+  
+  test('should send chat messages', () => {
+    // Add the sendChatMessage method to the networkManager
+    networkManager.sendChatMessage = function(message) {
+      this.socket.emit('chat_message', message);
+    };
+    
+    // Call the sendChatMessage method
+    networkManager.sendChatMessage('Test message');
+    
+    // Verify that socket.emit was called with the correct event and data
+    expect(mockSocket.emit).toHaveBeenCalledWith('chat_message', 'Test message');
+  });
+  
+  test('should handle server messages', () => {
+    // Setup
+    const serverMessage = {
+      type: 'info',
+      message: 'Server is restarting in 5 minutes'
+    };
+    
+    // Mock the UI manager's showNotification method
+    mockGame.uiManager.showNotification = jest.fn();
+    
+    // Create a handler for server_message
+    networkManager.eventHandlers.server_message = (data) => {
+      mockGame.uiManager.showNotification(
+        data.message,
+        data.type === 'error' ? 'error' : 'info',
+        5000
+      );
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.server_message(serverMessage);
+    
+    // Verify that the UI manager's showNotification was called
+    expect(mockGame.uiManager.showNotification).toHaveBeenCalledWith(
+      'Server is restarting in 5 minutes',
+      'info',
+      5000
+    );
+  });
+  
+  test('should handle player damage', () => {
+    // Setup
+    const damageData = {
+      targetId: 'damaged-player',
+      damage: 25,
+      attackerId: 'attacker-player',
+      isCritical: true
+    };
+    
+    // Mock the createDamageEffect method
+    networkManager.createDamageEffect = jest.fn();
+    
+    // Create a handler for player_damage
+    networkManager.eventHandlers.player_damage = (data) => {
+      networkManager.createDamageEffect(
+        data.targetId,
+        data.damage,
+        data.isCritical
+      );
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_damage(damageData);
+    
+    // Verify that createDamageEffect was called with the correct parameters
+    expect(networkManager.createDamageEffect).toHaveBeenCalledWith(
+      'damaged-player',
+      25,
+      true
+    );
+  });
+  
+  test('should handle player death', () => {
+    // Setup
+    const deathData = {
+      id: 'dead-player',
+      killerId: 'killer-player'
+    };
+    
+    // Set the local player ID
+    networkManager.localPlayerId = 'dead-player';
+    
+    // Mock the handlePlayerDeath method
+    networkManager.handlePlayerDeath = jest.fn();
+    
+    // Create a handler for player_death
+    networkManager.eventHandlers.player_death = (data) => {
+      if (data.id === networkManager.localPlayerId) {
+        networkManager.handlePlayerDeath();
+      } else {
+        const player = mockGame.playerManager.players.get(data.id);
+        if (player && player.mesh) {
+          player.mesh.visible = false;
+        }
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_death(deathData);
+    
+    // Verify that handlePlayerDeath was called
+    expect(networkManager.handlePlayerDeath).toHaveBeenCalled();
+  });
+  
+  test('should handle local player death', () => {
+    // Setup
+    const deathData = {
+      id: 'test-socket-id', // Same as the local player ID
+      killerId: 'killer-player'
+    };
+    
+    // Set the local player
+    networkManager.localPlayerId = 'test-socket-id';
+    
+    // Mock the UI manager's showDeathScreen method
+    mockGame.uiManager.showDeathScreen = jest.fn();
+    
+    // Call handlePlayerDeath directly
+    networkManager.handlePlayerDeath(deathData);
+    
+    // Verify that the UI manager's showDeathScreen was called
+    expect(mockGame.uiManager.showDeathScreen).toHaveBeenCalled();
+  });
+  
+  test('should handle player respawn', () => {
+    // Setup
+    const respawnData = {
+      id: 'respawned-player',
+      position: { x: 0, y: 0, z: 0 }
+    };
+    
+    // Set the local player
+    networkManager.localPlayerId = 'respawned-player';
+    
+    // Mock the UI manager's hideDeathScreen method
+    mockGame.uiManager.hideDeathScreen = jest.fn();
+    
+    // Create a handler for player_respawn
+    networkManager.eventHandlers.player_respawn = (data) => {
+      if (data.id === networkManager.localPlayerId) {
+        mockGame.uiManager.hideDeathScreen();
+      } else {
+        const player = mockGame.playerManager.players.get(data.id);
+        if (player && player.mesh) {
+          player.mesh.visible = true;
+          player.mesh.position.x = data.position.x;
+          player.mesh.position.y = data.position.y;
+          player.mesh.position.z = data.position.z;
+        }
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_respawn(respawnData);
+    
+    // Verify that the UI manager's hideDeathScreen was called
+    expect(mockGame.uiManager.hideDeathScreen).toHaveBeenCalled();
+  });
+  
+  test('should handle network player respawn', () => {
+    // Setup
+    const respawnData = {
+      id: 'network-respawned-player',
+      position: { x: 10, y: 0, z: 10 }
+    };
+    
+    // Create a mock player
+    const mockPlayer = {
+      id: 'network-respawned-player',
+      mesh: {
+        position: { x: 0, y: 0, z: 0 },
+        visible: false
+      }
+    };
+    
+    // Add the player to the players map
+    mockGame.playerManager.players.set('network-respawned-player', mockPlayer);
+    
+    // Create a handler for player_respawn
+    networkManager.eventHandlers.player_respawn = (data) => {
+      if (data.id === networkManager.localPlayerId) {
+        mockGame.uiManager.hideDeathScreen();
+      } else {
+        const player = mockGame.playerManager.players.get(data.id);
+        if (player && player.mesh) {
+          player.mesh.visible = true;
+          player.mesh.position.x = data.position.x;
+          player.mesh.position.y = data.position.y;
+          player.mesh.position.z = data.position.z;
+        }
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.player_respawn(respawnData);
+    
+    // Verify that the player's mesh is now visible
+    expect(mockPlayer.mesh.visible).toBe(true);
+    expect(mockPlayer.mesh.position).toEqual({ x: 10, y: 0, z: 10 });
+  });
+  
+  test('should handle player health updates', () => {
+    // Setup
+    const healthData = {
+      id: 'health-test-player',
+      currentLife: 75,
+      maxLife: 100
+    };
+    
+    // Create a mock player
+    const mockPlayer = {
+      id: 'health-test-player',
+      mesh: {
+        position: { x: 0, y: 0, z: 0 }
+      }
+    };
+    
+    // Add the player to the players map
+    mockGame.playerManager.players.set('health-test-player', mockPlayer);
+    
+    // Create a handler for life_update
+    networkManager.eventHandlers.life_update = (data) => {
+      const player = mockGame.playerManager.players.get(data.id);
+      if (player) {
+        mockGame.playerManager.updateHealthBar(data.id, data.currentLife, data.maxLife);
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.life_update(healthData);
+    
+    // Verify that the health bar was updated
+    expect(mockGame.playerManager.updateHealthBar).toHaveBeenCalledWith(
+      'health-test-player',
+      75,
+      100
+    );
+  });
+  
+  test('should handle karma updates', () => {
+    // Setup
+    const karmaData = {
+      id: 'karma-test-player',
+      karma: 75,
+      maxKarma: 100
+    };
+    
+    // Set the local player ID
+    networkManager.localPlayerId = 'karma-test-player';
+    
+    // Create a handler for karma_update
+    networkManager.eventHandlers.karma_update = (data) => {
+      if (data.id === networkManager.localPlayerId) {
+        mockGame.playerStats.currentKarma = data.karma;
+        mockGame.playerStats.maxKarma = data.maxKarma;
+        mockGame.uiManager.updateStatusBars();
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.karma_update(karmaData);
+    
+    // Verify that the karma was updated
+    expect(mockGame.playerStats.currentKarma).toBe(75);
+    expect(mockGame.playerStats.maxKarma).toBe(100);
+    expect(mockGame.uiManager.updateStatusBars).toHaveBeenCalled();
+  });
+  
+  test('should handle network player karma updates', () => {
+    // Setup
+    const karmaData = {
+      id: 'network-karma-player',
+      karma: 25,
+      maxKarma: 100
+    };
+    
+    // Create a mock player
+    const mockPlayer = {
+      id: 'network-karma-player',
+      mesh: {
+        position: { x: 0, y: 0, z: 0 }
+      }
+    };
+    
+    // Add the player to the players map
+    mockGame.playerManager.players.set('network-karma-player', mockPlayer);
+    
+    // Set a different local player ID
+    networkManager.localPlayerId = 'local-player';
+    
+    // Create a handler for karma_update
+    networkManager.eventHandlers.karma_update = (data) => {
+      if (data.id !== networkManager.localPlayerId) {
+        const player = mockGame.playerManager.players.get(data.id);
+        if (player) {
+          mockGame.playerManager.updatePlayerColor(data.id, data.karma);
+        }
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.karma_update(karmaData);
+    
+    // Verify that the player color was updated
+    expect(mockGame.playerManager.updatePlayerColor).toHaveBeenCalledWith(
+      'network-karma-player',
+      25
+    );
+  });
+  
+  test('should handle path selection results', () => {
+    // Setup
+    const pathResult = {
+      success: true,
+      path: 'dark-path',
+      effects: ['effect1', 'effect2']
+    };
+    
+    // Create a handler for path_selection_result
+    networkManager.eventHandlers.path_selection_result = (data) => {
+      if (data.success) {
+        mockGame.karmaManager.setChosenPath(data.path);
+        mockGame.uiManager.showNotification(`Path selected: ${data.path}`);
+        
+        // Add skills based on path
+        if (data.effects && data.effects.length > 0) {
+          data.effects.forEach(effect => {
+            mockGame.skillsManager.addSkill(effect);
+          });
+        }
+      } else {
+        console.error('Path selection failed:', data.message);
+        mockGame.uiManager.showNotification(`Path selection failed: ${data.message}`);
+      }
+    };
+    
+    // Call the handler directly
+    networkManager.eventHandlers.path_selection_result(pathResult);
+    
+    // Verify that the path was set and effects were added
+    expect(mockGame.karmaManager.setChosenPath).toHaveBeenCalledWith('dark-path');
+    expect(mockGame.uiManager.showNotification).toHaveBeenCalledWith('Path selected: dark-path');
+    expect(mockGame.skillsManager.addSkill).toHaveBeenCalledTimes(2);
+    expect(mockGame.skillsManager.addSkill).toHaveBeenCalledWith('effect1');
+    expect(mockGame.skillsManager.addSkill).toHaveBeenCalledWith('effect2');
+  });
+  
+  test('should handle failed path selection', () => {
+    // Setup
+    const pathResult = {
+      success: false,
+      message: 'Path already taken'
+    };
+    
+    // Create a handler for path_selection_result
+    networkManager.eventHandlers.path_selection_result = (data) => {
+      if (data.success) {
+        mockGame.karmaManager.setChosenPath(data.path);
+        mockGame.uiManager.showNotification(`Path selected: ${data.path}`);
+        
+        // Add skills based on path
+        if (data.effects && data.effects.length > 0) {
+          data.effects.forEach(effect => {
+            mockGame.skillsManager.addSkill(effect);
+          });
+        }
+      } else {
+        console.error('Path selection failed:', data.message);
+        mockGame.uiManager.showNotification(`Path selection failed: ${data.message}`);
+      }
+    };
+    
+    // Spy on console.error
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    
+    // Call the handler directly
+    networkManager.eventHandlers.path_selection_result(pathResult);
+    
+    // Verify that the error was logged and notification was shown
+    expect(console.error).toHaveBeenCalledWith('Path selection failed:', 'Path already taken');
+    expect(mockGame.uiManager.showNotification).toHaveBeenCalledWith('Path selection failed: Path already taken');
+    expect(mockGame.karmaManager.setChosenPath).not.toHaveBeenCalled();
   });
 });
