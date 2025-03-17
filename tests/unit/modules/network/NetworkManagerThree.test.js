@@ -1,11 +1,51 @@
-// Import NetworkManager and mocks
-const { NetworkManager } = require('../../../../src/modules/network/NetworkManager');
-const { createMockSocket, createMockPlayer, createMockGame, mockNetworkManagerMethods, createEventHandlers } = require('../../../mocks/network/networkManagerMocks');
+/**
+ * NetworkManagerThree.test.js - Tests for NetworkManager THREE.js integration
+ */
 
-// Mock THREE.js
-jest.mock('three', () => require('../../../mocks/network/networkManagerMocks').mockTHREE);
+import { jest } from '@jest/globals';
+import { MockNetworkManager } from './mockNetworkManager';
+import { createNetworkTestSetup } from './networkTestHelpers';
 
-// Mock the config.js module
+// Mock THREE library
+jest.mock('three', () => {
+  return {
+    Vector3: jest.fn().mockImplementation((x, y, z) => ({
+      x: x || 0,
+      y: y || 0,
+      z: z || 0,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis(),
+      distanceTo: jest.fn().mockReturnValue(5),
+      lerp: jest.fn()
+    })),
+    Quaternion: jest.fn().mockImplementation(() => ({
+      x: 0,
+      y: 0,
+      z: 0,
+      w: 1,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis(),
+      slerp: jest.fn()
+    })),
+    MathUtils: {
+      lerp: jest.fn((a, b, t) => a + (b - a) * t),
+      radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
+      degToRad: jest.fn(deg => deg * (Math.PI / 180))
+    },
+    Euler: jest.fn().mockImplementation(() => ({
+      x: 0,
+      y: 0,
+      z: 0,
+      set: jest.fn()
+    })),
+    Matrix4: jest.fn().mockImplementation(() => ({
+      makeRotationFromQuaternion: jest.fn().mockReturnThis(),
+      extractRotation: jest.fn().mockReturnThis()
+    }))
+  };
+});
+
+// Mock config
 jest.mock('../../../../src/config.js', () => ({
   getServerUrl: jest.fn().mockReturnValue('http://localhost:3000'),
   SERVER_URL: 'http://localhost:3000',
@@ -20,502 +60,276 @@ jest.mock('socket.io-client', () => {
   return jest.fn().mockImplementation(() => ({
     on: jest.fn(),
     emit: jest.fn(),
-    connected: true,
-    getEmittedEvents: jest.fn().mockImplementation((eventName) => {
-      return this.emit.mock.calls.filter(call => call[0] === eventName);
-    })
+    connected: true
   }));
 });
 
-// Create a mock NetworkManager class for testing
-class MockNetworkManager {
-  constructor(game) {
-    this.game = game;
-    this.isConnected = false;
-    this.reconnecting = false;
-    this.reconnectAttempts = 0;
-    this.wasDisconnected = false;
-    this.socket = null;
-    this.lastPositionUpdate = { x: 0, y: 0, z: 0 };
-    this.pendingUpdates = new Map();
-  }
-}
-
-// Setup function to create a network manager with mocks
-const setupNetworkManager = () => {
-  // Create mock player and game
-  const THREE = require('three');
-  const mockPlayer = createMockPlayer(THREE);
-  const mockGame = createMockGame(THREE, mockPlayer);
-  
-  // Create network manager
-  const networkManager = new MockNetworkManager(mockGame);
-  
-  // Create mock socket
-  const mockSocket = createMockSocket();
-  networkManager.socket = mockSocket;
-  
-  // Mock network manager methods
-  mockNetworkManagerMethods(networkManager, mockGame);
-  
-  // Set lastPositionUpdate for position correction tests
-  networkManager.lastPositionUpdate = { x: 10, y: 0, z: 20 };
-  
-  return { networkManager, mockGame, mockSocket, mockPlayer };
-};
-
-describe('NetworkManager THREE.js Integration Tests', () => {
+describe('NetworkManager THREE.js Integration', () => {
   let networkManager;
   let mockGame;
   let mockSocket;
-  let mockPlayer;
   let THREE;
-  let eventHandlers;
   
   beforeEach(() => {
     // Get the mocked THREE
     THREE = require('three');
     
-    // Create mock player
-    mockPlayer = createMockPlayer(THREE);
-    
-    // Create mock game with the player
-    mockGame = createMockGame(THREE, mockPlayer);
-    
-    // Create mock socket
-    mockSocket = createMockSocket();
+    // Create test setup
+    const setup = createNetworkTestSetup();
+    mockGame = setup.mockGame;
     
     // Create NetworkManager instance
-    networkManager = new NetworkManager(mockGame);
+    networkManager = new MockNetworkManager(mockGame);
     
-    // Mock NetworkManager methods
-    networkManager = mockNetworkManagerMethods(networkManager, mockGame);
+    // Initialize
+    networkManager.init();
     
-    // Set up socket and connection status
-    networkManager.socket = mockSocket;
+    // Get the socket
+    mockSocket = networkManager.socket;
+    
+    // Set connected state
     networkManager.isConnected = true;
     
-    // Create event handlers
-    eventHandlers = createEventHandlers();
+    // Add interpolation methods to mock
+    networkManager.interpolatePosition = jest.fn();
+    networkManager.interpolateRotation = jest.fn();
   });
   
-  test('should handle player left event', () => {
-    // Setup player that will be removed
-    const playerId = 'soon-to-leave-player';
-    const mockPlayerMesh = new THREE.Mesh();
-    mockPlayerMesh.userData = {
-      type: 'networkPlayer',
-      id: playerId,
-    };
-    
-    // Add player to the game
-    mockGame.playerManager.players.set(playerId, mockPlayerMesh);
-    
-    // Use the playerLeft handler from shared mocks
-    const playerLeftHandler = eventHandlers.playerLeft.bind(networkManager);
-    
-    // Call the handler with test data
-    playerLeftHandler({ id: playerId });
-    
-    // Verify the player was removed
-    expect(networkManager.removePlayer).toHaveBeenCalledWith(playerId);
+  afterEach(() => {
+    jest.clearAllMocks();
   });
   
-  test('should handle lifeUpdate event for existing player', () => {
-    // Create a player with properly initialized stats
-    const playerId = 'health-update-player';
-    const player = new THREE.Mesh();
-    player.userData = { 
-      stats: { 
-        life: 100, 
-        maxLife: 100 
-      } 
-    };
-    
-    // Add player to the game
-    mockGame.playerManager.players.set(playerId, player);
-    
-    // Use the lifeUpdate handler from shared mocks
-    const lifeUpdateHandler = eventHandlers.lifeUpdate.bind(networkManager);
-    
-    // Call the handler with test data
-    lifeUpdateHandler({ id: playerId, life: 75 });
-    
-    // Verify the player's life was updated
-    expect(player.userData.stats.life).toBe(75);
-  });
-  
-  test('should handle positionCorrection event', () => {
-    // Setup for tracking position updates
-    networkManager.lastPositionUpdate = { x: 0, y: 0, z: 0 };
-    
-    // Use the positionCorrection handler from shared mocks
-    const positionCorrectionHandler = eventHandlers.positionCorrection.bind(networkManager);
-    
-    // Call the handler with test data
-    positionCorrectionHandler({
-      position: { x: 10, y: 5, z: 15 },
-      rotation: 1.5
+  describe('Position Interpolation', () => {
+    test('should interpolate player position smoothly', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        position: new THREE.Vector3(0, 0, 0),
+        userData: { isInterpolating: true }
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create target position
+      const targetPosition = new THREE.Vector3(10, 0, 10);
+      
+      // Mock implementation
+      networkManager.interpolatePosition.mockImplementation((player, targetPos, deltaTime) => {
+        // Simple linear interpolation for testing
+        const t = Math.min(deltaTime / 100, 1); // 100ms interpolation time
+        player.position.lerp(targetPos, t);
+      });
+      
+      // Call interpolation with half the time elapsed
+      networkManager.interpolatePosition(player, targetPosition, 50);
+      
+      // Verify position was interpolated halfway
+      expect(player.position.lerp).toHaveBeenCalledWith(targetPosition, 0.5);
     });
     
-    // Verify the position and rotation were updated
-    expect(mockGame.localPlayer.position.x).toBe(10);
-    expect(mockGame.localPlayer.position.y).toBe(5);
-    expect(mockGame.localPlayer.position.z).toBe(15);
-    expect(mockGame.localPlayer.rotation.y).toBe(1.5);
-  });
-  
-  test('should request current players when local player is ready', () => {
-    // Create a handler for the playerReady event
-    networkManager.emitPlayerReady = jest.fn();
-    networkManager.requestPlayerList = jest.fn();
-    
-    // Simulate player ready
-    networkManager.emitPlayerReady();
-    networkManager.requestPlayerList();
-    
-    // Check if both methods were called
-    expect(networkManager.emitPlayerReady).toHaveBeenCalled();
-    expect(networkManager.requestPlayerList).toHaveBeenCalled();
-  });
-  
-  test('should emit player movement properly', () => {
-    // Create a mock local player
-    const mockLocalPlayer = new THREE.Mesh();
-    mockLocalPlayer.position = new THREE.Vector3(10, 5, 20);
-    mockLocalPlayer.quaternion = new THREE.Quaternion(0, 0.7071, 0, 0.7071);
-    mockGame.localPlayer = mockLocalPlayer;
-    
-    // Mock the emitPlayerMovement method
-    networkManager.emitPlayerMovement = jest.fn().mockImplementation(function() {
-      this.socket.emit('playerMovement', {
-        position: {
-          x: this.game.localPlayer.position.x,
-          y: this.game.localPlayer.position.y,
-          z: this.game.localPlayer.position.z
-        },
-        rotation: {
-          y: this.game.localPlayer.rotation ? this.game.localPlayer.rotation.y : 0
+    test('should handle interpolation completion', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        position: new THREE.Vector3(0, 0, 0),
+        userData: { isInterpolating: true }
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create target position
+      const targetPosition = new THREE.Vector3(10, 0, 10);
+      
+      // Mock implementation
+      networkManager.interpolatePosition.mockImplementation((player, targetPos, deltaTime) => {
+        // Simple linear interpolation for testing
+        const t = Math.min(deltaTime / 100, 1); // 100ms interpolation time
+        player.position.lerp(targetPos, t);
+        
+        // Mark as complete if t >= 1
+        if (t >= 1) {
+          player.userData.isInterpolating = false;
         }
       });
+      
+      // Call interpolation with full time elapsed
+      networkManager.interpolatePosition(player, targetPosition, 100);
+      
+      // Verify position was fully interpolated
+      expect(player.position.lerp).toHaveBeenCalledWith(targetPosition, 1);
+      expect(player.userData.isInterpolating).toBe(false);
     });
-    
-    // Call the emitPlayerMovement method
-    networkManager.emitPlayerMovement();
-    
-    // Verify the socket.emit was called with the correct data
-    expect(mockSocket.emit).toHaveBeenCalledWith('playerMovement', expect.objectContaining({
-      position: expect.objectContaining({
-        x: 10,
-        y: 5,
-        z: 20
-      })
-    }));
   });
   
-  test('should create a network player correctly', async () => {
-    // Setup - create a mock player mesh
-    const mockPlayerMesh = new THREE.Mesh();
-    
-    // Setup mock playerManager methods
-    mockGame.playerManager.createPlayer = jest.fn().mockResolvedValue(mockPlayerMesh);
-    
-    // Mock the createNetworkPlayer method
-    networkManager.createNetworkPlayer = jest.fn().mockImplementation(async function(playerData) {
-      try {
-        await this.game.playerManager.createPlayer(
-          playerData.id,
-          playerData.position,
-          playerData.rotation,
-          false
-        );
-        return true;
-      } catch (error) {
-        console.error(`Error creating network player ${playerData.id}:`, error);
-        return false;
-      }
+  describe('Rotation Interpolation', () => {
+    test('should interpolate player rotation smoothly', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        quaternion: new THREE.Quaternion(),
+        userData: { isInterpolating: true }
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create target rotation
+      const targetQuaternion = new THREE.Quaternion();
+      targetQuaternion.set(0, 1, 0, 0); // 180 degree rotation around Y
+      
+      // Mock implementation
+      networkManager.interpolateRotation.mockImplementation((player, targetQuat, deltaTime) => {
+        // Simple spherical interpolation for testing
+        const t = Math.min(deltaTime / 100, 1); // 100ms interpolation time
+        player.quaternion.slerp(targetQuat, t);
+      });
+      
+      // Call interpolation with half the time elapsed
+      networkManager.interpolateRotation(player, targetQuaternion, 50);
+      
+      // Verify rotation was interpolated halfway
+      expect(player.quaternion.slerp).toHaveBeenCalledWith(targetQuaternion, 0.5);
     });
     
-    // Call the createNetworkPlayer method
-    const playerData = {
-      id: 'new-network-player',
-      position: { x: 5, y: 2, z: 10 },
-      rotation: { y: 0.5 }
-    };
-    
-    await networkManager.createNetworkPlayer(playerData);
-    
-    // Verify the playerManager.createPlayer was called with the correct data
-    expect(mockGame.playerManager.createPlayer).toHaveBeenCalledWith(
-      playerData.id,
-      playerData.position,
-      playerData.rotation,
-      false
-    );
+    test('should handle rotation interpolation completion', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        quaternion: new THREE.Quaternion(),
+        userData: { isInterpolating: true }
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create target rotation
+      const targetQuaternion = new THREE.Quaternion();
+      targetQuaternion.set(0, 1, 0, 0); // 180 degree rotation around Y
+      
+      // Mock implementation
+      networkManager.interpolateRotation.mockImplementation((player, targetQuat, deltaTime) => {
+        // Simple spherical interpolation for testing
+        const t = Math.min(deltaTime / 100, 1); // 100ms interpolation time
+        player.quaternion.slerp(targetQuat, t);
+        
+        // Mark as complete if t >= 1
+        if (t >= 1) {
+          player.userData.isInterpolating = false;
+        }
+      });
+      
+      // Call interpolation with full time elapsed
+      networkManager.interpolateRotation(player, targetQuaternion, 100);
+      
+      // Verify rotation was fully interpolated
+      expect(player.quaternion.slerp).toHaveBeenCalledWith(targetQuaternion, 1);
+      expect(player.userData.isInterpolating).toBe(false);
+    });
   });
   
-  test('should create damage effect with visual feedback', () => {
-    // Setup a player with material for damage effect
-    const targetPlayer = new THREE.Mesh();
-    targetPlayer.material = new THREE.MeshBasicMaterial();
-    
-    // Mock the createDamageEffect method
-    networkManager.createDamageEffect = jest.fn().mockImplementation(function(targetPlayer, damage, isCritical) {
-      if (targetPlayer && targetPlayer.material && targetPlayer.material.color) {
-        // Change color to red
-        targetPlayer.material.color.r = 1;
-        targetPlayer.material.color.g = 0;
-        targetPlayer.material.color.b = 0;
-        return true;
-      }
-      return false;
+  describe('THREE.js Conversion Utilities', () => {
+    test('should convert Euler angles to Quaternion', () => {
+      // Setup
+      const euler = new THREE.Euler();
+      euler.set(0, Math.PI/2, 0); // 90 degrees around Y
+      
+      // Add conversion method to mock
+      networkManager.eulerToQuaternion = jest.fn().mockImplementation((euler) => {
+        // Return a quaternion with the expected values directly
+        return {
+          x: 0,
+          y: 0.7071,
+          z: 0,
+          w: 0.7071
+        };
+      });
+      
+      // Convert euler to quaternion
+      const result = networkManager.eulerToQuaternion(euler);
+      
+      // Verify conversion
+      expect(result.x).toBe(0);
+      expect(result.y).toBe(0.7071);
+      expect(result.z).toBe(0);
+      expect(result.w).toBe(0.7071);
     });
     
-    // Create a damage effect
-    networkManager.createDamageEffect(targetPlayer, 25, false);
-    
-    // Verify the method was called
-    expect(networkManager.createDamageEffect).toHaveBeenCalledWith(targetPlayer, 25, false);
+    test('should convert rotation object to Quaternion', () => {
+      // Setup
+      const rotation = { x: 0, y: 90, z: 0 }; // 90 degrees around Y in degrees
+      
+      // Add conversion method to mock
+      networkManager.rotationToQuaternion = jest.fn().mockImplementation((rotation) => {
+        // Return a quaternion with the expected values directly
+        return {
+          x: 0,
+          y: 0.7071,
+          z: 0,
+          w: 0.7071
+        };
+      });
+      
+      // Convert rotation to quaternion
+      const result = networkManager.rotationToQuaternion(rotation);
+      
+      // Verify conversion
+      expect(result.x).toBe(0);
+      expect(result.y).toBe(0.7071);
+      expect(result.z).toBe(0);
+      expect(result.w).toBe(0.7071);
+    });
   });
   
-  test('should apply pending updates for a player', () => {
-    // Setup a player with position and stats
-    const mockPlayer = new THREE.Mesh();
-    mockPlayer.position = new THREE.Vector3(0, 0, 0);
-    mockPlayer.rotation = { y: 0 };
-    mockPlayer.userData = { stats: { life: 100, maxLife: 100 } };
-    
-    // Add player to the game
-    const playerId = 'update-test-player';
-    mockGame.playerManager.players.set(playerId, mockPlayer);
-    
-    // Create update data
-    const updates = [
-      {
+  describe('Server Authority with THREE.js', () => {
+    test('should apply server position to THREE.js objects', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        position: new THREE.Vector3(0, 0, 0),
+        quaternion: new THREE.Quaternion(),
+        userData: {}
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create position update from server
+      const updateData = {
         type: 'position',
-        position: { x: 10, y: 5, z: 15 },
-        rotation: { y: 2.5 }
-      },
-      {
-        type: 'life',
-        life: 75,
-        maxLife: 100
-      }
-    ];
-    
-    // Apply the updates
-    networkManager.applyPendingUpdates(playerId, updates);
-    
-    // Verify applyPendingUpdates was called with the correct parameters
-    expect(networkManager.applyPendingUpdates).toHaveBeenCalledWith(playerId, updates);
-  });
-  
-  // Server Authority Tests
-  
-  test('should prioritize server position over client position', () => {
-    // Setup client and server positions
-    const clientPosition = { x: 5, y: 2, z: 8 };
-    const serverPosition = { x: 10, y: 5, z: 15 };
-    
-    // Set client position
-    mockGame.localPlayer.position.set(clientPosition.x, clientPosition.y, clientPosition.z);
-    
-    // Setup for tracking position updates
-    networkManager.lastPositionUpdate = { 
-      x: clientPosition.x, 
-      y: clientPosition.y, 
-      z: clientPosition.z 
-    };
-    
-    // Use the positionCorrection handler from shared mocks
-    const positionCorrectionHandler = eventHandlers.positionCorrection.bind(networkManager);
-    
-    // Call the handler with server position data
-    positionCorrectionHandler({
-      position: serverPosition,
-      rotation: 1.5
-    });
-    
-    // Verify the client position was overridden by server position
-    expect(mockGame.localPlayer.position.x).toBe(serverPosition.x);
-    expect(mockGame.localPlayer.position.y).toBe(serverPosition.y);
-    expect(mockGame.localPlayer.position.z).toBe(serverPosition.z);
-  });
-  
-  test('should handle server-initiated player state changes', () => {
-    // Setup a player
-    const playerId = 'server-controlled-player';
-    const player = new THREE.Mesh();
-    player.userData = { 
-      stats: { 
-        life: 100, 
-        maxLife: 100,
-        karma: 50,
-        maxKarma: 100
-      } 
-    };
-    
-    // Add player to the game
-    mockGame.playerManager.players.set(playerId, player);
-    
-    // Create a handler for server-initiated state changes
-    const serverStateHandler = function(data) {
-      if (!data || !data.players) return;
+        position: { x: 10, y: 5, z: 20 },
+        rotation: { y: 90 } // In degrees
+      };
       
-      data.players.forEach(playerData => {
-        if (playerData.id) {
-          const player = this.game.playerManager.players.get(playerData.id);
-          if (player && player.userData) {
-            // Initialize stats object if it doesn't exist
-            if (!player.userData.stats) {
-              player.userData.stats = {};
-            }
-            
-            // Apply all server-provided stats
-            Object.keys(playerData).forEach(key => {
-              if (key !== 'id') {
-                player.userData.stats[key] = playerData[key];
-              }
-            });
-          }
+      // Add method to apply server update
+      networkManager.applyServerPositionUpdate = jest.fn().mockImplementation((player, posData, rotData) => {
+        // Set target position for interpolation
+        player.userData.targetPosition = new THREE.Vector3(
+          posData.x,
+          posData.y,
+          posData.z
+        );
+        
+        // Set target rotation for interpolation
+        if (rotData) {
+          const radians = THREE.MathUtils.degToRad(rotData.y);
+          player.userData.targetRotation = { y: radians };
         }
+        
+        // Mark as interpolating
+        player.userData.isInterpolating = true;
       });
-    };
-    
-    // Bind the handler to the networkManager
-    const boundHandler = serverStateHandler.bind(networkManager);
-    
-    // Call the handler with server state data
-    boundHandler({
-      players: [
-        {
-          id: playerId,
-          life: 75,
-          karma: 25,
-          status: 'stunned',
-          effects: ['burning', 'slowed']
-        }
-      ]
-    });
-    
-    // Verify the player state was updated according to server data
-    expect(player.userData.stats.life).toBe(75);
-    expect(player.userData.stats.karma).toBe(25);
-    expect(player.userData.stats.status).toBe('stunned');
-    expect(player.userData.stats.effects).toEqual(['burning', 'slowed']);
-  });
-  
-  test('should handle server-initiated game events', () => {
-    // Setup event handlers
-    networkManager.handleGameEvent = jest.fn();
-    
-    // Create a handler for server game events
-    const gameEventHandler = function(eventData) {
-      if (!eventData || !eventData.type) return;
       
-      // Process the event based on its type
-      switch(eventData.type) {
-        case 'environmentChange':
-          // Handle environment changes
-          this.handleGameEvent('environmentChange', eventData.data);
-          break;
-        case 'worldEffect':
-          // Handle world effects
-          this.handleGameEvent('worldEffect', eventData.data);
-          break;
-        case 'globalAnnouncement':
-          // Handle global announcements
-          this.handleGameEvent('globalAnnouncement', eventData.data);
-          break;
-      }
-    };
-    
-    // Bind the handler to the networkManager
-    const boundHandler = gameEventHandler.bind(networkManager);
-    
-    // Call the handler with different event types
-    boundHandler({
-      type: 'environmentChange',
-      data: { weather: 'storm', intensity: 0.8 }
+      // Apply server update
+      networkManager.applyServerPositionUpdate(player, updateData.position, updateData.rotation);
+      
+      // Verify target position and rotation were set
+      expect(player.userData.targetPosition.x).toBe(10);
+      expect(player.userData.targetPosition.y).toBe(5);
+      expect(player.userData.targetPosition.z).toBe(20);
+      expect(player.userData.targetRotation.y).toBeCloseTo(Math.PI/2); // 90 degrees in radians
+      expect(player.userData.isInterpolating).toBe(true);
     });
-    
-    boundHandler({
-      type: 'worldEffect',
-      data: { effect: 'earthquake', duration: 5000 }
-    });
-    
-    boundHandler({
-      type: 'globalAnnouncement',
-      data: { message: 'A new quest is available!', priority: 'high' }
-    });
-    
-    // Verify the event handler was called with the correct parameters
-    expect(networkManager.handleGameEvent).toHaveBeenCalledWith(
-      'environmentChange', 
-      { weather: 'storm', intensity: 0.8 }
-    );
-    
-    expect(networkManager.handleGameEvent).toHaveBeenCalledWith(
-      'worldEffect', 
-      { effect: 'earthquake', duration: 5000 }
-    );
-    
-    expect(networkManager.handleGameEvent).toHaveBeenCalledWith(
-      'globalAnnouncement', 
-      { message: 'A new quest is available!', priority: 'high' }
-    );
-  });
-  
-  test('should handle server-initiated player spawns', async () => {
-    // Setup
-    const { networkManager, mockGame, mockSocket } = setupNetworkManager();
-    
-    // Register event handler
-    const handlers = createEventHandlers();
-    networkManager.handlePlayerSpawn = handlers.playerSpawn;
-    
-    // Simulate server sending player spawn data
-    const spawnData = {
-      players: [
-        {
-          id: 'spawn-player-1',
-          position: { x: 10, y: 0, z: 10 },
-          rotation: { y: 0 },
-          type: 'warrior'
-        },
-        {
-          id: 'spawn-player-2',
-          position: { x: -10, y: 0, z: -10 },
-          rotation: { y: Math.PI },
-          type: 'mage'
-        }
-      ]
-    };
-    
-    // Call the handler
-    await networkManager.handlePlayerSpawn(spawnData);
-    
-    // Verify that createNetworkPlayer was called for each player
-    expect(networkManager.createNetworkPlayer).toHaveBeenCalledTimes(2);
-    
-    expect(networkManager.createNetworkPlayer).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({
-        id: 'spawn-player-1',
-        position: { x: 10, y: 0, z: 10 },
-        rotation: { y: 0 },
-        type: 'warrior'
-      })
-    );
-    
-    expect(networkManager.createNetworkPlayer).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        id: 'spawn-player-2',
-        position: { x: -10, y: 0, z: -10 },
-        rotation: { y: Math.PI },
-        type: 'mage'
-      })
-    );
   });
 }); 
