@@ -16,15 +16,20 @@ export class NetworkManager {
         this.sockets = new Map();
         this.statsUpdateInterval = null;
         
+        // Get allowed origins from environment or use defaults
+        const corsOrigin = process.env.CORS_ORIGIN 
+            ? [process.env.CORS_ORIGIN] 
+            : ["https://localhost:5173", "https://localhost:3000", "https://play.karmaonline.io"];
+        
         // Initialize socket server
         this.io = new Server(httpServer, {
             cors: {
-                origin: ["https://localhost:5173", "https://localhost:3000"],
+                origin: corsOrigin,
                 methods: ["GET", "POST"],
                 credentials: true
             },
             transports: ['websocket', 'polling'],
-            secure: true
+            secure: process.env.NODE_ENV === 'production'
         });
         
         this.setupSocketHandlers();
