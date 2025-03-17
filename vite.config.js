@@ -68,7 +68,7 @@ export default defineConfig({
             output: {
                 manualChunks: {
                     vendor: ['three', 'socket.io-client'],
-                    game: ['src/index.js']
+                    game: ['src/main.js']
                 },
                 intro: generateDeadCode()
             }
