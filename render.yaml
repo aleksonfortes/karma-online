@@ -1,0 +1,61 @@
+services:
+  - name: karma-landing
+    type: web
+    env: static
+    buildCommand: npm run build:landing
+    staticPublishPath: ./landing-page/dist
+    domains:
+      - karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    
+  - name: karma-client
+    type: web
+    env: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    domains:
+      - play.karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_API_URL
+        value: https://api.karmaonline.io
+      - key: VITE_SOCKET_URL
+        value: wss://api.karmaonline.io
+      - key: VITE_ENV
+        value: production
+      - key: VITE_API_KEY
+        sync: false # This will be manually set in Render dashboard
+      - key: VITE_ANALYTICS_ID
+        sync: false # This will be manually set in Render dashboard
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+  
+  - name: karma-server
+    type: web
+    env: node
+    buildCommand: npm ci
+    startCommand: npm run start
+    domains:
+      - api.karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGIN
+        value: https://play.karmaonline.io
+      - key: API_KEY
+        sync: false # This will be manually set in Render dashboard
+      - key: JWT_SECRET
+        sync: false # This will be manually set in Render dashboard
+      - key: DATABASE_URL
+        sync: false # This will be manually set in Render dashboard 
