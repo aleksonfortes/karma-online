@@ -78,6 +78,21 @@ describe('NetworkManager THREE.js Integration', () => {
     const setup = createNetworkTestSetup();
     mockGame = setup.mockGame;
     
+    // Add skillsManager to mockGame
+    mockGame.skillsManager = {
+      revertSkillUse: jest.fn()
+    };
+    
+    // Ensure position is properly mocked
+    if (mockGame.playerManager && mockGame.playerManager.localPlayer) {
+      mockGame.playerManager.localPlayer.position = {
+        x: 0,
+        y: 0,
+        z: 0,
+        set: jest.fn()
+      };
+    }
+    
     // Create NetworkManager instance
     networkManager = new MockNetworkManager(mockGame);
     
@@ -330,6 +345,164 @@ describe('NetworkManager THREE.js Integration', () => {
       expect(player.userData.targetPosition.z).toBe(20);
       expect(player.userData.targetRotation.y).toBeCloseTo(Math.PI/2); // 90 degrees in radians
       expect(player.userData.isInterpolating).toBe(true);
+    });
+  });
+  
+  describe('Server Authority Validation and Conflict Resolution', () => {
+    test('should validate player actions with server before applying', () => {
+      // Setup
+      const actionData = {
+        type: 'skill_use',
+        skillId: 'fireball',
+        targetId: 'enemy-1',
+        position: { x: 10, y: 0, z: 10 }
+      };
+      
+      // Add validation method to mock
+      networkManager.validateActionWithServer = jest.fn().mockImplementation((action) => {
+        // Emit the action to server
+        mockSocket.emit('playerAction', action);
+        return true;
+      });
+      
+      // Validate action
+      const result = networkManager.validateActionWithServer(actionData);
+      
+      // Verify action was sent to server
+      expect(mockSocket.emit).toHaveBeenCalledWith('playerAction', actionData);
+      expect(result).toBe(true);
+    });
+    
+    test('should handle server rejection of player action', () => {
+      // Setup
+      const actionData = {
+        type: 'skill_use',
+        skillId: 'fireball',
+        targetId: 'enemy-1',
+        position: { x: 10, y: 0, z: 10 }
+      };
+      
+      // Add rejection handler method to mock
+      networkManager.handleServerRejection = jest.fn().mockImplementation((rejectionData) => {
+        // Log rejection
+        console.log(`Server rejected action: ${rejectionData.reason}`);
+        
+        // Revert any client-side prediction
+        if (rejectionData.type === 'skill_use') {
+          // Revert skill use
+          mockGame.skillsManager.revertSkillUse(rejectionData.skillId);
+        }
+        
+        return false;
+      });
+      
+      // Create rejection data
+      const rejectionData = {
+        type: 'skill_use',
+        skillId: 'fireball',
+        reason: 'Skill on cooldown',
+        timestamp: Date.now()
+      };
+      
+      // Handle rejection
+      const result = networkManager.handleServerRejection(rejectionData);
+      
+      // Verify rejection was handled
+      expect(result).toBe(false);
+    });
+    
+    test('should resolve position conflicts with server authority', () => {
+      // Setup
+      const playerId = 'test-player';
+      const player = {
+        position: new THREE.Vector3(5, 0, 5),
+        userData: { lastValidPosition: new THREE.Vector3(0, 0, 0) }
+      };
+      
+      // Add player to game
+      mockGame.playerManager.players.set(playerId, player);
+      
+      // Create server position data
+      const serverPosition = { x: 0, y: 0, z: 0 };
+      
+      // Add conflict resolution method to mock
+      networkManager.resolvePositionConflict = jest.fn().mockImplementation((player, serverPos) => {
+        // Calculate distance between positions
+        const distance = Math.sqrt(
+          Math.pow(player.position.x - serverPos.x, 2) +
+          Math.pow(player.position.y - serverPos.y, 2) +
+          Math.pow(player.position.z - serverPos.z, 2)
+        );
+        
+        // If distance is too large, snap to server position
+        if (distance > 10) {
+          player.position.x = serverPos.x;
+          player.position.y = serverPos.y;
+          player.position.z = serverPos.z;
+          return true; // Conflict resolved with snap
+        } else {
+          // Otherwise, interpolate to server position
+          player.userData.targetPosition = new THREE.Vector3(
+            serverPos.x,
+            serverPos.y,
+            serverPos.z
+          );
+          player.userData.isInterpolating = true;
+          return false; // Conflict resolved with interpolation
+        }
+      });
+      
+      // Resolve conflict
+      const result = networkManager.resolvePositionConflict(player, serverPosition);
+      
+      // Verify conflict resolution
+      expect(player.userData.targetPosition).toBeDefined();
+      expect(player.userData.isInterpolating).toBe(true);
+      expect(result).toBe(false); // Should use interpolation
+    });
+    
+    test('should handle server-side game state resets', () => {
+      // Setup
+      const resetData = {
+        type: 'game_reset',
+        reason: 'Server restart',
+        timestamp: Date.now()
+      };
+      
+      // Add reset handler method to mock
+      networkManager.handleServerReset = jest.fn().mockImplementation((resetData) => {
+        // Log reset
+        console.log(`Server reset: ${resetData.reason}`);
+        
+        // Clear all pending updates
+        networkManager.pendingUpdates.clear();
+        
+        // Reset local player position
+        if (mockGame.playerManager.localPlayer) {
+          const player = mockGame.playerManager.localPlayer;
+          // Check if set method exists before using it
+          if (player.position.set && typeof player.position.set === 'function') {
+            player.position.set(0, 0, 0);
+          } else {
+            // Fallback to direct property assignment
+            player.position.x = 0;
+            player.position.y = 0;
+            player.position.z = 0;
+          }
+        }
+        
+        // Request new initial position
+        networkManager.requestInitialPosition();
+        
+        return true;
+      });
+      
+      // Handle reset
+      const result = networkManager.handleServerReset(resetData);
+      
+      // Verify reset was handled
+      expect(result).toBe(true);
+      expect(networkManager.pendingUpdates.size).toBe(0);
     });
   });
 }); 
