@@ -143,10 +143,41 @@ export const createNetworkTestSetup = () => {
     localPlayerId: 'local-player-id',
     playerManager: {
       players: new Map(),
-      localPlayer: null
+      localPlayer: null,
+      createPlayer: jest.fn().mockImplementation((id, position, rotation, isLocal) => {
+        const player = {
+          id,
+          position: { ...position },
+          rotation: { ...rotation },
+          isLocal
+        };
+        mockGame.playerManager.players.set(id, player);
+        return player;
+      }),
+      createLocalPlayer: jest.fn().mockImplementation((data = {}) => {
+        const player = {
+          id: data.id || mockGame.localPlayerId,
+          position: data.position || { x: 0, y: 0, z: 0 },
+          rotation: data.rotation || { y: 0 },
+          isLocal: true
+        };
+        mockGame.playerManager.players.set(player.id, player);
+        mockGame.playerManager.localPlayer = player;
+        return player;
+      }),
+      removePlayer: jest.fn(),
+      applyServerUpdate: jest.fn()
     },
     uiManager: {
-      updateStatusBars: jest.fn()
+      updateStatusBars: jest.fn(),
+      showMessage: jest.fn()
+    },
+    environmentManager: {
+      updateWorldState: jest.fn()
+    },
+    npcManager: {
+      updateNPC: jest.fn(),
+      processServerNPCs: jest.fn()
     }
   };
   

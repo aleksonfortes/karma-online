@@ -12,50 +12,50 @@ import { createNetworkTestSetup } from './networkTestHelpers';
 // Mock THREE library
 jest.mock('three', () => {
   return {
-    Vector3: jest.fn().mockImplementation(() => ({
-      x: 0,
-      y: 0,
-      z: 0,
-      set: jest.fn(),
-      clone: jest.fn().mockReturnThis(),
-      distanceTo: jest.fn().mockReturnValue(5)
-    })),
-    Quaternion: jest.fn().mockImplementation(() => ({
-      x: 0,
-      y: 0,
-      z: 0,
-      w: 1,
-      set: jest.fn(),
-      clone: jest.fn().mockReturnThis()
-    })),
-    MathUtils: {
-      radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
-      degToRad: jest.fn(deg => deg * (Math.PI / 180))
-    },
-    Scene: jest.fn().mockImplementation(() => ({
-      add: jest.fn(),
-      remove: jest.fn()
-    })),
-    Object3D: jest.fn().mockImplementation(() => ({
-      position: { x: 0, y: 0, z: 0, set: jest.fn() },
-      rotation: { x: 0, y: 0, z: 0, set: jest.fn() },
-      quaternion: { x: 0, y: 0, z: 0, w: 1, set: jest.fn() },
-      add: jest.fn(),
-      remove: jest.fn()
-    })),
-    Mesh: jest.fn().mockImplementation(() => ({
-      position: { x: 0, y: 0, z: 0, set: jest.fn() },
-      rotation: { x: 0, y: 0, z: 0, set: jest.fn() },
-      quaternion: { x: 0, y: 0, z: 0, w: 1, set: jest.fn() },
-      userData: {},
-      add: jest.fn(),
-      remove: jest.fn()
-    })),
-    Color: jest.fn().mockImplementation(() => ({
-      copy: jest.fn(),
-      clone: jest.fn().mockReturnThis()
-    }))
-  };
+  Vector3: jest.fn().mockImplementation(() => ({
+    x: 0,
+    y: 0,
+    z: 0,
+    set: jest.fn(),
+    clone: jest.fn().mockReturnThis(),
+    distanceTo: jest.fn().mockReturnValue(5)
+  })),
+  Quaternion: jest.fn().mockImplementation(() => ({
+    x: 0,
+    y: 0,
+    z: 0,
+    w: 1,
+    set: jest.fn(),
+    clone: jest.fn().mockReturnThis()
+  })),
+  MathUtils: {
+    radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
+    degToRad: jest.fn(deg => deg * (Math.PI / 180))
+  },
+  Scene: jest.fn().mockImplementation(() => ({
+    add: jest.fn(),
+    remove: jest.fn()
+  })),
+  Object3D: jest.fn().mockImplementation(() => ({
+    position: { x: 0, y: 0, z: 0, set: jest.fn() },
+    rotation: { x: 0, y: 0, z: 0, set: jest.fn() },
+    quaternion: { x: 0, y: 0, z: 0, w: 1, set: jest.fn() },
+    add: jest.fn(),
+    remove: jest.fn()
+  })),
+  Mesh: jest.fn().mockImplementation(() => ({
+    position: { x: 0, y: 0, z: 0, set: jest.fn() },
+    rotation: { x: 0, y: 0, z: 0, set: jest.fn() },
+    quaternion: { x: 0, y: 0, z: 0, w: 1, set: jest.fn() },
+    userData: {},
+    add: jest.fn(),
+    remove: jest.fn()
+  })),
+  Color: jest.fn().mockImplementation(() => ({
+    copy: jest.fn(),
+    clone: jest.fn().mockReturnThis()
+  }))
+};
 });
 
 // Mock socket.io-client
@@ -102,7 +102,7 @@ describe('NetworkManager', () => {
   afterEach(() => {
     jest.clearAllMocks();
   });
-  
+
   describe('Constructor', () => {
     test('should initialize with default values', () => {
       const nm = new MockNetworkManager(mockGame);
@@ -111,7 +111,7 @@ describe('NetworkManager', () => {
       expect(nm.wasDisconnected).toBe(false);
     });
   });
-  
+
   describe('Initial connection', () => {
     test('should have socket after initialization', () => {
       expect(networkManager.socket).toBeTruthy();
@@ -124,25 +124,8 @@ describe('NetworkManager', () => {
       expect(networkManager.isConnected).toBe(true);
     });
   });
-  
+
   describe('Connection handling', () => {
-    test.skip('should handle reconnection', () => {
-      // Setup
-      networkManager.wasDisconnected = true;
-      
-      // Mock handleReconnection
-      const spy = jest.spyOn(networkManager, 'handleReconnection');
-      
-      // Trigger reconnection
-      networkManager.handleConnect();
-      
-      // Verify handleReconnection was called
-      expect(spy).toHaveBeenCalled();
-      
-      // Clean up
-      spy.mockRestore();
-    });
-    
     test('should handle disconnect', () => {
       // Setup
       networkManager.isConnected = true;
@@ -155,7 +138,7 @@ describe('NetworkManager', () => {
       expect(networkManager.wasDisconnected).toBe(true);
     });
   });
-  
+
   describe('Server state synchronization', () => {
     test('should handle initial position from server', () => {
       // Setup

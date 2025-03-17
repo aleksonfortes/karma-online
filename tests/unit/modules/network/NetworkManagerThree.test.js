@@ -14,7 +14,7 @@ jest.mock('three', () => {
       y: y || 0,
       z: z || 0,
       set: jest.fn(),
-      clone: jest.fn().mockReturnThis(),
+    clone: jest.fn().mockReturnThis(),
       distanceTo: jest.fn().mockReturnValue(5),
       lerp: jest.fn()
     })),
@@ -23,15 +23,15 @@ jest.mock('three', () => {
       y: 0,
       z: 0,
       w: 1,
-      set: jest.fn(),
+    set: jest.fn(),
       clone: jest.fn().mockReturnThis(),
       slerp: jest.fn()
-    })),
-    MathUtils: {
+  })),
+  MathUtils: {
       lerp: jest.fn((a, b, t) => a + (b - a) * t),
-      radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
-      degToRad: jest.fn(deg => deg * (Math.PI / 180))
-    },
+    radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
+    degToRad: jest.fn(deg => deg * (Math.PI / 180))
+  },
     Euler: jest.fn().mockImplementation(() => ({
       x: 0,
       y: 0,
@@ -124,8 +124,8 @@ describe('NetworkManager THREE.js Integration', () => {
       };
       
       // Add player to game
-      mockGame.playerManager.players.set(playerId, player);
-      
+    mockGame.playerManager.players.set(playerId, player);
+    
       // Create target position
       const targetPosition = new THREE.Vector3(10, 0, 10);
       
@@ -308,8 +308,8 @@ describe('NetworkManager THREE.js Integration', () => {
       };
       
       // Add player to game
-      mockGame.playerManager.players.set(playerId, player);
-      
+    mockGame.playerManager.players.set(playerId, player);
+    
       // Create position update from server
       const updateData = {
         type: 'position',
