@@ -20,7 +20,11 @@
     "test:coverage": "jest --coverage",
     "test:network": "jest src/modules/network",
     "test:environment": "jest src/modules/environment",
-    "test:CI": "jest --ci --coverage"
+    "test:CI": "jest --ci --coverage",
+    "test:integration": "jest tests/integration",
+    "test:integration:client-server": "jest tests/integration/client-server",
+    "test:integration:watch": "jest tests/integration --watch",
+    "test:integration:coverage": "jest tests/integration --coverage --collectCoverageFrom='server/src/modules/network/**/*.js'"
   },
   "dependencies": {
     "express": "^4.18.2",
