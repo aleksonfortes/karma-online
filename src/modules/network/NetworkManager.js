@@ -1160,7 +1160,7 @@ export class NetworkManager {
     }
 
     sendPlayerState() {
-        if (!this.isConnected || !this.socket || !this.game.localPlayer) return;
+        if (!this.isConnected || !this.socket || !this.game?.localPlayer) return;
         
         // Send current player state to server
         this.socket.emit('playerMovement', {
@@ -1182,7 +1182,7 @@ export class NetworkManager {
 
     update() {
         // Skip if not connected or no local player
-        if (!this.socket?.connected || !this.game.localPlayer) return;
+        if (!this.socket?.connected || !this.game?.localPlayer) return;
         
         // Send player state if player has moved
         const now = Date.now();
@@ -1653,7 +1653,7 @@ export class NetworkManager {
         }
         
         // Skip if there's no local player
-        if (!this.game.playerManager.localPlayer) {
+        if (!this.game?.playerManager?.localPlayer) {
             return;
         }
         
