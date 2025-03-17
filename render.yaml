@@ -24,6 +24,16 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: VITE_API_URL
+        value: https://api.karmaonline.io
+      - key: VITE_SOCKET_URL
+        value: wss://api.karmaonline.io
+      - key: VITE_ENV
+        value: production
+      - key: VITE_API_KEY
+        sync: false # This will be manually set in Render dashboard
+      - key: VITE_ANALYTICS_ID
+        sync: false # This will be manually set in Render dashboard
     routes:
       - type: rewrite
         source: /*
@@ -40,4 +50,12 @@ services:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000 
+        value: 10000
+      - key: CORS_ORIGIN
+        value: https://play.karmaonline.io
+      - key: API_KEY
+        sync: false # This will be manually set in Render dashboard
+      - key: JWT_SECRET
+        sync: false # This will be manually set in Render dashboard
+      - key: DATABASE_URL
+        sync: false # This will be manually set in Render dashboard 

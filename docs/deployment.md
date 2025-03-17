@@ -17,6 +17,21 @@ All components are deployed using Render.com via GitHub integration.
 2. Render will automatically detect the `render.yaml` file and create the services
 3. Configure environment variables as needed in the Render dashboard
 
+### Environment Variables
+
+The following environment variables need to be set in the Render dashboard:
+
+#### For karma-client
+- `VITE_API_KEY` - API key for client authentication
+- `VITE_ANALYTICS_ID` - Analytics tracking ID
+
+#### For karma-server
+- `API_KEY` - Server-side API key (must match VITE_API_KEY)
+- `JWT_SECRET` - Secret for JWT token signing
+- `DATABASE_URL` - Connection string for the database
+
+**Important**: Never commit sensitive environment variables to the repository. Use the Render dashboard to set these values securely.
+
 ## Domain Setup with GoDaddy and Cloudflare
 
 ### Step 1: Point Domain from GoDaddy to Cloudflare
@@ -51,10 +66,11 @@ For local development, you can either:
 ## Local Development
 
 For local development:
-1. Run `npm run dev` to start all components locally
-2. The client will be available at http://localhost:5173
-3. The server will be available at http://localhost:3000
-4. The landing page will be available at http://localhost:5173 (in landing-page mode)
+1. Ensure your `.env.development` file is set up with appropriate local values
+2. Run `npm run dev` to start all components locally
+3. The client will be available at http://localhost:5173
+4. The server will be available at http://localhost:3000
+5. The landing page will be available at http://localhost:5173 (in landing-page mode)
 
 ## Production Deployment
 
@@ -66,7 +82,7 @@ To deploy to production:
 ## Environment Configuration
 
 - Development: Uses `.env.development` file and local servers
-- Production: Uses `.env.production` file and deployed servers with Cloudflare protection
+- Production: Environment variables are managed in Render dashboard
 
 ## Security Considerations
 
