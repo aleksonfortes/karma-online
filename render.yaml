@@ -1,0 +1,43 @@
+services:
+  - name: karma-landing
+    type: web
+    env: static
+    buildCommand: npm run build:landing
+    staticPublishPath: ./landing-page/dist
+    domains:
+      - karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    
+  - name: karma-client
+    type: web
+    env: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    domains:
+      - play.karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+  
+  - name: karma-server
+    type: web
+    env: node
+    buildCommand: npm ci
+    startCommand: npm run start
+    domains:
+      - api.karmaonline.io
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000 
