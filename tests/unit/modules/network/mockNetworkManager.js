@@ -404,4 +404,164 @@ export class MockNetworkManager {
       this.lastUpdateTime = now;
     }
   }
+  
+  /**
+   * Validate a player action with the server before applying locally
+   * @param {Object} action - The action data to validate
+   * @returns {boolean} - Whether the action was sent for validation
+   */
+  validateActionWithServer(action) {
+    if (!this.isConnected || !this.socket) {
+      console.log('Cannot validate action: not connected to server');
+      return false;
+    }
+    
+    console.log(`Validating action with server: ${action.type}`);
+    
+    // Send action to server for validation
+    this.socket.emit('playerAction', action);
+    
+    // In a real implementation, we might apply client-side prediction here
+    // while waiting for server response
+    
+    return true;
+  }
+  
+  /**
+   * Handle server rejection of a player action
+   * @param {Object} rejectionData - The rejection data from server
+   * @returns {boolean} - Whether the rejection was handled
+   */
+  handleServerRejection(rejectionData) {
+    if (!rejectionData || !rejectionData.type) {
+      console.log('Invalid rejection data');
+      return false;
+    }
+    
+    console.log(`Server rejected action: ${rejectionData.reason}`);
+    
+    // Handle different types of rejections
+    switch (rejectionData.type) {
+      case 'movement':
+        // Revert player position to last valid position
+        if (this.game.playerManager.localPlayer) {
+          const player = this.game.playerManager.localPlayer;
+          if (player.userData.lastValidPosition) {
+            player.position.copy(player.userData.lastValidPosition);
+          }
+        }
+        break;
+        
+      case 'skill_use':
+        // Revert skill use
+        if (this.game.skillsManager && this.game.skillsManager.revertSkillUse) {
+          this.game.skillsManager.revertSkillUse(rejectionData.skillId);
+        }
+        break;
+        
+      case 'interaction':
+        // Revert interaction
+        if (this.game.uiManager && this.game.uiManager.showErrorMessage) {
+          this.game.uiManager.showErrorMessage(rejectionData.reason);
+        }
+        break;
+        
+      default:
+        console.log(`Unknown rejection type: ${rejectionData.type}`);
+        break;
+    }
+    
+    return true;
+  }
+  
+  /**
+   * Resolve position conflicts between client and server
+   * @param {Object} player - The player object
+   * @param {Object} serverPosition - The server position data
+   * @returns {boolean} - Whether the conflict was resolved with a snap (true) or interpolation (false)
+   */
+  resolvePositionConflict(player, serverPosition) {
+    if (!player || !serverPosition) {
+      console.log('Invalid player or server position data');
+      return false;
+    }
+    
+    // Calculate distance between client and server positions
+    const distance = Math.sqrt(
+      Math.pow(player.position.x - serverPosition.x, 2) +
+      Math.pow(player.position.y - serverPosition.y, 2) +
+      Math.pow(player.position.z - serverPosition.z, 2)
+    );
+    
+    console.log(`Position conflict detected. Distance: ${distance.toFixed(2)}`);
+    
+    // Store the current position as last valid position
+    if (!player.userData.lastValidPosition) {
+      player.userData.lastValidPosition = { x: 0, y: 0, z: 0 };
+    }
+    
+    player.userData.lastValidPosition.x = serverPosition.x;
+    player.userData.lastValidPosition.y = serverPosition.y;
+    player.userData.lastValidPosition.z = serverPosition.z;
+    
+    // If distance is too large, snap to server position
+    if (distance > 10) {
+      console.log('Distance too large, snapping to server position');
+      player.position.x = serverPosition.x;
+      player.position.y = serverPosition.y;
+      player.position.z = serverPosition.z;
+      return true; // Conflict resolved with snap
+    } else {
+      // Otherwise, interpolate to server position
+      console.log('Interpolating to server position');
+      player.userData.targetPosition = {
+        x: serverPosition.x,
+        y: serverPosition.y,
+        z: serverPosition.z
+      };
+      player.userData.isInterpolating = true;
+      return false; // Conflict resolved with interpolation
+    }
+  }
+  
+  /**
+   * Handle server-side game state resets
+   * @param {Object} resetData - The reset data from server
+   * @returns {boolean} - Whether the reset was handled
+   */
+  handleServerReset(resetData) {
+    if (!resetData) {
+      console.log('Invalid reset data');
+      return false;
+    }
+    
+    console.log(`Server reset: ${resetData.reason}`);
+    
+    // Clear all pending updates
+    this.pendingUpdates.clear();
+    
+    // Reset local player position
+    if (this.game.playerManager && this.game.playerManager.localPlayer) {
+      const player = this.game.playerManager.localPlayer;
+      // Check if set method exists before using it
+      if (player.position.set && typeof player.position.set === 'function') {
+        player.position.set(0, 0, 0);
+      } else {
+        // Fallback to direct property assignment
+        player.position.x = 0;
+        player.position.y = 0;
+        player.position.z = 0;
+      }
+    }
+    
+    // Request new initial position
+    this.requestInitialPosition();
+    
+    // Notify UI
+    if (this.game.uiManager && this.game.uiManager.showNotification) {
+      this.game.uiManager.showNotification('Server reset. Reconnecting...');
+    }
+    
+    return true;
+  }
 } 

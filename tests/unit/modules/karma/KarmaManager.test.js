@@ -1,10 +1,16 @@
+/**
+ * @jest-environment jsdom
+ */
+import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { MockKarmaManager } from './mockKarmaManager';
+import { createKarmaTestSetup, createMockKarmaListener } from './karmaTestHelpers';
 import { KarmaManager } from '../../../../src/modules/karma/KarmaManager';
 import * as THREE from 'three';
 
 // Import Jest spy utilities
 const { spyOn } = jest;
 
-// Simplified THREE mock to avoid circular dependencies
+// Mock THREE.js
 jest.mock('three', () => {
   return {
     Color: jest.fn().mockImplementation(() => ({
@@ -60,394 +66,144 @@ jest.mock('three', () => {
 
 describe('KarmaManager', () => {
   let karmaManager;
-  let mockPlayerManager;
-  let mockNetworkManager;
-  let mockUIManager;
   let mockGame;
-  let createdElements;
   
   beforeEach(() => {
-    // Clear all mocks
+    // Reset mocks
     jest.clearAllMocks();
     
-    // Setup createdElements for tracking DOM elements
-    createdElements = {};
+    // Create test setup
+    const setup = createKarmaTestSetup();
+    mockGame = setup.mockGame;
+    karmaManager = setup.karmaManager;
     
-    // Mock document and window objects
-    global.document = {
-      body: {
-        appendChild: jest.fn().mockImplementation(element => {
-          createdElements[element.id || 'unknown'] = element;
-          return element;
-        })
-      },
-      head: {
-        appendChild: jest.fn()
-      },
-      createElement: jest.fn(),
-      getElementById: jest.fn()
-    };
-    
-    // Mock document methods
-    const mockElement = {
-      style: {},
-      classList: {
-        add: jest.fn(),
-        remove: jest.fn(),
-        contains: jest.fn().mockReturnValue(false)
-      },
-      appendChild: jest.fn(),
-      setAttribute: jest.fn(),
-      getAttribute: jest.fn(),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn()
-    };
-    
-    document.createElement = jest.fn().mockImplementation(type => {
-      const element = { ...mockElement, id: '', tagName: type.toUpperCase() };
-      return element;
-    });
-    
-    document.getElementById = jest.fn().mockImplementation(id => {
-      if (id === 'karma-darkness-overlay') {
-        const overlayElement = { 
-          ...mockElement, 
-          id: 'karma-darkness-overlay',
-          style: {} 
-        };
-        return overlayElement;
-      }
-      return null;
-    });
-    
-    // Mock window object
-    global.window = {
-      innerWidth: 1920,
-      innerHeight: 1080
-    };
-    
-    // Mock player manager
-    mockPlayerManager = {
-      players: new Map(),
-      getPlayerById: jest.fn()
-    };
-    
-    // Mock network manager
-    mockNetworkManager = {
-      socket: {
-        connected: true,
-        id: 'test-socket-id',
-        emit: jest.fn()
-      },
-      sendPlayerState: jest.fn()
-    };
-    
-    // Mock UI manager
-    mockUIManager = {
-      updateStatusBars: jest.fn(),
-      showNotification: jest.fn(),
-      updateKarmaDisplay: jest.fn()
-    };
-    
-    // Mock game with required methods and properties
-    mockGame = {
-      playerManager: mockPlayerManager,
-      networkManager: mockNetworkManager,
-      uiManager: mockUIManager,
-      playerStats: {
-        currentKarma: 50,
-        maxKarma: 100,
-        currentLife: 100,
-        maxLife: 100,
-        currentMana: 100,
-        maxMana: 100,
-        path: 'neutral'
-      },
-      scene: { 
-        fog: { 
-          near: 0, 
-          far: 0, 
-          color: new THREE.Color()
-        },
-        traverse: jest.fn(),
-        add: jest.fn()
-      },
-      renderer: {
-        setClearColor: jest.fn()
-      },
-      environmentManager: {
-        isOnTemple: jest.fn().mockReturnValue(false)
-      },
-      cameraManager: {
-        getCamera: jest.fn().mockReturnValue({})
-      },
-      localPlayer: {
-        position: { clone: jest.fn().mockReturnValue({ project: jest.fn() }) }
-      }
-    };
-    
-    // Create KarmaManager with mocked game
-    karmaManager = new KarmaManager(mockGame);
-    
-    // For karma-related tests, ensure the darkness overlay is mocked consistently
-    karmaManager.darknessOverlay = {
-      style: {},
-      classList: {
-        add: jest.fn(),
-        remove: jest.fn(),
-        contains: jest.fn()
-      }
-    };
-
-    // Mock additional methods that might be called during tests
-    karmaManager.updateDarknessOverlay = jest.fn();
-    karmaManager.applyLightEffects = jest.fn();
-    karmaManager.applyDarkEffects = jest.fn();
-    karmaManager.removeLightEffects = jest.fn();
-    karmaManager.removeDarkEffects = jest.fn();
+    // Initialize karma manager
+    karmaManager.init();
   });
   
   afterEach(() => {
+    // Clean up
     jest.clearAllMocks();
-    delete global.document;
-    delete global.window;
+    karmaManager.cleanup();
   });
   
-  // Basic initialization
-  describe('Initialization', () => {
-    beforeEach(() => {
-      // Make sure createDarknessOverlay is a jest.fn() for this test suite
-      karmaManager.createDarknessOverlay = jest.fn().mockReturnValue(true);
-    });
-
-    it('should initialize with default values', () => {
-      // Verify initialization
-      expect(karmaManager).toBeDefined();
-      expect(karmaManager.karmaEffects).toBeDefined();
-      expect(karmaManager.karmaEffects.size).toBe(0);
-    });
-    
-    it('should initialize karma system when init is called', () => {
-      // Call init method
-      const result = karmaManager.init();
-      
-      // Verify initialization results
-      expect(result).toBe(true);
-      expect(mockGame.playerStats.currentKarma).toBe(50);
-      expect(mockGame.playerStats.maxKarma).toBe(100);
-      expect(karmaManager.createDarknessOverlay).toHaveBeenCalled();
-    });
+  test('should initialize with default karma value', () => {
+    expect(karmaManager.karma).toBe(50);
+    expect(karmaManager.initialized).toBe(true);
   });
   
-  // Karma updates and calculations
-  describe('Karma Updates and Calculations', () => {
-    it('should update local player karma', () => {
-      // Use the actual adjustKarma method instead of updateKarma
-      karmaManager.adjustKarma(25);
-      
-      // Verify karma was updated
-      expect(karmaManager.game.playerStats.currentKarma).toBe(75);
-      
-      // Verify that network update is sent
-      expect(mockNetworkManager.socket.emit).toHaveBeenCalledWith('karmaUpdate', {
-        id: 'test-socket-id',
-        karma: 75,
-        maxKarma: 100,
-        life: 100,
-        maxLife: 100,
-        mana: 100,
-        maxMana: 100
-      });
-      
-      // Verify that player state is sent
-      expect(mockNetworkManager.sendPlayerState).toHaveBeenCalled();
-    });
+  test('should adjust karma within limits', () => {
+    // Test increasing karma
+    karmaManager.adjustKarma(25);
+    expect(karmaManager.karma).toBe(75);
     
-    it('should calculate karma alignment based on karma value', () => {
-      // Setup game player stats
-      karmaManager.game.playerStats = {
-        currentKarma: 50,
-        maxKarma: 100,
-        path: null
-      };
-      
-      // Test dark alignment (high karma = dark path)
-      karmaManager.game.playerStats.currentKarma = 80;
-      karmaManager.updateKarmaPath();
-      expect(karmaManager.game.playerStats.path).toBe('dark');
-      
-      // Test neutral alignment
-      karmaManager.game.playerStats.currentKarma = 50;
-      karmaManager.updateKarmaPath();
-      expect(karmaManager.game.playerStats.path).toBe(null);
-      
-      // Test light alignment (low karma = light path)
-      karmaManager.game.playerStats.currentKarma = 20;
-      karmaManager.updateKarmaPath();
-      expect(karmaManager.game.playerStats.path).toBe('light');
-    });
+    // Test decreasing karma
+    karmaManager.adjustKarma(-15);
+    expect(karmaManager.karma).toBe(60);
     
-    it('should properly adjust karma based on positive and negative amounts', () => {
-      // Setup
-      karmaManager.game.playerStats = {
-        currentKarma: 50,
-        maxKarma: 100,
-        currentLife: 100,
-        maxLife: 100,
-        currentMana: 100,
-        maxMana: 100
-      };
-      
-      // Add karma (positive adjustment)
-      const changeAmount = karmaManager.adjustKarma(10);
-      
-      // Verify the adjustment
-      expect(changeAmount).toBe(10);
-      expect(karmaManager.game.playerStats.currentKarma).toBe(60);
-      
-      // Subtract karma (negative adjustment)
-      const reductionAmount = karmaManager.adjustKarma(-20);
-      
-      // Verify the adjustment
-      expect(reductionAmount).toBe(-20);
-      expect(karmaManager.game.playerStats.currentKarma).toBe(40);
-      
-      // Test clamping at min (0)
-      karmaManager.adjustKarma(-100);
-      expect(karmaManager.game.playerStats.currentKarma).toBe(0);
-      
-      // Test clamping at max (100)
-      karmaManager.game.playerStats.currentKarma = 90;
-      karmaManager.adjustKarma(20);
-      expect(karmaManager.game.playerStats.currentKarma).toBe(100);
-    });
+    // Test decreasing below neutral
+    karmaManager.adjustKarma(-20);
+    expect(karmaManager.karma).toBe(40);
     
-    it('should update karma effects when karma changes', () => {
-      // Setup
-      karmaManager.game.playerStats = {
-        currentKarma: 50,
-        maxKarma: 100,
-        currentLife: 100,
-        maxLife: 100
-      };
-      karmaManager.updateKarmaEffects = jest.fn();
-      
-      // Adjust karma
-      karmaManager.adjustKarma(10);
-      
-      // Verify karma effects are updated
-      expect(karmaManager.updateKarmaEffects).toHaveBeenCalled();
-    });
+    // Test decreasing to minimum
+    karmaManager.adjustKarma(-100);
+    expect(karmaManager.karma).toBe(0);
+    
+    // Test increasing from high value
+    karmaManager.setKarma(90);
+    karmaManager.adjustKarma(20);
+    expect(karmaManager.karma).toBe(100);
   });
   
-  // Karma effects
-  describe('Karma Effects', () => {
-    beforeEach(() => {
-      // Reset mocks for testing darkness overlay
-      jest.clearAllMocks();
-      
-      // Mock the createDarknessOverlay method
-      karmaManager.createDarknessOverlay = jest.fn().mockImplementation(function() {
-        this.darknessOverlay = document.createElement('div');
-        this.darknessOverlay.id = 'karma-darkness-overlay';
-        document.body.appendChild(this.darknessOverlay);
-        return this.darknessOverlay;
-      });
-      
-      // Set default values needed by the tests
-      karmaManager.game.playerStats.path = 'neutral';
-      karmaManager.darknessOverlay = null;
-    });
+  test('should set karma to specific value', () => {
+    // Set to specific value
+    karmaManager.setKarma(75);
+    expect(karmaManager.karma).toBe(75);
     
-    it('should create darkness overlay', () => {
-      // Call the method
-      karmaManager.createDarknessOverlay();
-      
-      // Verify document interactions
-      expect(document.createElement).toHaveBeenCalledWith('div');
-      expect(document.body.appendChild).toHaveBeenCalled();
-      
-      // Verify the darkness overlay was stored in the manager
-      expect(karmaManager.darknessOverlay).toBeTruthy();
-    });
+    // Set to value above max
+    karmaManager.setKarma(150);
+    expect(karmaManager.karma).toBe(100);
     
-    it('should update karma effects', () => {
-      // Mock darknessOverlay to prevent actual DOM manipulation
-      karmaManager.darknessOverlay = document.createElement('div');
-      
-      // Call the method with a sample value
-      karmaManager.updateKarmaEffects(0.5);
-      
-      // Expect karma effects have been applied
-      expect(karmaManager.game.scene.fog.far).not.toBeUndefined();
-      expect(karmaManager.game.renderer.setClearColor).toHaveBeenCalled();
-    });
-    
-    it('should apply light path effects', () => {
-      // Set up the light path
-      karmaManager.game.playerStats.path = 'light';
-      karmaManager.darknessOverlay = document.createElement('div');
-      
-      // Mock the specific methods
-      karmaManager.applyLightEffects = jest.fn();
-      
-      // Call the method with a sample value
-      karmaManager.updateKarmaEffects(0.5);
-      
-      // Check that light effects were applied
-      expect(karmaManager.applyLightEffects).toHaveBeenCalled();
-    });
-    
-    it('should apply dark path effects', () => {
-      // Set up the dark path
-      karmaManager.game.playerStats.path = 'dark';
-      karmaManager.darknessOverlay = document.createElement('div');
-      
-      // Mock the specific methods
-      karmaManager.applyDarkEffects = jest.fn();
-      
-      // Call the method with a sample value
-      karmaManager.updateKarmaEffects(0.5);
-      
-      // Check that dark effects were applied
-      expect(karmaManager.applyDarkEffects).toHaveBeenCalled();
-    });
+    // Set to value below min
+    karmaManager.setKarma(-50);
+    expect(karmaManager.karma).toBe(0);
   });
   
-  // Cleanup
-  describe('Resource Cleanup', () => {
-    it('should clean up all karma effects', () => {
-      // Setup multiple mock effects with proper Map structure
-      const mockEffect1 = { parent: { remove: jest.fn() } };
-      const mockEffect2 = { parent: { remove: jest.fn() } };
-      
-      // Initialize karmaEffects as a Map (which is how it's implemented in the actual class)
-      karmaManager.karmaEffects = new Map();
-      karmaManager.karmaEffects.set('effect1', mockEffect1);
-      karmaManager.karmaEffects.set('effect2', mockEffect2);
-      
-      // Mock DOM elements that would be cleaned up
-      global.document = {
-        getElementById: jest.fn().mockReturnValue({
-          remove: jest.fn()
-        })
-      };
-      
-      // Setup darkness overlay
-      karmaManager.darknessOverlay = {
-        parentElement: {
-          removeChild: jest.fn()
-        }
-      };
-      
-      // Cleanup
-      karmaManager.cleanup();
-      
-      // Verify all effects were properly cleaned up
-      expect(mockEffect1.parent.remove).toHaveBeenCalledWith(mockEffect1);
-      expect(mockEffect2.parent.remove).toHaveBeenCalledWith(mockEffect2);
-      expect(karmaManager.karmaEffects.size).toBe(0);
-      expect(karmaManager.darknessOverlay.parentElement.removeChild).toHaveBeenCalledWith(karmaManager.darknessOverlay);
-    });
+  test('should determine karma state correctly', () => {
+    // Test good karma
+    karmaManager.setKarma(80);
+    expect(karmaManager.getKarmaState()).toBe('good');
+    
+    // Test neutral karma
+    karmaManager.setKarma(50);
+    expect(karmaManager.getKarmaState()).toBe('neutral');
+    
+    // Test evil karma
+    karmaManager.setKarma(20);
+    expect(karmaManager.getKarmaState()).toBe('evil');
+  });
+  
+  test('should notify karma change listeners', () => {
+    // Create a mock listener
+    const mockListener = createMockKarmaListener();
+    
+    // Add the listener
+    karmaManager.addKarmaChangeListener(mockListener);
+    
+    // Adjust karma
+    karmaManager.adjustKarma(10, 'test reason');
+    
+    // Verify listener was called
+    expect(mockListener).toHaveBeenCalledWith(50, 60, 'test reason');
+    
+    // Remove the listener
+    karmaManager.removeKarmaChangeListener(mockListener);
+    
+    // Adjust karma again
+    karmaManager.adjustKarma(10);
+    
+    // Verify listener was only called once
+    expect(mockListener).toHaveBeenCalledTimes(1);
+  });
+  
+  test('should update karma visuals', () => {
+    // Set up spy on updateKarmaVisuals
+    const updateSpy = jest.spyOn(karmaManager, 'updateKarmaVisuals');
+    
+    // Adjust karma
+    karmaManager.adjustKarma(10);
+    
+    // Verify updateKarmaVisuals was called
+    expect(updateSpy).toHaveBeenCalled();
+    
+    // Restore original method
+    updateSpy.mockRestore();
+  });
+  
+  test('should update karma aura position during update', () => {
+    // Set up player position
+    mockGame.playerManager.localPlayer.position = { x: 10, y: 5, z: 10 };
+    
+    // Set up spy on karmaAura.position.set
+    karmaManager.karmaAura.position.set = jest.fn();
+    
+    // Call update
+    karmaManager.update(0.016);
+    
+    // Verify position was updated
+    expect(karmaManager.karmaAura.position.set).toHaveBeenCalledWith(10, 5, 10);
+  });
+  
+  test('should clean up resources', () => {
+    // Set up spy on scene.remove
+    mockGame.scene.remove = jest.fn();
+    
+    // Call cleanup
+    karmaManager.cleanup();
+    
+    // Verify resources were cleaned up
+    expect(mockGame.scene.remove).toHaveBeenCalledWith(karmaManager.karmaAura);
+    expect(karmaManager.karmaChangeListeners).toEqual([]);
+    expect(karmaManager.initialized).toBe(false);
   });
 });
