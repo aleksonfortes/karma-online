@@ -2,8 +2,8 @@ services:
   - name: karma-landing
     type: web
     env: static
-    buildCommand: npm run build:landing
-    staticPublishPath: ./landing-page/dist
+    buildCommand: npm ci && npm run build:landing
+    staticPublishPath: landing-page/dist
     domains:
       - karmaonline.io
     envVars:
@@ -17,8 +17,8 @@ services:
   - name: karma-client
     type: web
     env: static
-    buildCommand: npm run build
-    staticPublishPath: ./dist
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
     domains:
       - play.karmaonline.io
     envVars:
