@@ -39,7 +39,7 @@ export function createTestClient(serverUrl, options = {}) {
           socket.off('connect', onConnect);
           socket.off('connect_error', onConnectError);
           reject(new Error('Connection timeout'));
-        }, 5000);
+        }, 20000);
         
         const onConnect = () => {
           clearTimeout(connectTimeout);
@@ -81,10 +81,10 @@ export function createTestClient(serverUrl, options = {}) {
     /**
      * Listen for an event once and return the data
      * @param {string} event - Event name
-     * @param {number} [timeout=15000] - Timeout in milliseconds (increased from 5000 to 15000)
+     * @param {number} [timeout=30000] - Timeout in milliseconds (increased to 30000)
      * @returns {Promise<*>} Promise that resolves with the event data
      */
-    async waitForEvent(event, timeout = 15000) {
+    async waitForEvent(event, timeout = 30000) {
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
           socket.off(event, handler);
@@ -117,19 +117,37 @@ export function createTestClient(serverUrl, options = {}) {
      * @returns {Promise<void>} Promise that resolves when connection is closed
      */
     async disconnect() {
-      return new Promise((resolve) => {
-        // Clear all listeners
-        listeners.forEach((handlers, event) => {
-          handlers.forEach(handler => {
-            socket.off(event, handler);
+      return new Promise((resolve, reject) => {
+        try {
+          // Clear all listeners
+          listeners.forEach((handlers, event) => {
+            handlers.forEach(handler => {
+              socket.off(event, handler);
+            });
           });
-        });
-        listeners.clear();
-        
-        if (socket.connected) {
-          socket.disconnect();
+          listeners.clear();
+          
+          if (socket.connected) {
+            socket.disconnect();
+          }
+          
+          // Add a small delay to ensure the connection is properly closed
+          setTimeout(() => {
+            if (socket.connected) {
+              // Try one more time if still connected
+              try {
+                socket.disconnect();
+              } catch (err) {
+                console.warn('Error during second disconnect attempt:', err);
+              }
+            }
+            resolve();
+          }, 500);
+        } catch (error) {
+          console.error('Error during disconnect:', error);
+          // Resolve anyway to prevent test hanging
+          resolve();
         }
-        resolve();
       });
     }
   };

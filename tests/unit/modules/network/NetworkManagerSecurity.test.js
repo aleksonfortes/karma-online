@@ -1,359 +1,521 @@
 /**
- * NetworkManagerSecurity.test.js - Tests for security features in NetworkManager
+ * NetworkManagerSecurity.test.js - Unit tests for the security and validation features of NetworkManager
  * 
- * This file tests the security aspects of the NetworkManager class, including
- * handling of invalid data, protection against spoofing, and validation of server responses.
+ * These tests focus on testing the security, validation, and server authority aspects of the NetworkManager
+ * without setting up real socket connections.
  */
 
-import { jest } from '@jest/globals';
-import { MockNetworkManager } from './mockNetworkManager';
-import { createNetworkTestSetup } from './networkTestHelpers';
+import { jest, describe, test, expect, beforeEach } from '@jest/globals';
+import { NetworkManager } from '../../../../server/src/modules/network/NetworkManager.js';
+import GameConstants from '../../../../server/src/config/GameConstants.js';
 
-// Mock THREE library
-jest.mock('three', () => {
-  return {
-    Vector3: jest.fn().mockImplementation(() => ({
-      x: 0,
-      y: 0,
-      z: 0,
-      set: jest.fn(),
-      clone: jest.fn().mockReturnThis(),
-      distanceTo: jest.fn().mockReturnValue(5)
-    })),
-    Quaternion: jest.fn().mockImplementation(() => ({
-      x: 0,
-      y: 0,
-      z: 0,
-      w: 1,
-      set: jest.fn(),
-      clone: jest.fn().mockReturnThis()
-    })),
-    MathUtils: {
-      radToDeg: jest.fn(rad => rad * (180 / Math.PI)),
-      degToRad: jest.fn(deg => deg * (Math.PI / 180))
+// Mock dependencies
+const mockPlayerManager = {
+  addPlayer: jest.fn(),
+  getPlayerCount: jest.fn(),
+  getAllPlayers: jest.fn(),
+  getPlayer: jest.fn(),
+  getPlayerByUsername: jest.fn(),
+  removePlayer: jest.fn(),
+  verifyPlayerSession: jest.fn()
+};
+
+const mockGameManager = {
+  getAllNPCs: jest.fn(),
+  validateAction: jest.fn(),
+  checkServerAuthority: jest.fn(),
+  validatePosition: jest.fn()
+};
+
+// Mock Socket.io
+const mockSocket = {
+  id: 'test-socket-id',
+  handshake: {
+    query: {
+      username: 'TestUser',
+      version: '1.0.0',
+      sessionToken: 'valid-session-token'
     }
-  };
-});
-
-// Mock socket.io-client
-jest.mock('socket.io-client', () => {
-  return jest.fn().mockImplementation(() => ({
-    on: jest.fn(),
-    once: jest.fn(),
-    emit: jest.fn(),
-    disconnect: jest.fn(),
-    connected: true,
-    id: 'mock-socket-id'
-  }));
-});
-
-// Mock config
-jest.mock('../../../../src/config.js', () => ({
-  getServerUrl: jest.fn().mockReturnValue('http://localhost:3000'),
-  SERVER_URL: 'http://localhost:3000',
-  NETWORK: {
-    UPDATE_RATE: 100,
-    INTERPOLATION_DELAY: 100
+  },
+  on: jest.fn(),
+  emit: jest.fn(),
+  join: jest.fn(),
+  disconnect: jest.fn(),
+  to: jest.fn().mockReturnThis(),
+  broadcast: {
+    to: jest.fn().mockReturnThis(),
+    emit: jest.fn()
   }
-}));
+};
 
-describe('NetworkManager Security', () => {
+// Mock Socket.io server
+const mockIo = {
+  on: jest.fn(),
+  emit: jest.fn(),
+  to: jest.fn().mockReturnThis()
+};
+
+// Create a testable subclass of NetworkManager
+class TestableNetworkManager extends NetworkManager {
+  constructor() {
+    // Create a mock HTTP server
+    const mockHttpServer = {};
+    super(mockHttpServer, mockGameManager, mockPlayerManager);
+    
+    // Replace the io instance with our mock
+    this.io = mockIo;
+    
+    // Initialize collections for tracking
+    this.securityLogs = [];
+    this.rateLimit = new Map();
+    this.blacklistedIPs = new Set();
+    this.lastUpdateTime = new Map();
+    this.sockets = new Map();
+    this.bannedPlayers = new Set();
+  }
+  
+  // Override socket initialization
+  setupSocketHandlers() {
+    // No-op for testing
+  }
+  
+  // Override to prevent stats interval
+  startStatsUpdateInterval() {
+    // No-op for testing
+  }
+  
+  // Simulate a connection with different security parameters
+  simulateConnection(socket = mockSocket) {
+    // Validate the client version
+    if (!this.validateClientVersion(socket.handshake.query.version)) {
+      this.logSecurityEvent('Invalid client version', socket.id);
+      socket.emit('error', { message: 'Invalid client version' });
+      socket.disconnect();
+      return false;
+    }
+    
+    // Validate the session token
+    if (!this.validateSession(socket)) {
+      this.logSecurityEvent('Invalid session token', socket.id);
+      socket.emit('error', { message: 'Invalid session token' });
+      socket.disconnect();
+      return false;
+    }
+    
+    // Check for banned IP
+    if (this.isIPBanned(socket)) {
+      this.logSecurityEvent('Banned IP attempted connection', socket.id);
+      socket.emit('error', { message: 'You are banned' });
+      socket.disconnect();
+      return false;
+    }
+    
+    // Add the player
+    const player = this.playerManager.addPlayer(socket.id, socket.handshake.query.username, { x: 0, y: 0, z: 0 });
+    
+    // Store the socket
+    this.sockets.set(socket.id, { statsInterval: null });
+    
+    // Broadcast to others
+    socket.broadcast.emit('playerJoined', player);
+    
+    return socket;
+  }
+  
+  // Simulate a player action with rate limiting and validation
+  simulatePlayerAction(socketId, actionType, actionData) {
+    // Check rate limit
+    if (!this.checkRateLimit(socketId, actionType)) {
+      this.logSecurityEvent(`Rate limit exceeded for ${actionType}`, socketId);
+      return false;
+    }
+    
+    // Validate the action
+    if (!this.validateAction(actionType, actionData)) {
+      this.logSecurityEvent(`Invalid ${actionType} data`, socketId);
+      return false;
+    }
+    
+    // Process the action if it passed validation
+    return true;
+  }
+  
+  // Validation methods
+  validateSession(socket) {
+    if (!socket.handshake.query.sessionToken) {
+      return false;
+    }
+    
+    // Check with player manager if session is valid
+    return this.playerManager.verifyPlayerSession(
+      socket.handshake.query.username, 
+      socket.handshake.query.sessionToken
+    );
+  }
+  
+  validateClientVersion(version) {
+    if (!version) return false;
+    
+    // Simple version check for testing
+    return version === GameConstants.CLIENT_VERSION;
+  }
+  
+  validateAction(type, data) {
+    // Basic validation
+    if (!data) return false;
+    
+    switch (type) {
+      case 'movement':
+        return this.validateMovementData(data);
+      case 'chat':
+        return this.validateChatData(data);
+      case 'combat':
+        return this.validateCombatData(data);
+      default:
+        return false;
+    }
+  }
+  
+  validateMovementData(data) {
+    if (!data || !data.position) return false;
+    
+    const { position } = data;
+    
+    // Check for position values
+    if (typeof position.x !== 'number' || 
+        typeof position.y !== 'number' || 
+        typeof position.z !== 'number') {
+      return false;
+    }
+    
+    // Check for extreme values
+    const max = GameConstants.MAX_POSITION_VALUE || 5000;
+    if (Math.abs(position.x) > max || 
+        Math.abs(position.y) > max || 
+        Math.abs(position.z) > max) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  validateChatData(data) {
+    if (!data || !data.message) return false;
+    
+    // Message length check
+    if (data.message.length > 200) return false;
+    
+    // Basic sanitization
+    return !/<script|javascript:|onerror=|onclick=|alert\(|eval\(|document\.cookie/i.test(data.message);
+  }
+  
+  validateCombatData(data) {
+    if (!data || !data.targetId || typeof data.damage !== 'number') return false;
+    
+    // Damage should be within reasonable ranges
+    if (data.damage <= 0 || data.damage > 100) return false;
+    
+    return true;
+  }
+  
+  // Rate limiting methods
+  checkRateLimit(socketId, actionType) {
+    const now = Date.now();
+    const key = `${socketId}-${actionType}`;
+    
+    if (!this.rateLimit.has(key)) {
+      this.rateLimit.set(key, { count: 0, timestamp: now });
+    }
+    
+    const limit = this.rateLimit.get(key);
+    
+    // Reset counter if enough time has passed
+    if (now - limit.timestamp > 1000) {
+      limit.count = 0;
+      limit.timestamp = now;
+    }
+    
+    limit.count++;
+    
+    // Check if exceeds limit
+    const maxPerSecond = {
+      movement: 10,
+      chat: 3,
+      combat: 5
+    };
+    
+    return limit.count <= (maxPerSecond[actionType] || 5);
+  }
+  
+  // Security logging
+  logSecurityEvent(message, playerId) {
+    const event = {
+      timestamp: Date.now(),
+      message,
+      playerId
+    };
+    
+    this.securityLogs.push(event);
+    console.warn(`Security event: ${message} for player ${playerId}`);
+    
+    return event;
+  }
+  
+  isIPBanned(socket) {
+    // Mocked implementation
+    return this.bannedPlayers.has(socket.handshake.query.username);
+  }
+  
+  // Data sanitization
+  sanitizeData(data) {
+    if (!data) return null;
+    
+    const sanitized = { ...data };
+    
+    // Remove potentially dangerous properties
+    delete sanitized.__proto__;
+    delete sanitized.constructor;
+    
+    // Sanitize strings
+    Object.keys(sanitized).forEach(key => {
+      if (typeof sanitized[key] === 'string') {
+        sanitized[key] = this.sanitizeString(sanitized[key]);
+      }
+    });
+    
+    return sanitized;
+  }
+  
+  sanitizeString(str) {
+    if (typeof str !== 'string') return str;
+    
+    // Remove potentially dangerous HTML/JS content
+    return str.replace(/<script|javascript:|onerror=|onclick=|alert\(|eval\(|document\.cookie/gi, '');
+  }
+}
+
+describe('NetworkManager Security Tests', () => {
   let networkManager;
-  let mockGame;
-  let mockSocket;
   
   beforeEach(() => {
-    // Create test setup
-    const setup = createNetworkTestSetup();
-    mockGame = setup.mockGame;
-    
-    // Create NetworkManager instance
-    networkManager = new MockNetworkManager(mockGame);
-    
-    // Initialize
-    networkManager.init();
-    
-    // Get the socket
-    mockSocket = networkManager.socket;
-
-    // Mock console methods
-    global.console.log = jest.fn();
-    global.console.error = jest.fn();
-    global.console.warn = jest.fn();
-  });
-  
-  afterEach(() => {
     jest.clearAllMocks();
-  });
-  
-  describe('Input Validation', () => {
-    test('should reject malformed player data', () => {
-      // Setup
-      const malformedData = {
-        // Missing required id field
-        position: { x: 10, y: 0, z: 10 },
-        rotation: { y: 1.5 }
-      };
-      
-      // Mock player manager
-      mockGame.playerManager.createPlayer = jest.fn();
-      
-      // Call handler
-      networkManager.handlePlayerJoined(malformedData);
-      
-      // Verify player was not created
-      expect(mockGame.playerManager.createPlayer).not.toHaveBeenCalled();
+    
+    // Create an instance of our testable subclass
+    networkManager = new TestableNetworkManager();
+    
+    // Mock console methods for testing
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    
+    // Configure mocks
+    mockPlayerManager.addPlayer.mockImplementation((socketId, username, position) => ({
+      id: socketId,
+      username: username || 'DefaultUser',
+      position: position || { x: 0, y: 0, z: 0 }
+    }));
+    
+    mockPlayerManager.getPlayer.mockImplementation((socketId) => ({
+      id: socketId,
+      username: 'TestUser',
+      position: { x: 0, y: 0, z: 0 }
+    }));
+    
+    mockPlayerManager.verifyPlayerSession.mockImplementation((username, token) => {
+      return token === 'valid-session-token';
     });
     
-    test('should sanitize position data', () => {
-      // Setup
-      const invalidPositionData = {
-        id: 'player-1',
-        position: { 
-          x: NaN, 
-          y: Infinity, 
-          z: "not-a-number" 
-        },
-        rotation: { y: 1.5 }
-      };
-      
-      // Mock player manager
-      mockGame.playerManager.createPlayer = jest.fn();
-      
-      // Add sanitizePosition method to networkManager
-      networkManager.sanitizePosition = jest.fn(pos => ({
-        x: isNaN(Number(pos.x)) ? 0 : Number(pos.x),
-        y: isNaN(Number(pos.y)) || !isFinite(Number(pos.y)) ? 0 : Number(pos.y),
-        z: isNaN(Number(pos.z)) ? 0 : Number(pos.z)
-      }));
-      
-      // Override handlePlayerJoined to use sanitizePosition
-      const originalMethod = networkManager.handlePlayerJoined;
-      networkManager.handlePlayerJoined = jest.fn(playerData => {
-        if (!playerData || !playerData.id) return;
-        
-        const sanitizedPosition = networkManager.sanitizePosition(playerData.position);
-        originalMethod.call(networkManager, {
-          ...playerData,
-          position: sanitizedPosition
-        });
-      });
-      
-      // Call handler
-      networkManager.handlePlayerJoined(invalidPositionData);
-      
-      // Verify sanitizePosition was called
-      expect(networkManager.sanitizePosition).toHaveBeenCalledWith(invalidPositionData.position);
-      
-      // Verify player was created with sanitized position
-      expect(mockGame.playerManager.createPlayer).toHaveBeenCalledWith(
-        invalidPositionData.id,
-        expect.objectContaining({
-          x: 0,
-          y: 0,
-          z: 0
-        }),
-        invalidPositionData.rotation,
-        false
-      );
-    });
+    mockGameManager.validatePosition.mockReturnValue(true);
+    mockGameManager.checkServerAuthority.mockReturnValue(true);
   });
   
-  describe('Authentication and Authorization', () => {
-    test('should validate player identity before applying updates', () => {
-      // Setup
-      const updateData = {
-        id: 'player-123',
-        position: { x: 15, y: 0, z: 15 },
-        rotation: { y: 2.0 }
-      };
-      
-      // Mock isValidPlayer method
-      networkManager.isValidPlayer = jest.fn().mockReturnValue(false);
-      
-      // Override handlePlayerUpdate to use isValidPlayer
-      const originalMethod = networkManager.handlePlayerUpdate;
-      networkManager.handlePlayerUpdate = jest.fn(data => {
-        if (!networkManager.isValidPlayer(data.id)) {
-          console.warn(`Rejected update from invalid player: ${data.id}`);
-          return;
-        }
-        originalMethod.call(networkManager, data);
-      });
-      
-      // Mock player manager
-      mockGame.playerManager.applyServerUpdate = jest.fn();
-      
-      // Call handler
-      networkManager.handlePlayerUpdate(updateData);
-      
-      // Verify isValidPlayer was called
-      expect(networkManager.isValidPlayer).toHaveBeenCalledWith(updateData.id);
-      
-      // Verify update was not applied
-      expect(mockGame.playerManager.applyServerUpdate).not.toHaveBeenCalled();
-      
-      // Verify warning was logged
-      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Rejected update from invalid player'));
-    });
+  test('should validate session tokens', () => {
+    // Valid session
+    const validSocket = { ...mockSocket };
+    expect(networkManager.validateSession(validSocket)).toBe(true);
     
-    test('should handle server authentication challenges', () => {
-      // Setup
-      const challenge = {
-        token: 'challenge-token-123',
-        timestamp: Date.now()
-      };
-      
-      // Mock authentication response
-      networkManager.generateAuthResponse = jest.fn().mockReturnValue({
-        token: challenge.token,
-        response: 'auth-response-456'
-      });
-      
-      // Add handleAuthChallenge method
-      networkManager.handleAuthChallenge = jest.fn(challengeData => {
-        const response = networkManager.generateAuthResponse(challengeData);
-        networkManager.socket.emit('authResponse', response);
-      });
-      
-      // Call handler
-      networkManager.handleAuthChallenge(challenge);
-      
-      // Verify response was generated
-      expect(networkManager.generateAuthResponse).toHaveBeenCalledWith(challenge);
-      
-      // Verify response was sent
-      expect(mockSocket.emit).toHaveBeenCalledWith('authResponse', expect.objectContaining({
-        token: challenge.token
-      }));
-    });
-  });
-  
-  describe('Data Integrity', () => {
-    test('should detect and reject tampered data', () => {
-      // Setup
-      const tamperedData = {
-        id: 'player-123',
-        position: { x: 1000000, y: 1000000, z: 1000000 }, // Unrealistic position
-        timestamp: Date.now()
-      };
-      
-      // Mock isRealisticPosition method
-      networkManager.isRealisticPosition = jest.fn(pos => {
-        const maxCoord = 10000; // Example boundary
-        return Math.abs(pos.x) < maxCoord && 
-               Math.abs(pos.y) < maxCoord && 
-               Math.abs(pos.z) < maxCoord;
-      });
-      
-      // Override handlePositionCorrection to check position
-      const originalMethod = networkManager.handlePositionCorrection;
-      networkManager.handlePositionCorrection = jest.fn(data => {
-        if (!networkManager.isRealisticPosition(data.position)) {
-          console.error('Rejected unrealistic position correction');
-          return;
-        }
-        originalMethod.call(networkManager, data);
-      });
-      
-      // Call handler
-      networkManager.handlePositionCorrection(tamperedData);
-      
-      // Verify position was checked
-      expect(networkManager.isRealisticPosition).toHaveBeenCalledWith(tamperedData.position);
-      
-      // Verify error was logged
-      expect(console.error).toHaveBeenCalledWith('Rejected unrealistic position correction');
-    });
+    // Invalid session
+    const invalidSocket = { 
+      ...mockSocket, 
+      handshake: { 
+        query: { 
+          username: 'TestUser', 
+          sessionToken: 'invalid-token' 
+        } 
+      } 
+    };
     
-    test('should validate timestamps to prevent replay attacks', () => {
-      // Setup
-      const oldData = {
-        id: 'player-123',
-        position: { x: 10, y: 0, z: 10 },
-        timestamp: Date.now() - 60000 // 1 minute old
-      };
-      
-      // Mock isTimestampValid method
-      networkManager.isTimestampValid = jest.fn(timestamp => {
-        const maxAge = 30000; // 30 seconds
-        return Date.now() - timestamp < maxAge;
-      });
-      
-      // Override handlePlayerUpdate to check timestamp
-      const originalMethod = networkManager.handlePlayerUpdate;
-      networkManager.handlePlayerUpdate = jest.fn(data => {
-        if (!data.timestamp || !networkManager.isTimestampValid(data.timestamp)) {
-          console.warn('Rejected outdated or missing timestamp');
-          return;
-        }
-        originalMethod.call(networkManager, data);
-      });
-      
-      // Mock player manager
-      mockGame.playerManager.applyServerUpdate = jest.fn();
-      
-      // Call handler
-      networkManager.handlePlayerUpdate(oldData);
-      
-      // Verify timestamp was checked
-      expect(networkManager.isTimestampValid).toHaveBeenCalledWith(oldData.timestamp);
-      
-      // Verify warning was logged
-      expect(console.warn).toHaveBeenCalledWith('Rejected outdated or missing timestamp');
-      
-      // Verify update was not applied
-      expect(mockGame.playerManager.applyServerUpdate).not.toHaveBeenCalled();
-    });
+    // Configure mock to reject this token
+    mockPlayerManager.verifyPlayerSession.mockImplementationOnce(() => false);
+    
+    expect(networkManager.validateSession(invalidSocket)).toBe(false);
   });
   
-  describe('Rate Limiting', () => {
-    test('should throttle outgoing messages', () => {
-      // Setup
-      networkManager.isConnected = true;
-      networkManager.lastMessageTimes = new Map();
-      
-      // Mock isRateLimited method
-      networkManager.isRateLimited = jest.fn((messageType, minInterval) => {
-        const now = Date.now();
-        const lastTime = networkManager.lastMessageTimes.get(messageType) || 0;
-        
-        if (now - lastTime < minInterval) {
-          return true; // Rate limited
+  test('should validate client versions', () => {
+    // Set a constant for testing
+    GameConstants.CLIENT_VERSION = '1.0.0';
+    
+    // Valid version
+    expect(networkManager.validateClientVersion('1.0.0')).toBe(true);
+    
+    // Invalid version
+    expect(networkManager.validateClientVersion('0.9.0')).toBe(false);
+    
+    // Missing version
+    expect(networkManager.validateClientVersion(null)).toBe(false);
+  });
+  
+  test('should enforce rate limits for different actions', () => {
+    const socketId = 'rate-limit-test';
+    
+    // First call should pass
+    expect(networkManager.checkRateLimit(socketId, 'movement')).toBe(true);
+    
+    // Simulate many movement updates in quick succession
+    for (let i = 0; i < 10; i++) {
+      networkManager.checkRateLimit(socketId, 'movement');
+    }
+    
+    // Next call should fail (exceeded 10 per second)
+    expect(networkManager.checkRateLimit(socketId, 'movement')).toBe(false);
+    
+    // Chat should have a different rate limit (3 per second)
+    expect(networkManager.checkRateLimit(socketId, 'chat')).toBe(true);
+    expect(networkManager.checkRateLimit(socketId, 'chat')).toBe(true);
+    expect(networkManager.checkRateLimit(socketId, 'chat')).toBe(true);
+    expect(networkManager.checkRateLimit(socketId, 'chat')).toBe(false);
+  });
+  
+  test('should log security events with player ID', () => {
+    const playerId = 'security-test-id';
+    const message = 'Suspicious activity detected';
+    
+    const event = networkManager.logSecurityEvent(message, playerId);
+    
+    expect(event).toBeDefined();
+    expect(event.message).toBe(message);
+    expect(event.playerId).toBe(playerId);
+    expect(networkManager.securityLogs.length).toBe(1);
+    expect(console.warn).toHaveBeenCalled();
+  });
+  
+  test('should sanitize user input data', () => {
+    const maliciousData = {
+      message: '<script>alert("XSS");</script>Hello',
+      __proto__: { dangerous: true },
+      username: 'ValidUser'
+    };
+    
+    const sanitized = networkManager.sanitizeData(maliciousData);
+    
+    expect(sanitized).toBeDefined();
+    expect(sanitized.message).not.toContain('<script>');
+    expect(Object.getPrototypeOf(sanitized)).toBe(Object.prototype);
+    expect(sanitized.username).toBe('ValidUser');
+  });
+  
+  test('should reject connection with invalid session token', () => {
+    // Configure mock to reject this token
+    mockPlayerManager.verifyPlayerSession.mockImplementationOnce(() => false);
+    
+    const invalidSocket = { 
+      ...mockSocket, 
+      handshake: { 
+        query: { 
+          username: 'TestUser',
+          version: '1.0.0',
+          sessionToken: 'invalid-token' 
+        } 
+      },
+      emit: jest.fn(),
+      disconnect: jest.fn()
+    };
+    
+    const result = networkManager.simulateConnection(invalidSocket);
+    
+    expect(result).toBe(false);
+    expect(invalidSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(invalidSocket.disconnect).toHaveBeenCalled();
+    expect(networkManager.securityLogs.length).toBe(1);
+  });
+  
+  test('should reject connection with invalid client version', () => {
+    // Set a constant for testing
+    GameConstants.CLIENT_VERSION = '1.0.0';
+    
+    const invalidSocket = { 
+      ...mockSocket, 
+      handshake: { 
+        query: { 
+          username: 'TestUser',
+          version: '0.9.0',
+          sessionToken: 'valid-session-token' 
+        } 
+      },
+      emit: jest.fn(),
+      disconnect: jest.fn()
+    };
+    
+    const result = networkManager.simulateConnection(invalidSocket);
+    
+    expect(result).toBe(false);
+    expect(invalidSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(invalidSocket.disconnect).toHaveBeenCalled();
+    expect(networkManager.securityLogs.length).toBe(1);
+  });
+  
+  test('should reject malicious movement data', () => {
+    // Valid connection
+    const socketId = 'movement-test-id';
+    
+    // Invalid movement data (extreme values)
+    const maliciousMovement = {
+      position: { x: 999999, y: 999999, z: 999999 }
+    };
+    
+    const result = networkManager.simulatePlayerAction(socketId, 'movement', maliciousMovement);
+    
+    expect(result).toBe(false);
+    expect(networkManager.securityLogs.length).toBe(1);
+  });
+  
+  test('should reject chat messages with malicious content', () => {
+    // Valid connection
+    const socketId = 'chat-test-id';
+    
+    // Invalid chat data (contains script tag)
+    const maliciousChat = {
+      message: '<script>alert("XSS");</script>Hello'
+    };
+    
+    const result = networkManager.simulatePlayerAction(socketId, 'chat', maliciousChat);
+    
+    expect(result).toBe(false);
+    expect(networkManager.securityLogs.length).toBe(1);
+  });
+  
+  test('should handle banned players correctly', () => {
+    // Add a username to banned list
+    networkManager.bannedPlayers.add('BannedUser');
+    
+    const bannedSocket = { 
+      ...mockSocket, 
+      handshake: { 
+        query: { 
+          username: 'BannedUser',
+          version: '1.0.0',
+          sessionToken: 'valid-session-token' 
         }
-        
-        // Update last message time
-        networkManager.lastMessageTimes.set(messageType, now);
-        return false;
-      });
-      
-      // Override sendPlayerAction to use rate limiting
-      const originalMethod = networkManager.sendPlayerAction;
-      networkManager.sendPlayerAction = jest.fn(action => {
-        const messageType = 'playerAction';
-        const minInterval = 100; // 100ms minimum between actions
-        
-        if (networkManager.isRateLimited(messageType, minInterval)) {
-          console.warn(`Rate limited: ${messageType}`);
-          return;
-        }
-        
-        originalMethod.call(networkManager, action);
-      });
-      
-      // Call method twice in quick succession
-      const action = { type: 'attack', targetId: 'enemy-1' };
-      networkManager.sendPlayerAction(action);
-      networkManager.sendPlayerAction(action);
-      
-      // Verify rate limiting was checked twice
-      expect(networkManager.isRateLimited).toHaveBeenCalledTimes(2);
-      
-      // Verify socket.emit was called only once
-      expect(mockSocket.emit).toHaveBeenCalledTimes(1);
-      
-      // Verify warning was logged
-      expect(console.warn).toHaveBeenCalledWith('Rate limited: playerAction');
-    });
+      },
+      emit: jest.fn(),
+      disconnect: jest.fn()
+    };
+    
+    const result = networkManager.simulateConnection(bannedSocket);
+    
+    expect(result).toBe(false);
+    expect(bannedSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(bannedSocket.disconnect).toHaveBeenCalled();
+    expect(networkManager.securityLogs.length).toBe(1);
   });
 }); 

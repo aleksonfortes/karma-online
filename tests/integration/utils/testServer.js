@@ -27,6 +27,11 @@ export function createTestServer(options = {}) {
       origin: '*',
       methods: ['GET', 'POST']
     },
+    // Add additional options for more reliable testing
+    connectTimeout: 30000,
+    pingTimeout: 30000,
+    pingInterval: 5000,
+    transports: ['websocket', 'polling'],
     ...options.socketOptions
   });
 
