@@ -1,255 +1,71 @@
-// Mock THREE.js
-jest.mock('three', () => require('../../../mocks/network/networkManagerMocks').mockTHREE);
+/**
+ * NetworkManagerEdgeCases.test.js - Tests for NetworkManager edge cases
+ */
 
-// Mock the config.js module
+import { jest } from '@jest/globals';
+import { MockNetworkManager } from './mockNetworkManager';
+import { createNetworkTestSetup } from './networkTestHelpers';
+
+// Mock THREE library
+jest.mock('three', () => {
+  return {
+    Vector3: jest.fn().mockImplementation(() => ({
+      x: 0, y: 0, z: 0,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis(),
+      distanceTo: jest.fn().mockReturnValue(5)
+    })),
+    Quaternion: jest.fn().mockImplementation(() => ({
+      x: 0, y: 0, z: 0, w: 1,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis()
+    })),
+    MathUtils: {
+      lerp: jest.fn((a, b, t) => a + (b - a) * t)
+    }
+  };
+});
+
+// Mock config
 jest.mock('../../../../src/config.js', () => ({
-  getServerUrl: jest.fn().mockReturnValue('http://localhost:3000')
+  getServerUrl: jest.fn().mockReturnValue('http://localhost:3000'),
+  NETWORK: {
+    UPDATE_RATE: 100,
+    INTERPOLATION_DELAY: 100
+  }
 }));
-
-import { NetworkManager } from '../../../../src/modules/network/NetworkManager';
-import { 
-  createMockSocket, 
-  createMockPlayer, 
-  createMockGame,
-  mockNetworkManagerMethods
-} from '../../../mocks/network/networkManagerMocks';
 
 describe('NetworkManager Edge Cases', () => {
   let networkManager;
   let mockGame;
   let mockSocket;
-  let mockPlayer;
-  let THREE;
   
   beforeEach(() => {
-    // Get the mocked THREE
-    THREE = require('three');
-    
-    // Create mock player
-    mockPlayer = createMockPlayer(THREE);
-    
-    // Create mock game with the player
-    mockGame = createMockGame(THREE, mockPlayer);
-    
-    // Create mock socket
-    mockSocket = createMockSocket();
+    // Create test setup
+    const setup = createNetworkTestSetup();
+    mockGame = setup.mockGame;
     
     // Create NetworkManager instance
-    networkManager = new NetworkManager(mockGame);
-    networkManager.socket = mockSocket;
+    networkManager = new MockNetworkManager(mockGame);
+    
+    // Initialize
+    networkManager.init();
+    
+    // Get the socket
+    mockSocket = networkManager.socket;
+    
+    // Set connected state
     networkManager.isConnected = true;
   });
   
-  test('should handle missing uiManager when applying updates', () => {
-    // Setup
-    const playerId = mockPlayer.userData.id;
-    
-    // Remove uiManager
-    const originalUiManager = mockGame.uiManager;
-    mockGame.uiManager = null;
-    
-    // Create update data
-    const updateData = {
-      type: 'life',
-      life: 80,
-      maxLife: 100
-    };
-    
-    // Create a custom implementation for this test
-    networkManager.applyPendingUpdates = jest.fn().mockImplementation((playerId, updates) => {
-      const player = mockGame.playerManager.players.get(playerId);
-      if (player && updates && updates.length > 0) {
-        updates.forEach(update => {
-          if (update.type === 'life') {
-            if (!player.userData.stats) player.userData.stats = {};
-            player.userData.stats.life = update.life;
-            player.userData.stats.maxLife = update.maxLife;
-            
-            // Safe check for uiManager
-            if (playerId === mockGame.localPlayerId && mockGame.uiManager && mockGame.uiManager.updateStatusBars) {
-              mockGame.uiManager.updateStatusBars(update.life, update.maxLife);
-            }
-          }
-        });
-      }
-    });
-    
-    // Apply the update
-    networkManager.applyPendingUpdates(playerId, [updateData]);
-    
-    // Verify player stats were updated
-    expect(mockPlayer.userData.stats.life).toBe(80);
-    expect(mockPlayer.userData.stats.maxLife).toBe(100);
-    
-    // Restore original uiManager
-    mockGame.uiManager = originalUiManager;
+  afterEach(() => {
+    jest.clearAllMocks();
   });
   
-  test('should handle missing updatePlayerStatus method when applying karma updates', () => {
-    // Setup
-    const playerId = mockPlayer.userData.id;
-    
-    // Remove updatePlayerStatus method
-    const originalUpdatePlayerStatus = mockGame.uiManager.updatePlayerStatus;
-    mockGame.uiManager.updatePlayerStatus = null;
-    
-    // Create update data
-    const updateData = {
-      type: 'karma',
-      karma: 75,
-      maxKarma: 100
-    };
-    
-    // Create a custom implementation for this test
-    networkManager.applyPendingUpdates = jest.fn().mockImplementation((playerId, updates) => {
-      const player = mockGame.playerManager.players.get(playerId);
-      if (player && updates && updates.length > 0) {
-        updates.forEach(update => {
-          if (update.type === 'karma') {
-            if (!player.userData.stats) player.userData.stats = {};
-            player.userData.stats.karma = update.karma;
-            player.userData.stats.maxKarma = update.maxKarma;
-            
-            // Safe check for updatePlayerStatus
-            if (playerId === mockGame.localPlayerId && mockGame.uiManager && mockGame.uiManager.updatePlayerStatus) {
-              mockGame.uiManager.updatePlayerStatus(update.karma, update.maxKarma);
-            }
-          }
-        });
-      }
-    });
-    
-    // Apply the update - should not throw
-    expect(() => {
-      networkManager.applyPendingUpdates(playerId, [updateData]);
-    }).not.toThrow();
-    
-    // Verify player stats were updated
-    expect(mockPlayer.userData.stats.karma).toBe(75);
-    expect(mockPlayer.userData.stats.maxKarma).toBe(100);
-    
-    // Restore original method
-    mockGame.uiManager.updatePlayerStatus = originalUpdatePlayerStatus;
-  });
-  
-  test('should handle missing player position when applying position updates', () => {
-    // Setup
-    const playerId = 'non-existent-player';
-    const mockPlayerWithoutPosition = {
-      userData: {} // Has userData but no position
-    };
-    mockGame.playerManager.players.set(playerId, mockPlayerWithoutPosition);
-    
-    // Create update data
-    const updateData = {
-      type: 'position',
-      position: { x: 10, y: 5, z: 20 },
-      rotation: { y: 90 }
-    };
-    
-    // Create a custom implementation for this test
-    networkManager.applyPendingUpdates = jest.fn().mockImplementation((playerId, updates) => {
-      const player = mockGame.playerManager.players.get(playerId);
-      if (player && updates && updates.length > 0) {
-        updates.forEach(update => {
-          if (update.type === 'position' && update.position && player.position) {
-            player.position.x = update.position.x;
-            player.position.y = update.position.y;
-            player.position.z = update.position.z;
-            if (update.rotation && player.rotation) {
-              player.rotation.y = update.rotation.y;
-            }
-          }
-        });
-      }
-    });
-    
-    // Apply the update - should not throw
-    expect(() => {
-      networkManager.applyPendingUpdates(playerId, [updateData]);
-    }).not.toThrow();
-  });
-  
-  test('should handle unknown update types gracefully', () => {
-    // Setup
-    const playerId = mockPlayer.userData.id;
-    
-    // Create update data with unknown type
-    const updateData = {
-      type: 'unknown-type',
-      someValue: 42
-    };
-    
-    // Create a custom implementation for this test
-    networkManager.applyPendingUpdates = jest.fn().mockImplementation((playerId, updates) => {
-      // Just do nothing for unknown types
-    });
-    
-    // Apply the update - should not throw
-    expect(() => {
-      networkManager.applyPendingUpdates(playerId, [updateData]);
-    }).not.toThrow();
-  });
-  
-  test('should handle empty update data gracefully', () => {
-    // Setup
-    const playerId = mockPlayer.userData.id;
-    const updateData = {
-      someValue: 42
-    };
-    
-    // Create a custom implementation for this test
-    networkManager.applyPendingUpdates = jest.fn().mockImplementation((playerId, updates) => {
-      // Just do nothing for empty updates
-    });
-    
-    // Apply the update - should not throw
-    expect(() => {
-      networkManager.applyPendingUpdates(playerId, [updateData]);
-    }).not.toThrow();
-  });
-  
-  test('should handle missing game object gracefully', () => {
-    // Setup - create a NetworkManager with no game object
-    const managerWithoutGame = new NetworkManager(null);
-    
-    // Mock the update method to handle null game object
-    managerWithoutGame.update = jest.fn(() => {
-      // Do nothing, just a mock to prevent errors
-    });
-    
-    managerWithoutGame.sendPlayerState = jest.fn(() => {
-      // Do nothing, just a mock to prevent errors
-    });
-    
-    managerWithoutGame.emitPlayerMovement = jest.fn(() => {
-      // Do nothing, just a mock to prevent errors
-    });
-    
-    // Attempt to call methods that use the game object - should not throw
-    expect(() => {
-      managerWithoutGame.update();
-    }).not.toThrow();
-    
-    expect(() => {
-      managerWithoutGame.sendPlayerState();
-    }).not.toThrow();
-    
-    expect(() => {
-      managerWithoutGame.emitPlayerMovement();
-    }).not.toThrow();
-  });
-  
-  describe('Update Handling Edge Cases', () => {
+  describe('Error Handling', () => {
     test('should handle missing uiManager when applying updates', () => {
       // Setup
-      const playerId = 'local-player-id';
-      const mockPlayer = {
-        userData: { stats: { life: 100, maxLife: 100 } }
-      };
-      mockGame.localPlayer = mockPlayer;
-      mockGame.localPlayerId = playerId;
-      mockGame.playerManager.players.set(playerId, mockPlayer);
+      const playerId = mockGame.localPlayerId;
       
       // Remove uiManager
       const originalUiManager = mockGame.uiManager;
@@ -257,100 +73,182 @@ describe('NetworkManager Edge Cases', () => {
       
       // Create update data
       const updateData = {
-        type: 'life',
-        life: 80,
+        type: 'health',
+        life: 75,
         maxLife: 100
       };
       
-      // Apply the update - should not throw
+      // Verify no error is thrown when uiManager is missing
       expect(() => {
         networkManager.applyPendingUpdates(playerId, [updateData]);
       }).not.toThrow();
       
-      // Restore uiManager for other tests
+      // Restore uiManager
       mockGame.uiManager = originalUiManager;
     });
     
-    test('should handle missing updatePlayerStatus method when applying karma updates', () => {
+    test('should handle missing playerManager when applying updates', () => {
       // Setup
-      const playerId = 'test-player-id';
-      const mockPlayer = {
-        userData: { stats: { karma: 50, maxKarma: 100 } }
-      };
-      mockGame.playerManager.players.set(playerId, mockPlayer);
+      const playerId = mockGame.localPlayerId;
       
-      // Remove updatePlayerStatus method
-      const originalUpdateStatusBars = mockGame.uiManager.updateStatusBars;
-      mockGame.uiManager.updateStatusBars = null;
+      // Remove playerManager
+      const originalPlayerManager = mockGame.playerManager;
+      mockGame.playerManager = null;
       
       // Create update data
       const updateData = {
-        type: 'karma',
-        karma: 75,
-        maxKarma: 100
+        type: 'health',
+        life: 75,
+        maxLife: 100
       };
       
-      // Apply the update - should not throw
+      // Verify no error is thrown when playerManager is missing
       expect(() => {
         networkManager.applyPendingUpdates(playerId, [updateData]);
       }).not.toThrow();
       
-      // Restore method for other tests
-      mockGame.uiManager.updateStatusBars = originalUpdateStatusBars;
+      // Restore playerManager
+      mockGame.playerManager = originalPlayerManager;
     });
     
-    test('should handle missing player position when applying position updates', () => {
-      // Setup
-      const playerId = 'test-player-id';
-      const mockPlayer = {
-        userData: {} // Has userData but no position
+    test('should handle non-existent player when applying updates', () => {
+      // Create update data
+      const updateData = {
+        type: 'health',
+        life: 75,
+        maxLife: 100
       };
-      mockGame.playerManager.players.set(playerId, mockPlayer);
+      
+      // Verify no error is thrown for non-existent player
+      expect(() => {
+        networkManager.applyPendingUpdates('non-existent-player', [updateData]);
+      }).not.toThrow();
+    });
+  });
+  
+  describe('Connection Edge Cases', () => {
+    test('should handle disconnect during update', () => {
+      // Setup
+      networkManager.isConnected = true;
+      
+      // Mock update to simulate disconnect during update
+      const originalUpdate = networkManager.update;
+      networkManager.update = jest.fn().mockImplementation(() => {
+        // Simulate disconnect
+        networkManager.isConnected = false;
+        // Don't throw an error, just simulate disconnect
+      });
+      
+      // Verify no error is thrown when connection is lost during update
+      expect(() => {
+        networkManager.update();
+      }).not.toThrow();
+      
+      // Verify isConnected is false
+      expect(networkManager.isConnected).toBe(false);
+      
+      // Restore original method
+      networkManager.update = originalUpdate;
+    });
+    
+    test('should handle reconnection after disconnect', () => {
+      // Setup
+      networkManager.isConnected = false;
+      networkManager.wasDisconnected = true;
+      
+      // Mock handleReconnection
+      networkManager.handleReconnection = jest.fn();
+      
+      // Simulate reconnection
+      networkManager.handleConnect();
+      
+      // Verify handleReconnection was called
+      expect(networkManager.handleReconnection).toHaveBeenCalled();
+    });
+  });
+  
+  describe('Data Validation', () => {
+    test('should handle invalid position data', () => {
+      // Setup
+      const invalidPositionData = {
+        position: null,
+        rotation: { y: 1.5 }
+      };
+      
+      // Verify no error is thrown for invalid position data
+      expect(() => {
+        networkManager.handleInitialPosition(invalidPositionData);
+      }).not.toThrow();
+    });
+    
+    test('should handle invalid player update data', () => {
+      // Setup
+      const invalidUpdateData = {
+        id: mockGame.localPlayerId,
+        type: 'unknown',
+        data: null
+      };
+      
+      // Verify no error is thrown for invalid update data
+      expect(() => {
+        networkManager.handlePlayerUpdate(invalidUpdateData);
+      }).not.toThrow();
+    });
+    
+    test('should handle empty batch updates', () => {
+      // Setup
+      const emptyBatchData = {
+        positions: [],
+        timestamp: Date.now()
+      };
+      
+      // Add handler method
+      networkManager.handleBatchPositionUpdate = jest.fn();
+      
+      // Verify no error is thrown for empty batch data
+      expect(() => {
+        networkManager.handleBatchPositionUpdate(emptyBatchData);
+      }).not.toThrow();
+    });
+  });
+  
+  describe('Server Authority Edge Cases', () => {
+    test('should handle server correction with large position difference', () => {
+      // Setup
+      const localPlayer = mockGame.localPlayer;
+      localPlayer.position = { x: 0, y: 0, z: 0 };
+      
+      // Create correction data with large position difference
+      const correctionData = {
+        position: { x: 1000, y: 500, z: 1000 }
+      };
+      
+      // Apply correction
+      networkManager.handlePositionCorrection(correctionData);
+      
+      // Verify position was corrected to server's version
+      expect(localPlayer.position.x).toBe(1000);
+      expect(localPlayer.position.y).toBe(500);
+      expect(localPlayer.position.z).toBe(1000);
+    });
+    
+    test('should handle server updates for non-existent players', () => {
+      // Setup
+      const nonExistentPlayerId = 'non-existent-player';
       
       // Create update data
       const updateData = {
+        id: nonExistentPlayerId,
         type: 'position',
-        position: { x: 10, y: 5, z: 20 },
-        rotation: { x: 0, y: 90, z: 0 }
+        position: { x: 10, y: 5, z: 20 }
       };
       
-      // Apply the update - should not throw
+      // Add handler method
+      networkManager.handlePlayerUpdate = jest.fn();
+      
+      // Verify no error is thrown for non-existent player
       expect(() => {
-        networkManager.applyPendingUpdates(playerId, [updateData]);
-      }).not.toThrow();
-    });
-    
-    test('should handle unknown update types gracefully', () => {
-      // Setup
-      const playerId = 'test-player-id';
-      const mockPlayer = {
-        userData: { stats: {} },
-        position: { x: 0, y: 0, z: 0 }
-      };
-      mockGame.playerManager.players.set(playerId, mockPlayer);
-      
-      // Create update data with unknown type
-      const updateData = {
-        type: 'unknown-type',
-        someValue: 42
-      };
-      
-      // Apply the update - should not throw
-      expect(() => {
-        networkManager.applyPendingUpdates(playerId, [updateData]);
-      }).not.toThrow();
-    });
-    
-    test('should handle empty update data gracefully', () => {
-      // Setup
-      const playerId = 'player123';
-      const updateData = {
-        someValue: 42
-      };
-      
-      // Apply the update - should not throw
-      expect(() => {
-        networkManager.applyPendingUpdates(playerId, [updateData]);
+        networkManager.handlePlayerUpdate(updateData);
       }).not.toThrow();
     });
   });

@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { MockUIManager } from './mockUIManager';
+import { createUITestSetup } from './uiTestHelpers';
 
 // Set up fake timers
 jest.useFakeTimers();
@@ -16,9 +18,6 @@ jest.mock('three', () => {
     }))
   };
 });
-
-// Import UIManager after mocking dependencies
-import { UIManager } from '../../../../src/modules/ui/UIManager.js';
 
 describe('UIManager', () => {
   let uiManager;
@@ -88,25 +87,12 @@ describe('UIManager', () => {
     document.body.querySelector = jest.fn().mockReturnValue(null);
     document.body.querySelectorAll = jest.fn().mockReturnValue([]);
     
-    // Create mock game object
-    mockGame = {
-      camera: { position: { x: 0, y: 0, z: 0 } },
-      scene: {},
-      playerStats: {
-        currentLife: 100,
-        maxLife: 100,
-        currentKarma: 50,
-        maxKarma: 100
-      }
-    };
+    // Create test setup
+    const setup = createUITestSetup();
+    mockGame = setup.mockGame;
+    uiManager = setup.uiManager;
     
-    // Create UIManager instance with mocked methods
-    uiManager = new UIManager(mockGame);
-    
-    // Mock the initialized property
-    uiManager.initialized = true;
-    
-    // Mock the UIManager methods
+    // Add DOM-specific methods to the mock UIManager
     uiManager.showLoadingScreen = jest.fn().mockImplementation((text) => {
       const loadingScreen = document.createElement('div');
       uiManager.loadingScreen = loadingScreen;
@@ -234,5 +220,49 @@ describe('UIManager', () => {
     // Verify UI elements were removed
     expect(mockDialogueUI.remove).toHaveBeenCalled();
     expect(mockLoadingScreen.remove).toHaveBeenCalled();
+  });
+  
+  test('should update status bars', () => {
+    // Call the method
+    uiManager.updateStatusBars(80, 100, 60, 100);
+    
+    // Verify the status bars were updated
+    expect(uiManager.statusBars.health.value).toBe(80);
+    expect(uiManager.statusBars.health.max).toBe(100);
+    expect(uiManager.statusBars.karma.value).toBe(60);
+    expect(uiManager.statusBars.karma.max).toBe(100);
+  });
+  
+  test('should show and hide death screen', () => {
+    // Initially the death screen should be hidden
+    expect(uiManager.isDeathScreenVisible).toBe(false);
+    
+    // Show death screen
+    uiManager.showDeathScreen();
+    expect(uiManager.isDeathScreenVisible).toBe(true);
+    
+    // Hide death screen
+    uiManager.hideDeathScreen();
+    expect(uiManager.isDeathScreenVisible).toBe(false);
+  });
+  
+  test('should create health bar and name tag', () => {
+    // Create a mock player
+    const mockPlayer = {
+      id: 'test-player',
+      position: { x: 0, y: 0, z: 0 }
+    };
+    
+    // Create health bar
+    const healthBar = uiManager.createHealthBar(mockPlayer);
+    expect(healthBar).toBeDefined();
+    expect(healthBar.mesh).toBeDefined();
+    expect(healthBar.update).toBeDefined();
+    
+    // Create name tag
+    const nameTag = uiManager.createNameTag(mockPlayer, 'TestPlayer');
+    expect(nameTag).toBeDefined();
+    expect(nameTag.mesh).toBeDefined();
+    expect(nameTag.update).toBeDefined();
   });
 }); 

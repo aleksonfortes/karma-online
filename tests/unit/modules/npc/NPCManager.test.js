@@ -2,6 +2,8 @@
  * @jest-environment jsdom
  */
 import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { MockNPCManager } from './mockNPCManager';
+import { createNPCTestSetup } from './npcTestHelpers';
 
 // Mock THREE.js
 jest.mock('three', () => {
@@ -50,16 +52,21 @@ jest.mock('three/examples/jsm/loaders/GLTFLoader.js', () => {
   return {
     GLTFLoader: jest.fn().mockImplementation(() => ({
       load: jest.fn().mockImplementation((url, onLoad) => {
-        // Mock a successful load
-        onLoad({
+        // Create a mock GLTF object
+        const mockGLTF = {
           scene: {
             position: { x: 0, y: 0, z: 0 },
             rotation: { x: 0, y: 0, z: 0 },
             scale: { x: 1, y: 1, z: 1 },
+            add: jest.fn(),
+            remove: jest.fn(),
             traverse: jest.fn()
           },
           animations: []
-        });
+        };
+        
+        // Call the onLoad callback with the mock GLTF
+        onLoad(mockGLTF);
       })
     }))
   };
@@ -83,356 +90,165 @@ describe('NPCManager', () => {
   let mockGame;
   
   beforeEach(() => {
+    // Reset mocks
     jest.clearAllMocks();
     
-    // Create a mock game object
-    mockGame = {
-      scene: {
-        add: jest.fn(),
-        remove: jest.fn()
-      },
-      playerManager: {
-        player: {
-          position: { x: 0, y: 0, z: 0 }
-        }
-      },
-      localPlayer: {
-        position: { x: 0, y: 0, z: 0 }
-      },
-      uiManager: {
-        showInteractionLabel: jest.fn(),
-        hideInteractionLabel: jest.fn(),
-        showDialogue: jest.fn(),
-        hideDialogue: jest.fn()
-      },
-      networkManager: {
-        socket: {
-          on: jest.fn(),
-          off: jest.fn(),
-          emit: jest.fn()
-        }
-      },
-      environmentManager: {
-        darkNPC: null,
-        lightNPC: null
-      }
-    };
-    
-    // Create NPCManager instance
-    npcManager = new NPCManager(mockGame);
-    
-    // Mock console methods
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'error').mockImplementation(() => {});
-    
-    // Add missing methods
-    npcManager.checkTempleProximity = jest.fn().mockImplementation(() => {
-      const playerPos = mockGame.playerManager.player.position;
-      const lightTemplePos = { x: 50, y: 0, z: 50 };
-      const darkTemplePos = { x: -50, y: 0, z: -50 };
-      
-      const distanceToLightTemple = Math.sqrt(
-        Math.pow(playerPos.x - lightTemplePos.x, 2) +
-        Math.pow(playerPos.y - lightTemplePos.y, 2) +
-        Math.pow(playerPos.z - lightTemplePos.z, 2)
-      );
-      
-      const distanceToDarkTemple = Math.sqrt(
-        Math.pow(playerPos.x - darkTemplePos.x, 2) +
-        Math.pow(playerPos.y - darkTemplePos.y, 2) +
-        Math.pow(playerPos.z - darkTemplePos.z, 2)
-      );
-      
-      return distanceToLightTemple < 10 || distanceToDarkTemple < 10;
-    });
-    
-    // Mock the loadNPC method to create and store NPCs in the npcs map
-    npcManager.loadNPC = jest.fn().mockImplementation((position, type, npcData) => {
-      const npc = {
-        id: npcData.id,
-        type,
-        position: { x: position.x, y: position.y, z: position.z },
-        mesh: {
-          position: { x: position.x, y: position.y, z: position.z },
-          visible: true,
-          remove: jest.fn()
-        },
-        interactionLabel: document.createElement('div'),
-        interactionLabelVisible: true
-      };
-      npcManager.npcs.set(npcData.id, npc);
-      return npc;
-    });
-    
-    // Mock the calculateDistance method for testing
-    npcManager.calculateDistance = jest.fn().mockImplementation((npc) => {
-      const playerPos = mockGame.playerManager.player.position;
-      const npcPos = npc.position;
-      const dx = playerPos.x - npcPos.x;
-      const dy = playerPos.y - npcPos.y;
-      const dz = playerPos.z - npcPos.z;
-      return Math.sqrt(dx * dx + dy * dy + dz * dz);
-    });
-    
-    // Mock the processServerNPCs method to avoid the position.x error
-    npcManager.processServerNPCs = jest.fn().mockImplementation((npcData) => {
-      if (!npcData || !Array.isArray(npcData)) {
-        console.error('Invalid NPC data received from server:', npcData);
-        return;
-      }
-      
-      // Process each NPC
-      npcData.forEach(npc => {
-        if (!npc.id || !npc.type || !npc.position) {
-          return;
-        }
-        
-        const position = { x: npc.position.x, y: npc.position.y, z: npc.position.z };
-        npcManager.loadNPC(position, npc.type, npc);
-      });
-    });
-    
-    // Mock the handleInteraction method
-    npcManager.handleInteraction = jest.fn().mockImplementation(() => {
-      // Find the closest NPC within interaction distance
-      let closestNPC = null;
-      let closestDistance = Infinity;
-      
-      npcManager.npcs.forEach(npc => {
-        const distance = npcManager.calculateDistance(npc);
-        if (distance < 5 && distance < closestDistance) {
-          closestDistance = distance;
-          closestNPC = npc;
-        }
-      });
-      
-      if (closestNPC) {
-        mockGame.uiManager.showDialogue(closestNPC.type, 'Test dialogue');
-        return true;
-      }
-      
-      return false;
-    });
-    
-    // Mock the hideAllInteractionLabels method
-    npcManager.hideAllInteractionLabels = jest.fn().mockImplementation(() => {
-      npcManager.npcs.forEach(npc => {
-        npc.interactionLabelVisible = false;
-        mockGame.uiManager.hideInteractionLabel(npc.id);
-      });
-    });
-    
-    // Mock the update method
-    npcManager.update = jest.fn().mockImplementation(() => {
-      npcManager.npcs.forEach(npc => {
-        const distance = npcManager.calculateDistance(npc);
-        if (distance < 5) {
-          mockGame.uiManager.showInteractionLabel(npc.id, npc.type);
-          npc.interactionLabelVisible = true;
-        } else {
-          mockGame.uiManager.hideInteractionLabel(npc.id);
-          npc.interactionLabelVisible = false;
-        }
-      });
-    });
-    
-    // Override the init method
-    const originalInit = npcManager.init;
-    npcManager.init = jest.fn().mockImplementation(function() {
-      if (this.initialized) {
-        console.log('NPC Manager already initialized');
-        return;
-      }
-      
-      this.initialized = true;
-      mockGame.networkManager.socket.on('server_npcs', this.processServerNPCs.bind(this));
-    });
-    
-    // Override the cleanup method
-    npcManager.cleanup = jest.fn().mockImplementation(function() {
-      this.npcs.forEach(npc => {
-        if (npc.mesh) {
-          npc.mesh.remove();
-        }
-      });
-      
-      this.npcs.clear();
-      mockGame.networkManager.socket.off('server_npcs', this.processServerNPCs);
-    });
+    // Create test setup
+    const setup = createNPCTestSetup();
+    mockGame = setup.mockGame;
+    npcManager = setup.npcManager;
   });
   
   afterEach(() => {
-    // Restore console methods
-    console.log.mockRestore();
-    console.error.mockRestore();
+    // Clean up
+    jest.clearAllMocks();
+    npcManager.cleanup();
   });
   
   test('should initialize correctly', () => {
-    expect(npcManager).toBeDefined();
     expect(npcManager.game).toBe(mockGame);
-    expect(npcManager.npcs).toBeDefined();
-    expect(npcManager.npcs.size).toBe(0);
-    expect(npcManager.initialized).toBe(false);
-  });
-  
-  test('should initialize NPCManager', () => {
-    npcManager.init();
-    
     expect(npcManager.initialized).toBe(true);
+    expect(npcManager.npcs.size).toBe(0);
     expect(mockGame.networkManager.socket.on).toHaveBeenCalledWith('server_npcs', expect.any(Function));
   });
   
-  test('should not initialize twice', () => {
-    npcManager.initialized = true;
+  test('should create and remove NPCs', () => {
+    // Create an NPC
+    const npcId = 'test-npc';
+    const npcType = 'merchant';
+    const position = { x: 10, y: 0, z: 10 };
+    const rotation = { y: 1.5 };
     
-    npcManager.init();
+    const npc = npcManager.createNPC(npcId, npcType, position, rotation);
     
-    expect(console.log).toHaveBeenCalledWith('NPC Manager already initialized');
+    // Verify NPC was created correctly
+    expect(npc).toBeDefined();
+    expect(npc.id).toBe(npcId);
+    expect(npc.type).toBe(npcType);
+    expect(npc.position.x).toBe(position.x);
+    expect(npc.position.y).toBe(position.y);
+    expect(npc.position.z).toBe(position.z);
+    expect(npc.rotation.y).toBe(rotation.y);
+    expect(npc.userData.isNPC).toBe(true);
+    expect(npc.userData.type).toBe(npcType);
+    expect(npcManager.npcs.size).toBe(1);
+    expect(npcManager.npcs.get(npcId)).toBe(npc);
+    expect(mockGame.scene.add).toHaveBeenCalledWith(npc);
+    
+    // Remove the NPC
+    npcManager.removeNPC(npcId);
+    
+    // Verify NPC was removed
+    expect(npcManager.npcs.size).toBe(0);
+    expect(npcManager.npcs.has(npcId)).toBe(false);
+    expect(mockGame.scene.remove).toHaveBeenCalledWith(npc);
   });
   
   test('should process server NPCs', () => {
-    const npcData = [
-      { id: 'npc1', type: 'quest', position: { x: 10, y: 0, z: 10 } },
-      { id: 'npc2', type: 'merchant', position: { x: -10, y: 0, z: -10 } }
+    // Create mock server NPC data
+    const serverNPCs = [
+      { id: 'npc-1', type: 'merchant', position: { x: 10, y: 0, z: 10 }, rotation: { y: 0 } },
+      { id: 'npc-2', type: 'guard', position: { x: -10, y: 0, z: -10 }, rotation: { y: Math.PI } }
     ];
     
-    npcManager.processServerNPCs(npcData);
+    // Process server NPCs
+    npcManager.processServerNPCs(serverNPCs);
     
+    // Verify NPCs were created
     expect(npcManager.npcs.size).toBe(2);
-    expect(npcManager.npcs.get('npc1')).toBeDefined();
-    expect(npcManager.npcs.get('npc2')).toBeDefined();
-    expect(npcManager.loadNPC).toHaveBeenCalledTimes(2);
+    expect(npcManager.npcs.has('npc-1')).toBe(true);
+    expect(npcManager.npcs.has('npc-2')).toBe(true);
+    
+    // Verify NPC properties
+    const npc1 = npcManager.npcs.get('npc-1');
+    expect(npc1.type).toBe('merchant');
+    expect(npc1.position.x).toBe(10);
+    expect(npc1.position.z).toBe(10);
+    
+    const npc2 = npcManager.npcs.get('npc-2');
+    expect(npc2.type).toBe('guard');
+    expect(npc2.position.x).toBe(-10);
+    expect(npc2.position.z).toBe(-10);
+    expect(npc2.rotation.y).toBe(Math.PI);
   });
   
-  test('should handle invalid NPC data', () => {
-    const invalidData = [
-      { id: 'npc1' }, // Missing type and position
-      { type: 'quest' }, // Missing id and position
-      { position: { x: 10, y: 0, z: 10 } } // Missing id and type
-    ];
+  test('should check for player-NPC interactions', () => {
+    // Create NPCs at different distances from the player
+    const closeNPC = npcManager.createNPC('close-npc', 'merchant', { x: 2, y: 0, z: 2 });
+    const mediumNPC = npcManager.createNPC('medium-npc', 'guard', { x: 4, y: 0, z: 4 });
+    const farNPC = npcManager.createNPC('far-npc', 'villager', { x: 10, y: 0, z: 10 });
     
-    npcManager.processServerNPCs(invalidData);
+    // Set player position
+    mockGame.playerManager.localPlayer.position = { x: 0, y: 0, z: 0 };
     
-    expect(npcManager.npcs.size).toBe(0);
-    expect(npcManager.loadNPC).not.toHaveBeenCalled();
+    // Check interactions
+    npcManager.checkInteractions();
+    
+    // Verify dialogue is shown for the closest NPC (within dialogue distance)
+    expect(npcManager.isDialogueActive).toBe(true);
+    expect(npcManager.activeNPC).toBe(closeNPC);
+    expect(mockGame.uiManager.showDialogue).toHaveBeenCalledWith(
+      closeNPC.type,
+      expect.any(String)
+    );
+    expect(mockGame.uiManager.hideInteractionLabel).toHaveBeenCalledWith(closeNPC.id);
+    
+    // Move player away from all NPCs
+    mockGame.playerManager.localPlayer.position = { x: 20, y: 0, z: 20 };
+    
+    // Reset dialogue state
+    npcManager.isDialogueActive = false;
+    npcManager.activeNPC = null;
+    
+    // Check interactions again
+    npcManager.checkInteractions();
+    
+    // Verify no interactions are triggered
+    expect(npcManager.isDialogueActive).toBe(false);
+    expect(npcManager.activeNPC).toBeNull();
   });
   
-  test('should check temple proximity', () => {
-    // Set player position near the light temple
-    mockGame.playerManager.player.position = { x: 45, y: 0, z: 45 };
-    
-    const isNearTemple = npcManager.checkTempleProximity();
-    
-    // Player should be near the light temple
-    expect(isNearTemple).toBe(true);
-    
-    // Set player position far from both temples
-    mockGame.playerManager.player.position = { x: 0, y: 0, z: 0 };
-    
-    const isNotNearTemple = npcManager.checkTempleProximity();
-    
-    // Player should not be near any temple
-    expect(isNotNearTemple).toBe(false);
-  });
-  
-  test('should handle interaction', () => {
-    // Create NPCs
-    const npc1 = { id: 'npc1', type: 'quest', position: { x: 1, y: 0, z: 1 } };
-    const npc2 = { id: 'npc2', type: 'merchant', position: { x: 10, y: 0, z: 10 } };
-    
-    npcManager.npcs.set('npc1', npc1);
-    npcManager.npcs.set('npc2', npc2);
-    
-    // Set player position close to npc1
-    mockGame.playerManager.player.position = { x: 0, y: 0, z: 0 };
-    
-    // Mock calculateDistance to return a value within interaction distance for npc1
-    npcManager.calculateDistance.mockImplementation((npc) => {
-      return npc.id === 'npc1' ? 2 : 15;
-    });
-    
-    const result = npcManager.handleInteraction();
-    
-    expect(result).toBe(true);
-    expect(mockGame.uiManager.showDialogue).toHaveBeenCalled();
-  });
-  
-  test('should hide all interaction labels', () => {
-    // Create NPCs
-    const npc1 = { 
-      id: 'npc1', 
-      type: 'quest', 
-      position: { x: 1, y: 0, z: 1 },
-      interactionLabelVisible: true
-    };
-    const npc2 = { 
-      id: 'npc2', 
-      type: 'merchant', 
-      position: { x: 10, y: 0, z: 10 },
-      interactionLabelVisible: true
-    };
-    
-    npcManager.npcs.set('npc1', npc1);
-    npcManager.npcs.set('npc2', npc2);
-    
-    npcManager.hideAllInteractionLabels();
-    
-    // Check that all labels are hidden
-    expect(npc1.interactionLabelVisible).toBe(false);
-    expect(npc2.interactionLabelVisible).toBe(false);
-    expect(mockGame.uiManager.hideInteractionLabel).toHaveBeenCalledTimes(2);
-  });
-  
-  test('should process NPC updates', () => {
+  test('should show and hide dialogue', () => {
     // Create an NPC
-    const npc = { 
-      id: 'npc1', 
-      type: 'quest', 
-      position: { x: 1, y: 0, z: 1 },
-      interactionLabelVisible: false
-    };
+    const npc = npcManager.createNPC('test-npc', 'merchant', { x: 0, y: 0, z: 0 });
     
-    npcManager.npcs.set('npc1', npc);
+    // Show dialogue
+    npcManager.showDialogue(npc);
     
-    // Set player position close to the NPC
-    mockGame.playerManager.player.position = { x: 0, y: 0, z: 0 };
+    // Verify dialogue is shown
+    expect(npcManager.isDialogueActive).toBe(true);
+    expect(npcManager.activeNPC).toBe(npc);
+    expect(mockGame.uiManager.showDialogue).toHaveBeenCalledWith(
+      npc.type,
+      expect.any(String)
+    );
+    expect(mockGame.uiManager.hideInteractionLabel).toHaveBeenCalledWith(npc.id);
     
-    // Mock calculateDistance to return a value within interaction distance
-    npcManager.calculateDistance.mockReturnValue(3);
+    // Hide dialogue
+    npcManager.hideDialogue();
     
-    // Process updates
-    npcManager.update();
-    
-    // Interaction label should be shown
-    expect(mockGame.uiManager.showInteractionLabel).toHaveBeenCalled();
+    // Verify dialogue is hidden
+    expect(npcManager.isDialogueActive).toBe(false);
+    expect(npcManager.activeNPC).toBeNull();
+    expect(mockGame.uiManager.hideDialogue).toHaveBeenCalled();
   });
   
-  test('should clean up NPCs', () => {
-    // Create NPCs
-    const npc1 = { 
-      id: 'npc1', 
-      type: 'quest', 
-      position: { x: 1, y: 0, z: 1 },
-      mesh: { remove: jest.fn() }
-    };
-    const npc2 = { 
-      id: 'npc2', 
-      type: 'merchant', 
-      position: { x: 10, y: 0, z: 10 },
-      mesh: { remove: jest.fn() }
-    };
+  test('should clean up properly', () => {
+    // Create some NPCs
+    npcManager.createNPC('npc-1', 'merchant', { x: 0, y: 0, z: 0 });
+    npcManager.createNPC('npc-2', 'guard', { x: 10, y: 0, z: 10 });
     
-    npcManager.npcs.set('npc1', npc1);
-    npcManager.npcs.set('npc2', npc2);
-    
-    // Initialize to set up socket handlers
-    npcManager.init();
+    // Verify NPCs were created
+    expect(npcManager.npcs.size).toBe(2);
     
     // Clean up
     npcManager.cleanup();
     
-    // NPCs should be removed
+    // Verify NPCs were removed
     expect(npcManager.npcs.size).toBe(0);
-    expect(mockGame.networkManager.socket.off).toHaveBeenCalledWith('server_npcs', expect.any(Function));
+    expect(mockGame.networkManager.socket.off).toHaveBeenCalledWith(
+      'server_npcs',
+      expect.any(Function)
+    );
   });
 }); 

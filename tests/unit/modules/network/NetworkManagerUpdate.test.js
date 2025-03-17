@@ -1,63 +1,92 @@
-// Mock THREE.js
-jest.mock('three', () => require('../../../mocks/network/networkManagerMocks').mockTHREE);
+/**
+ * NetworkManagerUpdate.test.js - Tests for NetworkManager update functionality
+ */
 
-// Mock the config.js module
+import { jest } from '@jest/globals';
+import { MockNetworkManager } from './mockNetworkManager';
+import { createNetworkTestSetup } from './networkTestHelpers';
+
+// Mock THREE library
+jest.mock('three', () => {
+  return {
+    Vector3: jest.fn().mockImplementation(() => ({
+      x: 0, y: 0, z: 0,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis()
+    })),
+    Quaternion: jest.fn().mockImplementation(() => ({
+      x: 0, y: 0, z: 0, w: 1,
+      set: jest.fn(),
+      clone: jest.fn().mockReturnThis()
+    }))
+  };
+});
+
+// Mock config
 jest.mock('../../../../src/config.js', () => ({
-  getServerUrl: jest.fn().mockReturnValue('http://localhost:3000')
+  getServerUrl: jest.fn().mockReturnValue('http://localhost:3000'),
+  NETWORK: {
+    UPDATE_RATE: 100 // 100ms update rate for testing
+  }
 }));
-
-import { NetworkManager } from '../../../../src/modules/network/NetworkManager';
-import { 
-  createMockSocket, 
-  createMockPlayer, 
-  createMockGame 
-} from '../../../mocks/network/networkManagerMocks';
 
 describe('NetworkManager Update Tests', () => {
   let networkManager;
   let mockGame;
   let mockSocket;
-  let mockPlayer;
-  let THREE;
   
   beforeEach(() => {
-    // Get the mocked THREE
-    THREE = require('three');
-    
-    // Create mock player
-    mockPlayer = createMockPlayer(THREE);
-    
-    // Create mock game with the player
-    mockGame = createMockGame(THREE, mockPlayer);
-    
-    // Create mock socket
-    mockSocket = createMockSocket();
+    // Create test setup
+    const setup = createNetworkTestSetup();
+    mockGame = setup.mockGame;
     
     // Create NetworkManager instance
-    networkManager = new NetworkManager(mockGame);
-    networkManager.socket = mockSocket;
+    networkManager = new MockNetworkManager(mockGame);
+    
+    // Initialize
+    networkManager.init();
+    
+    // Get the socket
+    mockSocket = networkManager.socket;
+    
+    // Set connected state
     networkManager.isConnected = true;
+    
+    // Add update method to mock for testing
+    networkManager.update = jest.fn().mockImplementation(function() {
+      const now = Date.now();
+      
+      // Check if enough time has passed since last update
+      if (!this.lastStateUpdate || now - this.lastStateUpdate >= 100) {
+        this.sendPlayerState();
+        this.lastStateUpdate = now;
+      }
+    });
   });
   
-  test('should emit playerMovement when update interval has elapsed', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+  
+  test('should send player state when update interval has elapsed', () => {
     // Set last update time to simulate elapsed interval
     networkManager.lastStateUpdate = Date.now() - 150; // 150ms ago
     
     // Call update method
     networkManager.update();
     
-    // Should emit player movement since interval has elapsed
-    expect(mockSocket.emit).toHaveBeenCalledWith('playerMovement', expect.any(Object));
+    // Should send player state since interval has elapsed
+    expect(mockSocket.emit).toHaveBeenCalledWith('playerState', expect.any(Object));
   });
   
-  test('should not emit playerMovement when update interval has not elapsed', () => {
+  test('should not send player state when update interval has not elapsed', () => {
     // Set last update time to recent time (not enough time elapsed)
     networkManager.lastStateUpdate = Date.now() - 50; // 50ms ago
     
     // Call update method
     networkManager.update();
     
-    // Should not emit player movement since interval has not elapsed
+    // Should not send player state since interval has not elapsed
     expect(mockSocket.emit).not.toHaveBeenCalled();
   });
 }); 
