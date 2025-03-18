@@ -2,9 +2,7 @@ services:
   - name: karma-landing
     type: web
     env: static
-    buildCommand: >
-      npm install vite --no-save &&
-      node_modules/.bin/vite build landing-page
+    buildCommand: npm install && npm run build:landing
     staticPublishPath: landing-page/dist
     domains:
       - karmaonline.io
@@ -19,9 +17,7 @@ services:
   - name: karma-client
     type: web
     env: static
-    buildCommand: >
-      npm install vite --no-save &&
-      node_modules/.bin/vite build
+    buildCommand: npm install && npm run build
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
