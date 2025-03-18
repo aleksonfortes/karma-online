@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Karma Online</title>
+    <title>Karma Online - Welcome</title>
     <meta name="description" content="Karma Online - A multiplayer web game">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -41,15 +41,24 @@
             letter-spacing: 2px;
         }
 
-        .subtitle {
-            font-size: 1.5rem;
+        .description {
+            font-size: 1.2rem;
             max-width: 600px;
             text-align: center;
             margin-bottom: 3rem;
             color: #cccccc;
+            line-height: 1.8;
         }
 
-        .cta-button {
+        .button-group {
+            display: flex;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .button {
             padding: 1rem 2.5rem;
             font-size: 1.2rem;
             border: none;
@@ -63,12 +72,53 @@
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
+        }
+
+        .play-button {
             background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
         }
 
-        .cta-button:hover {
+        .discord-button {
+            background: #5865F2;
+        }
+
+        .button:hover {
             transform: translateY(-3px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .newsletter-section {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 3rem;
+            border-radius: 15px;
+            max-width: 600px;
+            width: 100%;
+            margin-top: 2rem;
+            text-align: center;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .newsletter-section h2 {
+            color: #4ecdc4;
+            margin-bottom: 1rem;
+            font-size: 1.8rem;
+        }
+
+        .newsletter-section p {
+            color: #cccccc;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+            line-height: 1.6;
+        }
+
+        .newsletter-section iframe {
+            border: none !important;
+            background: transparent !important;
+            max-width: 480px;
+            width: 100%;
+            margin: 0 auto;
+            display: block;
         }
 
         .domain-info {
@@ -95,9 +145,24 @@
                 font-size: 3rem;
             }
             
-            .subtitle {
+            .description {
                 font-size: 1.1rem;
                 padding: 0 1rem;
+            }
+            
+            .button-group {
+                flex-direction: column;
+                width: 100%;
+                max-width: 300px;
+            }
+            
+            .button {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .newsletter-section {
+                padding: 1.5rem;
             }
         }
     </style>
@@ -105,14 +170,36 @@
 <body>
     <div class="container">
         <h1 class="title">Karma Online</h1>
-        <h2 class="subtitle">A multiplayer web game experience</h2>
-        <a href="https://play.karmaonline.io" class="cta-button">Play Now</a>
+        <p class="description">
+            A multiplayer game crafted by AI with DevYogi's touch.
+            Making fun accessible through your browser.
+        </p>
+        <div class="button-group">
+            <a href="https://play.karmaonline.io" class="button play-button">
+                <i class="fas fa-play"></i> Play Now
+            </a>
+            <a href="https://discord.gg/429gGAd6" class="button discord-button">
+                <i class="fab fa-discord"></i> Join Discord
+            </a>
+        </div>
+        <div class="newsletter-section">
+            <h2>Stay Updated</h2>
+            <p>Subscribe to our newsletter to receive game updates and to learn how we are developing the game using AI.</p>
+            <iframe 
+                src="https://devyogi.substack.com/embed" 
+                width="480" 
+                height="150" 
+                style="background:transparent !important;" 
+                frameborder="0" 
+                scrolling="no">
+            </iframe>
+        </div>
     </div>
     <div class="domain-info">karmaonline.io</div>
     
-    <!-- Use an absolute path and add a fallback -->
+    <!-- Script fallback for error handling, using absolute path -->
     <script>
-        // Fallback in case the module script fails to load
+        // Fallback in case the script fails to load
         window.addEventListener('error', function(e) {
             if (e.target.tagName === 'SCRIPT') {
                 console.log('Script loading error - using fallback');
