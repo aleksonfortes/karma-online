@@ -3,7 +3,7 @@ services:
     type: web
     env: static
     buildCommand: chmod +x render-build.sh && ./render-build.sh landing
-    staticPublishPath: landing-page/dist
+    staticPublishPath: ./landing-page/dist
     domains:
       - karmaonline.io
     envVars:
