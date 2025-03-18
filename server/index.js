@@ -8,10 +8,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-
-// Trust Cloudflare proxies
-app.set('trust proxy', process.env.TRUST_CLOUDFLARE_PROXY === 'true');
-
 const server = createServer(app);
 
 // Check if dist directory exists and serve static files
@@ -48,6 +44,4 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Mode: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`Development URL: http://localhost:5173`);
-    console.log(`Production URL: http://localhost:${PORT}`);
 }); 
