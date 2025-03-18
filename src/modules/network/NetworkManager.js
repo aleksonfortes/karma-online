@@ -148,6 +148,11 @@ export class NetworkManager {
                 }
             }
             
+            // Process monster data if available
+            if (gameState.monsters && this.game.monsterManager) {
+                this.game.monsterManager.processServerMonsters(gameState.monsters);
+            }
+            
             // Send our initial state to all players
             if (this.game.localPlayer) {
                 this.sendPlayerState();
@@ -1017,6 +1022,20 @@ export class NetworkManager {
                 
                 // Update health bar
                 this.game.playerManager.updateHealthBar(playerMesh);
+            }
+        });
+
+        // Set up monster data handler
+        this.socket.on('monster_data', (monsterData) => {
+            if (this.game.monsterManager) {
+                this.game.monsterManager.processServerMonsters(monsterData);
+            }
+        });
+        
+        // Set up monster update handler
+        this.socket.on('monster_update', (updateData) => {
+            if (this.game.monsterManager) {
+                this.game.monsterManager.processMonsterUpdate(updateData);
             }
         });
     }

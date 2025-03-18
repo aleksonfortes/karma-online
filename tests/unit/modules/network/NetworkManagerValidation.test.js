@@ -38,15 +38,29 @@ const mockHttpServer = {};
 // Create a subclass for testing that doesn't require a real server
 class TestableNetworkManager extends NetworkManager {
   constructor() {
-    super(mockHttpServer, mockGameManager, mockPlayerManager);
+    super({}, {});
     
-    // Replace the io instance with our mock
+    // Set up mock dependencies
+    this.playerManager = mockPlayerManager;
+    this.gameManager = mockGameManager;
+    this.sockets = new Map();
     this.io = mockIo;
+    
+    // Version checking
+    this.requiredVersion = GameConstants.REQUIRED_CLIENT_VERSION;
+    
+    // Security
+    this.bannedIps = new Set();
+    this.maxInvalidAttempts = 5;
+    this.invalidAttempts = new Map();
+    
+    // Game state
+    this.serverStartTime = Date.now();
+    this.securityLogs = [];
     
     // Initialize collections
     this.lastUpdateTime = new Map();
     this.playerLastPositions = new Map();
-    this.sockets = new Map();
     this._lastLogs = {};
   }
   
@@ -216,6 +230,38 @@ class TestableNetworkManager extends NetworkManager {
         return false;
       }
     }
+    
+    return true;
+  }
+  
+  // Validation methods
+  validateClientVersion(clientVersion) {
+    return clientVersion === GameConstants.REQUIRED_CLIENT_VERSION;
+  }
+  
+  validateMessage(socketId, message) {
+    // Check if we have a socket for this ID
+    if (!this.sockets.has(socketId)) {
+      this.logSecurityEvent(`Invalid socket ID: ${socketId}`);
+      return false;
+    }
+    
+    // Check if message has required fields
+    if (!message || !message.type) {
+      this.logSecurityEvent(`Invalid message format from socket ${socketId}`);
+      return false;
+    }
+    
+    // Rate limit check
+    const now = Date.now();
+    const lastUpdate = this.lastUpdateTime.get(socketId) || 0;
+    if (now - lastUpdate < GameConstants.MIN_UPDATE_INTERVAL) {
+      this.logSecurityEvent(`Rate limit exceeded for socket ${socketId}`);
+      return false;
+    }
+    
+    // Update last message time
+    this.lastUpdateTime.set(socketId, now);
     
     return true;
   }

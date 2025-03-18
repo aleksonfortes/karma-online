@@ -960,4 +960,33 @@ export class PlayerManager {
         
         return false;
     }
+
+    /**
+     * Get the local player (the player controlled by this user)
+     * @returns {Object} The local player object
+     */
+    getLocalPlayer() {
+        // If localPlayer is already set, return it
+        if (this.localPlayer) {
+            return this.localPlayer;
+        }
+        
+        // If localPlayer is directly available in the game object, use that
+        if (this.game.localPlayer) {
+            this.localPlayer = this.game.localPlayer;
+            return this.localPlayer;
+        }
+        
+        // Otherwise, try to find it in the player collection
+        if (this.game.networkManager && this.game.networkManager.socket) {
+            const localPlayerId = this.game.networkManager.socket.id;
+            if (localPlayerId && this.players.has(localPlayerId)) {
+                this.localPlayer = this.players.get(localPlayerId);
+                return this.localPlayer;
+            }
+        }
+        
+        console.warn('Could not find local player');
+        return null;
+    }
 }

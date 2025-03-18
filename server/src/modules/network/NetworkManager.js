@@ -7,9 +7,8 @@ import { Server } from 'socket.io';
 import GameConstants from '../../config/GameConstants.js';
 
 export class NetworkManager {
-    constructor(httpServer, gameManager, playerManager) {
-        this.gameManager = gameManager;
-        this.playerManager = playerManager;
+    constructor(httpServer) {
+        this.gameManager = null;
         this.lastUpdateTime = new Map();
         this.playerLastPositions = new Map();
         this._lastLogs = {};
@@ -31,6 +30,16 @@ export class NetworkManager {
             transports: ['websocket', 'polling'],
             secure: process.env.NODE_ENV === 'production'
         });
+        
+        // Socket handlers will be set up after the game manager is set
+    }
+    
+    /**
+     * Set the game manager reference and initialize socket handlers
+     */
+    setGameManager(gameManager) {
+        this.gameManager = gameManager;
+        this.playerManager = this.gameManager.playerManager;
         
         this.setupSocketHandlers();
         this.initialize();
@@ -481,6 +490,64 @@ export class NetworkManager {
             
             // Store the interval for cleanup on disconnect
             this.sockets.set(socket.id, { statsInterval });
+
+            // Handle monster attack
+            socket.on('attack_monster', (data) => {
+                if (!data || !data.monsterId) {
+                    return this.logSecurityEvent(`Invalid attack_monster data from ${socket.id}`);
+                }
+                
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    return this.logSecurityEvent(`Player not found for attack_monster from ${socket.id}`);
+                }
+                
+                // Get the monster
+                const monster = this.gameManager.monsterManager.getMonsterById(data.monsterId);
+                if (!monster) {
+                    return this.logSecurityEvent(`Monster ${data.monsterId} not found for attack_monster from ${socket.id}`);
+                }
+                
+                // Check if the monster is within range
+                const playerPos = player.position;
+                const monsterPos = monster.position;
+                const distance = this.calculateDistance(playerPos, monsterPos);
+                
+                // Get skill info - default to basic attack if no skill specified
+                const skillId = data.skillId || 'martial_arts';
+                const attackRange = 5; // Configurable attack range
+                const rangeTolerance = 0.3; // Small buffer for network latency/position desync
+                
+                if (distance > attackRange + rangeTolerance) {
+                    return this.log(`Player ${socket.id} attack out of range (${distance.toFixed(2)})`);
+                }
+                
+                // Calculate damage based on the skill
+                let damage = 25; // Base damage
+                if (skillId === 'martial_arts') {
+                    damage = 25;
+                } else if (skillId === 'dark_strike') {
+                    damage = 35;
+                }
+                
+                // Apply damage to monster
+                monster.health -= damage;
+                
+                // Log the attack
+                this.log(`Player ${socket.id} used ${skillId} on monster ${monster.id} for ${damage} damage`);
+                
+                // Check if monster is dead
+                if (monster.health <= 0) {
+                    // Handle monster death
+                    this.gameManager.handleMonsterDeath(socket.id, monster.id);
+                } else {
+                    // Broadcast monster health update
+                    this.io.emit('monster_update', {
+                        monsterId: monster.id,
+                        health: monster.health
+                    });
+                }
+            });
         });
     }
     

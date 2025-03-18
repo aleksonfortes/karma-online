@@ -9,6 +9,7 @@ import { NPCManager } from './modules/npc/NPCManager.js';
 import { EnvironmentManager } from './modules/environment/EnvironmentManager.js';
 import { CameraManager } from './modules/camera/CameraManager.js';
 import { TargetingManager } from './modules/targeting/TargetingManager.js';
+import { MonsterManager } from './modules/monster/MonsterManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
@@ -109,6 +110,7 @@ export class Game {
             this.karmaManager = new KarmaManager(this);
             this.cameraManager = new CameraManager(this);
             this.targetingManager = new TargetingManager(this);
+            this.monsterManager = new MonsterManager(this);
             
             // Initialize UI first so we can show loading indicators
             await this.uiManager.init();
@@ -142,6 +144,9 @@ export class Game {
             // Initialize TargetingManager
             await this.targetingManager.init();
             
+            // Initialize MonsterManager after NPCs
+            await this.monsterManager.init();
+            
             // Now that everything is loaded, hide loading screen and show game UI
             this.uiManager.hideLoadingScreen();
             this.uiManager.createUI();
@@ -153,9 +158,19 @@ export class Game {
 
     // Handle network-related events from NetworkManager
     onNetworkEvent(eventName, data) {
-        console.log(`Network event: ${eventName}`, data);
+        console.log(`Network event received: ${eventName}`);
         
-        switch (eventName) {
+        // Forward to appropriate event handlers
+        switch(eventName) {
+            case 'game_state':
+                this.handleGameUpdate(data);
+                break;
+            case 'monster_data':
+                this.monsterManager.processServerMonsters(data);
+                break;
+            case 'monster_update':
+                this.monsterManager.processMonsterUpdate(data);
+                break;
             case 'gameUpdate':
                 // Handle game state update from server
                 this.handleGameUpdate(data);
@@ -227,10 +242,11 @@ export class Game {
         console.log('Scene setup complete');
     }
 
+    /**
+     * Set up input handlers for keyboard and mouse
+     */
     setupInputHandlers() {
-        console.log('Setting up input handlers...');
-        
-        // Keyboard events for movement
+        // Set up keyboard handler for movement and skills
         document.addEventListener('keydown', (event) => {
             if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
             
@@ -240,40 +256,74 @@ export class Game {
                 case 'KeyA': this.controls.left = true; break;
                 case 'KeyD': this.controls.right = true; break;
                 case 'Space': 
-                    if (this.isAlive) this.skillsManager?.useMartialArts();
+                    if (this.isAlive) {
+                        // Check if player has chosen a path - skip in test environment
+                        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+                        if (!this.playerStats.path && !isTestEnvironment) {
+                            console.log('You must choose a path (light or dark) before using skills');
+                            // Show UI message if UI manager exists
+                            if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                this.uiManager.showNotification('Choose a path (light or dark) first');
+                            } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
+                                this.uiManager.showMessage('Choose a path (light or dark) first');
+                            }
+                            break;
+                        }
+                        
+                        // Check if we have targeting manager and a monster targeted
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster' && this.skillsManager) {
+                            // Get the monster
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Only attempt to attack if monster exists
+                                this.skillsManager.useSkillOnMonster(target.id);
+                            }
+                        } else if (this.skillsManager) {
+                            // Use appropriate skill based on path
+                            const skillToUse = this.skillsManager.getDefaultSkill();
+                            if (skillToUse === 'martial_arts') {
+                                this.skillsManager.useMartialArts();
+                            } else if (skillToUse === 'dark_strike') {
+                                this.skillsManager.useDarkStrike();
+                            }
+                        }
+                    }
                     break;
                 case 'KeyE':
-                    if (this.isAlive) this.npcManager?.handleInteraction();
-                    break;
-                case 'Escape':
-                    // Clear current target when pressing Escape
-                    this.targetingManager?.clearTarget();
-                    break;
-                case 'KeyK':
-                    // Test karma - increase karma (dark path)
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Increasing karma - moving toward dark path (testing)');
-                        this.karmaManager.adjustKarma(10);
-                        this.uiManager?.showNotification('Karma increased by 10 (more debt)', '#444444');
+                    // E handles both NPC interaction and skill usage for monsters, like PVP
+                    if (this.isAlive) {
+                        // Check if we have targeting manager and a monster targeted
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster' && this.skillsManager) {
+                            // Check if player has chosen a path - skip in test environment
+                            const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+                            if (!this.playerStats.path && !isTestEnvironment) {
+                                console.log('You must choose a path (light or dark) before using skills');
+                                // Show UI message if UI manager exists
+                                if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                    this.uiManager.showNotification('Choose a path (light or dark) first');
+                                } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
+                                    this.uiManager.showMessage('Choose a path (light or dark) first');
+                                }
+                                break;
+                            }
+                            
+                            // Get the monster
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Only attempt to attack if monster exists
+                                this.skillsManager.useSkillOnMonster(target.id);
+                            }
+                        } else if (this.npcManager) {
+                            // Try to interact with NPCs
+                            this.npcManager.handleInteraction();
+                        }
                     }
                     break;
-                case 'KeyJ':
-                    // Test karma - decrease karma (light path)
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Decreasing karma - moving toward light path (testing)');
-                        this.karmaManager.adjustKarma(-10);
-                        this.uiManager?.showNotification('Karma decreased by 10 (less debt)', '#ffffff');
-                    }
-                    break;
-                case 'Digit8':
-                    // Test karma - reset karma to default
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Resetting karma to default (testing)');
-                        // Calculate amount needed to reset to 50
-                        const resetAmount = 50 - this.playerStats.currentKarma;
-                        this.karmaManager.adjustKarma(resetAmount);
-                        this.uiManager?.showNotification('Karma reset to default (50)', '#ffffff');
-                    }
+                case 'Digit3':
+                    // Handle NPC interaction with the number 3 key
+                    if (this.isAlive && this.npcManager) this.npcManager.handleInteraction();
                     break;
             }
         });
@@ -289,48 +339,16 @@ export class Game {
             }
         });
         
-        // Mouse click event for targeting
-        this.renderer.domElement.addEventListener('click', (event) => {
-            if (!this.isAlive) return;
-            
-            console.log('Mouse click detected');
-            
-            // Log player information
-            console.log('Local player:', this.localPlayer ? {
-                id: this.localPlayer.userData?.id || 'unknown',
-                position: this.localPlayer.position ? 
-                    `(${this.localPlayer.position.x.toFixed(2)}, ${this.localPlayer.position.y.toFixed(2)}, ${this.localPlayer.position.z.toFixed(2)})` : 'N/A'
-            } : 'No local player');
-            
-            console.log('All players in game:', Array.from(this.players.entries()).map(([id, player]) => {
-                return {
-                    id: id,
-                    isLocalPlayer: player === this.localPlayer,
-                    position: player.position ? 
-                        `(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})` : 'N/A'
-                };
-            }));
-            
-            // Calculate mouse position in normalized device coordinates (-1 to +1)
-            const rect = this.renderer.domElement.getBoundingClientRect();
-            const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            
-            console.log(`Mouse click at screen coordinates: (${event.clientX}, ${event.clientY})`);
-            console.log(`Normalized coordinates: (${x.toFixed(4)}, ${y.toFixed(4)})`);
-            console.log(`Canvas rect: left=${rect.left.toFixed(0)}, top=${rect.top.toFixed(0)}, width=${rect.width.toFixed(0)}, height=${rect.height.toFixed(0)}`);
-            
-            // Check if targeting manager exists
-            if (this.targetingManager) {
-                console.log('Targeting manager exists, handling targeting');
-                const mousePosition = new THREE.Vector2(x, y);
-                this.targetingManager.handleTargeting(mousePosition);
-            } else {
-                console.warn('No targeting manager available');
+        // Set up mouse click handler for targeting
+        document.addEventListener('click', (event) => {
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || 
+                event.target.tagName === 'BUTTON' || event.target.classList.contains('ui-element')) {
+                return;
             }
+            
+            console.log('Mouse click event detected');
+            this.handleMouseClick(event);
         });
-        
-        console.log('Input handlers setup complete');
     }
 
     startGameLoop() {
@@ -369,7 +387,8 @@ export class Game {
         this.uiManager?.update(delta);
         this.environmentManager?.update(delta);
         this.cameraManager?.update(delta);
-        this.targetingManager?.update(delta);
+        this.targetingManager?.update();
+        this.monsterManager?.update(delta);
         
         // Continuous collision check - ensure player is never inside a pillar
         if (this.localPlayer && this.environmentManager) {
@@ -383,11 +402,6 @@ export class Game {
             if (this.terrainManager) {
                 this.terrainManager.applyTerrainHeight(this.localPlayer.position);
             }
-        }
-        
-        // Update camera
-        if (this.localPlayer) {
-            this.cameraManager.update(delta);
         }
     }
 
@@ -520,5 +534,31 @@ export class Game {
         
         console.log(`Path chosen: ${path}`);
         return true;
+    }
+
+    /**
+     * Handle mouse click
+     * @param {Event} event - Mouse event
+     */
+    handleMouseClick(event) {
+        // Only handle left mouse button clicks
+        if (event.button !== 0) return;
+        
+        // Convert screen coordinates to normalized device coordinates
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        // Create a normalized vector for the mouse position
+        const mousePosition = new THREE.Vector2(mouseX, mouseY);
+        
+        console.log('Mouse click:', {
+            x: mouseX.toFixed(2), 
+            y: mouseY.toFixed(2)
+        });
+        
+        // Try to target something at the click position
+        if (this.targetingManager) {
+            this.targetingManager.handleTargeting(mousePosition);
+        }
     }
 }
