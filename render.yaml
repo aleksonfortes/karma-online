@@ -2,7 +2,7 @@ services:
   - name: karma-landing
     type: web
     env: node
-    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npm run build:landing
+    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npx vite build landing-page
     startCommand: npm run start:landing
     domains:
       - karmaonline.io
@@ -15,7 +15,7 @@ services:
   - name: karma-client
     type: web
     env: static
-    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npm run build
+    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npx vite build
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
