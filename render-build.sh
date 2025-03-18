@@ -6,16 +6,26 @@ echo "Node version: $(node -v)"
 echo "NPM version: $(npm -v)"
 echo "Working directory: $(pwd)"
 
-# Show environment variables (excluding secrets)
-echo "Environment variables:"
-printenv | grep -v "_KEY\|SECRET\|TOKEN" | grep "VITE_"
+# Show Vite-related environment variables safely
+echo "VITE Environment variables:"
+printenv | grep "VITE_" || echo "No VITE_ environment variables found"
 
 # Install dependencies
 echo "Installing dependencies..."
 npm install --save
 
 # Ensure vite is available (using local installation)
-echo "Vite version: $(./node_modules/.bin/vite --version)"
+echo "Checking for vite in node_modules..."
+if [ -f "./node_modules/.bin/vite" ]; then
+  echo "Vite found! Version: $(./node_modules/.bin/vite --version)"
+else
+  echo "Vite not found in node_modules/.bin. Checking installed packages:"
+  npm list vite
+  echo "Attempting to install vite directly..."
+  npm install vite --save
+  echo "After installation, checking for vite again:"
+  ls -la ./node_modules/.bin/ | grep vite || echo "Vite binary still not found"
+fi
 
 # Build the project
 echo "Building project..."
@@ -25,9 +35,28 @@ if [ "$1" = "landing" ]; then
   echo "Landing page directory contents:"
   ls -la landing-page
   
+  # Check if Vite config exists
+  echo "Checking for vite config in landing-page..."
+  if [ -f "landing-page/vite.config.js" ]; then
+    echo "Found landing-page/vite.config.js"
+    cat landing-page/vite.config.js
+  else
+    echo "landing-page/vite.config.js not found!"
+  fi
+  
+  # Check if index.html exists
+  echo "Checking for index.html in landing-page..."
+  if [ -f "landing-page/index.html" ]; then
+    echo "Found landing-page/index.html"
+  else
+    echo "landing-page/index.html not found!"
+    echo "Contents of landing-page directory:"
+    find landing-page -type f | sort
+  fi
+  
   # Build directly from the root, specifying the landing page as root
   echo "Running vite build with root option..."
-  ./node_modules/.bin/vite build --config landing-page/vite.config.js
+  npx vite build landing-page
   
   # Create the expected directory structure if needed
   echo "Creating landing-page/dist directory if not exists..."
@@ -71,7 +100,7 @@ export default defineConfig({
 EOF
 
   echo "Running vite build with simple config..."
-  ./node_modules/.bin/vite build --config vite.simple.config.js --mode production
+  npx vite build --config vite.simple.config.js --mode production
   
   echo "Dist contents:"
   ls -la dist || echo "Dist directory not found"

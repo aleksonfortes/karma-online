@@ -1,3 +1,6 @@
+// Import styles
+import './style.css';
+
 // Basic entry point for the landing page
 console.log('Karma Online - Landing Page Loaded');
 
