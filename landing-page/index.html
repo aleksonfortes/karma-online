@@ -41,24 +41,15 @@
             letter-spacing: 2px;
         }
 
-        .description {
-            font-size: 1.2rem;
+        .subtitle {
+            font-size: 1.5rem;
             max-width: 600px;
             text-align: center;
             margin-bottom: 3rem;
             color: #cccccc;
-            line-height: 1.8;
         }
 
-        .button-group {
-            display: flex;
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-
-        .button {
+        .cta-button {
             padding: 1rem 2.5rem;
             font-size: 1.2rem;
             border: none;
@@ -72,53 +63,20 @@
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-        }
-
-        .play-button {
             background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
         }
 
-        .discord-button {
-            background: #5865F2;
-        }
-
-        .button:hover {
+        .cta-button:hover {
             transform: translateY(-3px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
         }
 
-        .newsletter-section {
-            background: rgba(255, 255, 255, 0.05);
-            padding: 3rem;
-            border-radius: 15px;
-            max-width: 600px;
-            width: 100%;
-            margin-top: 2rem;
-            text-align: center;
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .newsletter-section h2 {
-            color: #4ecdc4;
-            margin-bottom: 1rem;
-            font-size: 1.8rem;
-        }
-
-        .newsletter-section p {
-            color: #cccccc;
-            margin-bottom: 2rem;
-            font-size: 1.1rem;
-            line-height: 1.6;
-        }
-
-        .newsletter-section iframe {
-            border: none !important;
-            background: transparent !important;
-            max-width: 480px;
-            width: 100%;
-            margin: 0 auto;
-            display: block;
+        .domain-info {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            font-size: 0.8rem;
+            color: #666;
         }
 
         @keyframes glow {
@@ -132,81 +90,23 @@
             }
         }
 
-        .domain-info {
-            position: fixed;
-            bottom: 1rem;
-            right: 1rem;
-            font-size: 0.8rem;
-            color: #666;
-        }
-
         @media (max-width: 768px) {
             .title {
                 font-size: 3rem;
             }
             
-            .description {
+            .subtitle {
                 font-size: 1.1rem;
-                padding: 0 1rem;
-            }
-            
-            .button-group {
-                flex-direction: column;
-                width: 100%;
-                max-width: 300px;
-            }
-            
-            .button {
-                width: 100%;
-                justify-content: center;
-            }
-            
-            .newsletter-section {
                 padding: 0 1rem;
             }
         }
     </style>
 </head>
 <body>
-    <div id="app">
-        <header>
-            <h1>Karma Online</h1>
-            <p>A multiplayer web game experience</p>
-        </header>
-        <main>
-            <p>Welcome to Karma Online! The game is currently in development.</p>
-            <a href="https://play.karmaonline.io">Play Now</a>
-        </main>
-        <footer>
-            <p>&copy; 2025 Karma Online</p>
-        </footer>
-    </div>
     <div class="container">
         <h1 class="title">Karma Online</h1>
-        <p class="description">
-            A multiplayer game crafted by AI with DevYogi's touch.
-            Making fun accessible through your browser.
-        </p>
-        <div class="button-group">
-            <a href="https://play.karmaonline.io" class="button play-button">
-                <i class="fas fa-play"></i> Play Now
-            </a>
-            <a href="https://discord.gg/429gGAd6" class="button discord-button">
-                <i class="fab fa-discord"></i> Join Discord
-            </a>
-        </div>
-        <div class="newsletter-section">
-            <h2>Stay Updated</h2>
-            <p>Subscribe to our newsletter to receive game updates and to learn how we are developing the game using AI.</p>
-            <iframe 
-                src="https://devyogi.substack.com/embed" 
-                width="480" 
-                height="150" 
-                style="background:transparent !important;" 
-                frameborder="0" 
-                scrolling="no">
-            </iframe>
-        </div>
+        <h2 class="subtitle">A multiplayer web game experience</h2>
+        <a href="https://play.karmaonline.io" class="cta-button">Play Now</a>
     </div>
     <div class="domain-info">karmaonline.io</div>
     <script type="module" src="./src/main.js"></script>
