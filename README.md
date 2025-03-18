@@ -130,3 +130,23 @@ Karma Online uses Render for deployment with three separate services:
 3. In the Render dashboard, manually deploy only the affected services
 
 This approach keeps all code in the main branch while giving you control over which services are deployed.
+
+## Monster System
+
+The game now includes a basic monster system with the following features:
+
+1. Monsters spawn at predefined locations outside the temple area
+2. Monsters can be targeted and attacked by clicking on them and pressing 'E' to use skills
+3. When a monster dies, it will respawn after a short delay
+4. Server maintains authority over monster state, health, and respawning
+5. Monster combat uses the same skill system as PVP combat
+
+### Adding Monster Models
+
+To add custom monster models:
+
+1. Create or obtain a 3D model in GLB format
+2. Place the file at `public/models/monster_basic.glb`
+3. The game will automatically use this model for basic monsters
+
+If no model file is present, the game will use a simple cube as a fallback.

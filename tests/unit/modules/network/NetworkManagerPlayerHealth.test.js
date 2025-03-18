@@ -56,21 +56,24 @@ const mockIo = {
 // Create a testable subclass of NetworkManager
 class TestableNetworkManager extends NetworkManager {
   constructor() {
-    // Create a mock HTTP server
-    const mockHttpServer = {};
-    super(mockHttpServer, mockGameManager, mockPlayerManager);
+    super({}, {});
     
-    // Replace the io instance with our mock
+    // Set up mock dependencies
+    this.playerManager = mockPlayerManager;
+    this.gameManager = mockGameManager;
+    this.sockets = new Map();
     this.io = mockIo;
     
-    // Initialize collections for tracking
-    this.lastUpdateTime = new Map();
-    this.sockets = new Map();
-  }
-  
-  // Override socket initialization
-  setupSocketHandlers() {
-    // No-op for testing
+    // Version checking
+    this.requiredVersion = GameConstants.REQUIRED_CLIENT_VERSION;
+    
+    // Security
+    this.bannedIps = new Set();
+    this.maxInvalidAttempts = 5;
+    this.invalidAttempts = new Map();
+    
+    // Game state
+    this.serverStartTime = Date.now();
   }
   
   // Override to prevent stats interval

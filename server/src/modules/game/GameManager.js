@@ -3,12 +3,17 @@
  * 
  * Handles game state, player updates, and game loop
  */
+import * as THREE from 'three';
+import PlayerManager from '../player/PlayerManager.js';
 import NPCManager from '../npc/NPCManager.js';
+import MonsterManager from '../monster/MonsterManager.js';
 
-export class GameManager {
-    constructor(playerManager) {
-        this.playerManager = playerManager;
+export default class GameManager {
+    constructor(io) {
+        this.io = io;
+        this.playerManager = new PlayerManager(this);
         this.npcManager = new NPCManager(this);
+        this.monsterManager = new MonsterManager(this);
         this.gameState = {
             lastUpdate: Date.now()
         };
@@ -121,7 +126,46 @@ export class GameManager {
         
         // Update NPCs to face nearby players
         this.npcManager.update(this.playerManager);
+        
+        // Update monsters
+        this.monsterManager.update(this.playerManager);
+        
+        // Broadcast monster states to clients
+        const monsterData = this.monsterManager.getAllMonsters();
+        if (monsterData.length > 0) {
+            this.io.emit('monster_data', monsterData);
+        }
+    }
+    
+    getGameState() {
+        return {
+            players: this.playerManager.getAllPlayers(),
+            npcs: this.npcManager.getAllNPCs(),
+            monsters: this.monsterManager.getAllMonsters()
+        };
+    }
+    
+    handleMonsterDeath(playerId, monsterId) {
+        const monster = this.monsterManager.getMonsterById(monsterId);
+        if (!monster) {
+            console.warn(`Monster ${monsterId} not found for death handling`);
+            return null;
+        }
+        
+        // Trigger monster death and respawn
+        this.monsterManager.handleMonsterDeath(monsterId);
+        
+        // Notify all clients about the monster death
+        this.io.emit('monster_update', {
+            monsterId: monsterId,
+            isAlive: false
+        });
+        
+        return monster;
+    }
+    
+    cleanup() {
+        this.npcManager.cleanup();
+        this.monsterManager.cleanup();
     }
 }
-
-export default GameManager;

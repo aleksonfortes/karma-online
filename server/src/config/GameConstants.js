@@ -65,6 +65,19 @@ const GameConstants = {
     MOVEMENT: {
         RATE_LIMIT_MS: 100, // Minimum time between movement updates
         MAX_SPEED: 10 // Maximum units per second a player can move
+    },
+    
+    // Monster configurations
+    MONSTER: {
+        BASIC: {
+            SPAWN_POSITION: { x: 15, y: 0, z: 15 }, // Position outside the temple area
+            SCALE: 0.8,
+            COLLISION_RADIUS: 1.0,
+            MAX_HEALTH: 100,
+            RESPAWN_TIME: 10000, // 10 seconds in milliseconds
+            MOVEMENT_SPEED: 2,
+            AGGRO_RADIUS: 8
+        }
     }
 };
 

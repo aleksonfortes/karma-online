@@ -75,7 +75,7 @@ export class UIManager {
         karmaFill.style.borderRadius = '6px';
         karmaFill.style.transition = 'width 0.3s ease-out';
         karmaBar.appendChild(karmaFill);
-
+        
         // Create karma tooltip (as a separate element)
         const karmaTooltip = document.createElement('div');
         karmaTooltip.className = 'tooltip';
@@ -113,7 +113,7 @@ export class UIManager {
         });
         
         karmaContainer.appendChild(karmaBar);
-
+        
         // Create container for Life ring, skills, and Mana ring
         const gameplayContainer = document.createElement('div');
         gameplayContainer.style.display = 'flex';
@@ -123,15 +123,13 @@ export class UIManager {
 
         // Create Life ring
         const lifeRing = this.createStatRing('#ff6666', '#990000', 'Life');
-        uiContainer.appendChild(lifeRing);
         
         // Store the life ring elements for later access
         this.lifeRingFill = lifeRing.querySelector('.fill');
         this.lifeTooltip = lifeRing.querySelector('.tooltip');
-
+        
         // Create Mana ring
         const manaRing = this.createStatRing('#6699ff', '#000099', 'Mana');
-        uiContainer.appendChild(manaRing);
         
         // Store the mana ring elements for later access
         this.manaRingFill = manaRing.querySelector('.fill');
@@ -144,7 +142,7 @@ export class UIManager {
         gameplayContainer.appendChild(lifeRing);
         gameplayContainer.appendChild(skillBar);
         gameplayContainer.appendChild(manaRing);
-
+        
         // Add to skill bar wrapper
         uiContainer.appendChild(karmaContainer);
         uiContainer.appendChild(gameplayContainer);
@@ -161,6 +159,110 @@ export class UIManager {
             uiContainer: uiContainer,
             karmaContainer: karmaContainer
         };
+        
+        // Create target display
+        this.createTargetDisplay();
+        
+        // Show initial values
+        this.updateStatusBars(this.game.playerStats);
+    }
+    
+    createSkillBar() {
+        // Create skill bar container that matches original style
+        const skillBarContainer = document.createElement('div');
+        skillBarContainer.style.display = 'flex';
+        skillBarContainer.style.gap = '10px';
+        skillBarContainer.style.padding = '5px 10px';
+        skillBarContainer.style.background = 'rgba(0, 0, 0, 0.6)';
+        skillBarContainer.style.borderRadius = '8px';
+        skillBarContainer.style.border = '1px solid #444';
+        
+        // Initialize skill slots
+        const keybinds = ['SPACE', 'Q', 'E', 'R', 'F'];
+        this.skillElements = {};
+        
+        for (let i = 1; i <= 5; i++) {
+            // Create skill container (button + keybind)
+            const skillContainer = document.createElement('div');
+            skillContainer.style.position = 'relative';
+            skillContainer.style.display = 'flex';
+            skillContainer.style.flexDirection = 'column';
+            skillContainer.style.alignItems = 'center';
+            
+            // Create the skill button
+            const skillButton = document.createElement('div');
+            skillButton.className = 'skill-slot'; // Add skill-slot class for selector
+            skillButton.style.width = '45px';
+            skillButton.style.height = '45px';
+            skillButton.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            skillButton.style.border = '1px solid #666';
+            skillButton.style.borderRadius = '5px';
+            skillButton.style.display = 'flex';
+            skillButton.style.justifyContent = 'center';
+            skillButton.style.alignItems = 'center';
+            skillButton.style.color = '#ccc';
+            skillButton.style.fontSize = '22px';
+            skillButton.style.overflow = 'hidden';
+            skillButton.style.position = 'relative';
+            skillButton.dataset.empty = 'true';
+            skillButton.dataset.slotNumber = i; // Add slot number for easier debugging
+            
+            // Add keybind label under the button
+            const keyLabel = document.createElement('div');
+            keyLabel.style.marginTop = '4px';
+            keyLabel.style.color = '#999';
+            keyLabel.style.fontSize = '10px';
+            keyLabel.style.fontWeight = 'bold';
+            keyLabel.style.textShadow = '1px 1px 1px rgba(0,0,0,0.5)';
+            keyLabel.textContent = keybinds[i-1];
+            
+            // Add tooltip for the skill
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.style.position = 'absolute';
+            tooltip.style.top = '-40px';
+            tooltip.style.left = '50%';
+            tooltip.style.transform = 'translateX(-50%)';
+            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            tooltip.style.color = '#ffffff';
+            tooltip.style.padding = '5px 8px';
+            tooltip.style.borderRadius = '4px';
+            tooltip.style.fontSize = '12px';
+            tooltip.style.whiteSpace = 'nowrap';
+            tooltip.style.display = 'none';
+            tooltip.style.zIndex = '1500';
+            tooltip.style.pointerEvents = 'none';
+            tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
+            
+            // Store elements for later updates
+            this.skillElements[i] = {
+                container: skillContainer,
+                button: skillButton,
+                label: keyLabel,
+                tooltip: tooltip,
+                cooldownOverlay: null, // Will be added when needed
+                isOnCooldown: false
+            };
+            
+            // Show tooltip on hover
+            skillButton.addEventListener('mouseenter', () => {
+                if (skillButton.dataset.empty !== 'true') {
+                    tooltip.style.display = 'block';
+                }
+            });
+            
+            skillButton.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+            
+            // Assemble skill UI elements
+            skillContainer.appendChild(skillButton);
+            skillContainer.appendChild(tooltip);
+            skillContainer.appendChild(keyLabel);
+            skillBarContainer.appendChild(skillContainer);
+        }
+        
+        return skillBarContainer;
     }
     
     // Helper method to create status bars with modern styling
@@ -336,234 +438,110 @@ export class UIManager {
         return container;
     }
     
-    createSkillBar() {
-        // Create skill bar container that matches original style
-        const skillBarContainer = document.createElement('div');
-        skillBarContainer.style.display = 'flex';
-        skillBarContainer.style.gap = '10px';
-        skillBarContainer.style.padding = '5px 10px';
-        skillBarContainer.style.background = 'rgba(0, 0, 0, 0.6)';
-        skillBarContainer.style.borderRadius = '8px';
-        skillBarContainer.style.border = '1px solid #444';
-        
-        // Initialize skill slots
-        const keybinds = ['SPACE', 'Q', 'E', 'R', 'F'];
-        this.skillElements = {};
-        
-        for (let i = 1; i <= 5; i++) {
-            // Create skill container (button + keybind)
-            const skillContainer = document.createElement('div');
-            skillContainer.style.position = 'relative';
-            skillContainer.style.display = 'flex';
-            skillContainer.style.flexDirection = 'column';
-            skillContainer.style.alignItems = 'center';
-            
-            // Create the skill button
-            const skillButton = document.createElement('div');
-            skillButton.className = 'skill-slot'; // Add skill-slot class for selector
-            skillButton.style.width = '45px';
-            skillButton.style.height = '45px';
-            skillButton.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            skillButton.style.border = '1px solid #666';
-            skillButton.style.borderRadius = '5px';
-            skillButton.style.display = 'flex';
-            skillButton.style.justifyContent = 'center';
-            skillButton.style.alignItems = 'center';
-            skillButton.style.color = '#ccc';
-            skillButton.style.fontSize = '22px';
-            skillButton.style.overflow = 'hidden';
-            skillButton.style.position = 'relative';
-            skillButton.dataset.empty = 'true';
-            skillButton.dataset.slotNumber = i; // Add slot number for easier debugging
-            
-            // Add keybind label under the button
-            const keyLabel = document.createElement('div');
-            keyLabel.style.marginTop = '4px';
-            keyLabel.style.color = '#999';
-            keyLabel.style.fontSize = '10px';
-            keyLabel.style.fontWeight = 'bold';
-            keyLabel.style.textShadow = '1px 1px 1px rgba(0,0,0,0.5)';
-            keyLabel.textContent = keybinds[i-1];
-            
-            // Add tooltip for the skill
-            const tooltip = document.createElement('div');
-            tooltip.className = 'tooltip';
-            tooltip.style.position = 'absolute';
-            tooltip.style.top = '-40px';
-            tooltip.style.left = '50%';
-            tooltip.style.transform = 'translateX(-50%)';
-            tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
-            tooltip.style.color = '#ffffff';
-            tooltip.style.padding = '5px 8px';
-            tooltip.style.borderRadius = '4px';
-            tooltip.style.fontSize = '12px';
-            tooltip.style.whiteSpace = 'nowrap';
-            tooltip.style.display = 'none';
-            tooltip.style.zIndex = '1500';
-            tooltip.style.pointerEvents = 'none';
-            tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
-            
-            // Store elements for later updates
-            this.skillElements[i] = {
-                container: skillContainer,
-                button: skillButton,
-                label: keyLabel,
-                tooltip: tooltip,
-                cooldownOverlay: null, // Will be added when needed
-                isOnCooldown: false
-            };
-            
-            // Show tooltip on hover
-            skillButton.addEventListener('mouseenter', () => {
-                if (skillButton.dataset.empty !== 'true') {
-                    tooltip.style.display = 'block';
-                }
-            });
-            
-            skillButton.addEventListener('mouseleave', () => {
-                tooltip.style.display = 'none';
-            });
-            
-            // Assemble skill UI elements
-            skillContainer.appendChild(skillButton);
-            skillContainer.appendChild(tooltip);
-            skillContainer.appendChild(keyLabel);
-            skillBarContainer.appendChild(skillContainer);
-        }
-        
-        // Store the skill bar container for later reference
-        this.statusElements.skillBarContainer = skillBarContainer;
-        
-        return skillBarContainer;
-    }
-    
     updateStatusBars(playerStats) {
         if (!playerStats) return;
         
-        // Update health/life ring
-        if (this.lifeRingFill && this.lifeTooltip) {
-            const healthPercent = (playerStats.currentLife / playerStats.maxLife) * 100;
-            // Update linear style fill from bottom to top (more like original)
-            this.lifeRingFill.style.clipPath = `inset(${100 - healthPercent}% 0 0 0)`;
+        // Extract player stats with default values
+        const currentLife = playerStats.currentLife || 100;
+        const maxLife = playerStats.maxLife || 100;
+        const currentMana = playerStats.currentMana || 100;
+        const maxMana = playerStats.maxMana || 100;
+        const currentKarma = playerStats.currentKarma || 50;
+        const maxKarma = playerStats.maxKarma || 100;
+        const experience = playerStats.experience || 0;
+        const experienceToNextLevel = playerStats.experienceToNextLevel || 100;
+        const level = playerStats.level || 1;
+        
+        // Update life ring
+        if (this.lifeRingFill) {
+            const lifePercentage = Math.max(0, Math.min(100, (currentLife / maxLife) * 100));
+            this.lifeRingFill.style.strokeDashoffset = `calc(600 - (600 * ${lifePercentage} / 100))`;
             
-            const lifeValue = this.lifeRingFill.parentElement.parentElement.querySelector('.value');
-            if (lifeValue) {
-                lifeValue.textContent = Math.round(playerStats.currentLife);
+            if (this.lifeTooltip) {
+                this.lifeTooltip.textContent = `Life: ${Math.floor(currentLife)}/${maxLife}`;
             }
-            
-            this.lifeTooltip.textContent = `Life: ${Math.round(playerStats.currentLife)}/${playerStats.maxLife}`;
         }
         
         // Update mana ring
-        if (this.manaRingFill && this.manaTooltip) {
-            const manaPercent = (playerStats.currentMana / playerStats.maxMana) * 100;
-            // Update linear style fill from bottom to top (more like original)
-            this.manaRingFill.style.clipPath = `inset(${100 - manaPercent}% 0 0 0)`;
+        if (this.manaRingFill) {
+            const manaPercentage = Math.max(0, Math.min(100, (currentMana / maxMana) * 100));
+            this.manaRingFill.style.strokeDashoffset = `calc(600 - (600 * ${manaPercentage} / 100))`;
             
-            const manaValue = this.manaRingFill.parentElement.parentElement.querySelector('.value');
-            if (manaValue) {
-                manaValue.textContent = Math.round(playerStats.currentMana);
-            }
-            
-            this.manaTooltip.textContent = `Mana: ${Math.round(playerStats.currentMana)}/${playerStats.maxMana}`;
-        }
-        
-        // Update karma bar
-        if (this.karmaBarFill && this.karmaTooltip) {
-            const karmaPercent = (playerStats.currentKarma / playerStats.maxKarma) * 100;
-            this.karmaBarFill.style.width = `${karmaPercent}%`;
-            
-            // Update karma tooltip with path information
-            let karmaPath = '';
-            
-            // If a path has been explicitly chosen, use that instead of calculating based on karma percentage
-            if (playerStats.path) {
-                karmaPath = playerStats.path.charAt(0).toUpperCase() + playerStats.path.slice(1);
-                
-                if (karmaPath === 'Light') {
-                    this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
-                } else if (karmaPath === 'Dark') {
-                    this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
-                }
-            } else {
-                // Fall back to the percentage-based calculation if no path is chosen
-                if (karmaPercent < 30) {
-                    karmaPath = 'Light';
-                    this.updateDarknessOverlay(0.3, 'rgba(0, 50, 255, 0.15)');
-                } else if (karmaPercent > 70) {
-                    karmaPath = 'Dark';
-                    this.updateDarknessOverlay(0.3, 'rgba(100, 0, 0, 0.15)');
-                } else {
-                    karmaPath = 'Neutral';
-                    this.updateDarknessOverlay(0, 'transparent');
-                }
-            }
-            
-            // Update the tooltip text with or without the path name based on user preference
-            if (karmaPath) {
-                this.karmaTooltip.textContent = `Karma: ${karmaPath} (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
-            } else {
-                this.karmaTooltip.textContent = `Karma: (${Math.round(playerStats.currentKarma)}/${playerStats.maxKarma})`;
+            if (this.manaTooltip) {
+                this.manaTooltip.textContent = `Mana: ${Math.floor(currentMana)}/${maxMana}`;
             }
         }
         
-        // Update XP fill
-        if (playerStats.level && this.levelText) {
-            this.levelText.textContent = playerStats.level;
+        // Update karma bar fill - ensure it fills properly from 0-100
+        // For right-aligned fill, higher karma means smaller white portion
+        const percentage = (1 - (currentKarma / maxKarma)) * 100;
+        if (this.karmaBarFill) {
+            this.karmaBarFill.style.width = `${percentage}%`;
         }
         
-        if (playerStats.experience !== undefined && 
-            playerStats.experienceToNextLevel !== undefined && 
-            this.xpRingFill && this.xpTooltip) {
-            
-            const xpPercent = (playerStats.experience / playerStats.experienceToNextLevel) * 100;
-            // Update linear fill from bottom to top - matching original style
-            this.xpRingFill.style.clipPath = `inset(${100 - xpPercent}% 0 0 0)`;
-            
-            this.xpTooltip.textContent = `Level ${playerStats.level}: ${playerStats.experience}/${playerStats.experienceToNextLevel} XP`;
+        // Update karma tooltip
+        if (this.karmaTooltip) {
+            this.karmaTooltip.textContent = `Karma: ${Math.floor(currentKarma)}/${maxKarma}`;
+        }
+        
+        // Update XP ring if the method exists
+        if (typeof this.updateXPRing === 'function') {
+            this.updateXPRing(experience, experienceToNextLevel, level);
         }
     }
     
+    /**
+     * Update the skill bar with the player's active skills
+     */
     updateSkillBar() {
         if (!this.game.skillsManager || !this.statusElements?.skillBarContainer) {
             return;
         }
         
-        // Clear existing skill elements
-        const slots = this.statusElements.skillBarContainer.querySelectorAll('.skill-slot');
-        slots.forEach(slot => slot.innerHTML = '');
-        
-        // Get active skills
-        const activeSkills = this.game.skillsManager.getActiveSkills();
-        
-        // Create new skill elements
-        activeSkills.forEach(skillId => {
-            const skill = this.game.skillsManager.skills[skillId];
-            if (!skill) {
-                return;
-            }
+        try {
+            // Clear existing skill elements
+            const slots = this.statusElements.skillBarContainer.querySelectorAll('.skill-slot');
+            slots.forEach(slot => slot.innerHTML = '');
             
-            // Get the slot for this skill
-            const slotIndex = skill.slot - 1; // Convert to 0-based index
-            const slot = this.statusElements.skillBarContainer.querySelector(`.skill-slot:nth-child(${skill.slot})`);
+            // Get active skills
+            const activeSkills = this.game.skillsManager.getActiveSkills();
             
-            if (!slot) {
-                // Fallback: try to find the slot by index
+            // Create new skill elements
+            activeSkills.forEach(skillId => {
+                const skill = this.game.skillsManager.skills[skillId];
+                if (!skill) {
+                    return;
+                }
+                
+                // Ensure skill has a slot (default to 1)
+                const slotNumber = skill.slot || 1;
+                
+                // Find the slot for this skill
                 const allSlots = this.statusElements.skillBarContainer.querySelectorAll('.skill-slot');
+                const slotIndex = slotNumber - 1; // Convert to 0-based index
+                
+                // Only proceed if the slot index is valid
                 if (slotIndex >= 0 && slotIndex < allSlots.length) {
                     allSlots[slotIndex].innerHTML = ''; // Clear the slot
                     this.addSkillToElement(allSlots[slotIndex], skill);
                 }
-                return;
-            }
-            
-            // Add skill to the slot
-            this.addSkillToElement(slot, skill);
-        });
+            });
+        } catch (error) {
+            console.error('Error updating skill bar:', error);
+        }
     }
     
-    // Helper method to add a skill to a slot element
+    /**
+     * Add a skill to a UI slot element
+     * @param {HTMLElement} slotElement - The slot element to add the skill to
+     * @param {Object} skill - The skill data
+     */
     addSkillToElement(slotElement, skill) {
+        if (!slotElement || !skill) {
+            console.warn('Invalid slot element or skill data');
+            return;
+        }
+        
         // Create skill button
         const skillElement = document.createElement('div');
         skillElement.className = 'skill';
@@ -573,7 +551,7 @@ export class UIManager {
         skillElement.style.width = '100%';
         skillElement.style.height = '100%';
         skillElement.style.fontSize = '24px';
-        skillElement.textContent = skill.icon;
+        skillElement.textContent = skill.icon || skill.name.charAt(0);
         
         // Add tooltip
         const tooltip = document.createElement('div');
@@ -591,7 +569,7 @@ export class UIManager {
         tooltip.style.zIndex = '1000';
         tooltip.style.pointerEvents = 'none';
         tooltip.style.boxShadow = '0 2px 5px rgba(0,0,0,0.3)';
-        tooltip.textContent = `${skill.name}: ${skill.description}`;
+        tooltip.textContent = `${skill.name}: ${skill.description || ''}`;
         
         // Show tooltip on hover
         skillElement.addEventListener('mouseenter', () => {
@@ -1470,6 +1448,9 @@ export class UIManager {
      * Clear the target display when no target is selected
      */
     clearTargetDisplay() {
+        // Add debug info
+        console.log('Clearing target display');
+        
         if (this.targetDisplay) {
             this.targetDisplay.container.style.display = 'none';
         }
@@ -1587,5 +1568,68 @@ export class UIManager {
                 this.deathScreen.container.style.display = 'none';
             }, 500);
         }
+    }
+
+    /**
+     * Update the XP ring with the player's experience
+     * @param {number} experience - Current experience points
+     * @param {number} experienceToNextLevel - Experience needed for next level
+     * @param {number} level - Current player level
+     */
+    updateXPRing(experience, experienceToNextLevel, level) {
+        if (this.xpRingFill && this.xpTooltip) {
+            const xpPercent = Math.min(100, (experience / experienceToNextLevel) * 100);
+            this.xpRingFill.style.strokeDashoffset = `calc(600 - (600 * ${xpPercent} / 100))`;
+            
+            if (this.xpTooltip) {
+                this.xpTooltip.textContent = `Level ${level}: ${Math.floor(experience)}/${experienceToNextLevel} XP`;
+            }
+        }
+        
+        // Update level text if available
+        if (this.levelText) {
+            this.levelText.textContent = level;
+        }
+    }
+
+    /**
+     * Show a message to the user
+     * @param {string} message - The message to display
+     * @param {number} [duration=3000] - How long to show the message in milliseconds
+     */
+    showMessage(message, duration = 3000) {
+        // Create message element if it doesn't exist
+        if (!this.messageElement) {
+            this.messageElement = document.createElement('div');
+            this.messageElement.style.position = 'fixed';
+            this.messageElement.style.top = '20%';
+            this.messageElement.style.left = '50%';
+            this.messageElement.style.transform = 'translateX(-50%)';
+            this.messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            this.messageElement.style.color = '#ffffff';
+            this.messageElement.style.padding = '10px 20px';
+            this.messageElement.style.borderRadius = '5px';
+            this.messageElement.style.fontFamily = 'Arial, sans-serif';
+            this.messageElement.style.fontSize = '16px';
+            this.messageElement.style.zIndex = '2000';
+            this.messageElement.style.textAlign = 'center';
+            this.messageElement.style.maxWidth = '80%';
+            this.messageElement.style.display = 'none';
+            document.body.appendChild(this.messageElement);
+        }
+        
+        // Clear any existing timeout
+        if (this.messageTimeout) {
+            clearTimeout(this.messageTimeout);
+        }
+        
+        // Set message and show
+        this.messageElement.textContent = message;
+        this.messageElement.style.display = 'block';
+        
+        // Hide after duration
+        this.messageTimeout = setTimeout(() => {
+            this.messageElement.style.display = 'none';
+        }, duration);
     }
 } 

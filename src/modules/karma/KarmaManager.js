@@ -513,6 +513,11 @@ export class KarmaManager {
                     console.error('Failed to add martial_arts skill');
                     this.game.activeSkills.add('martial_arts');
                 }
+                
+                // Ensure skill has proper slot value
+                if (this.game.skillsManager.skills.martial_arts) {
+                    this.game.skillsManager.skills.martial_arts.slot = 1;
+                }
             } else if (path === 'dark') {
                 // Add dark path skills
                 this.game.skillsManager.addSkill('dark_strike');
@@ -522,11 +527,20 @@ export class KarmaManager {
                     console.error('Failed to add dark_strike skill');
                     this.game.activeSkills.add('dark_strike');
                 }
+                
+                // Ensure skill has proper slot value
+                if (this.game.skillsManager.skills.dark_strike) {
+                    this.game.skillsManager.skills.dark_strike.slot = 1;
+                }
             }
             
             // Update UI
             if (this.game.uiManager) {
-                this.game.uiManager.updateSkillBar();
+                try {
+                    this.game.uiManager.updateSkillBar();
+                } catch (error) {
+                    console.error('Error updating skill bar:', error);
+                }
             }
         }
         
