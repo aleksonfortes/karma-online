@@ -106,3 +106,27 @@ Karma Level | Effects
 - Karma action cooldown (1s)
 - Browser-only client validation
 - CORS protection
+
+## Deployment Guide
+
+Karma Online uses Render for deployment with three separate services:
+
+1. **Landing Page** (karmaonline.io)
+   - Code location: `/landing-page`
+   - When to deploy: After changes to landing page content
+
+2. **Game Client** (play.karmaonline.io)
+   - Code location: Main directory and `/src`
+   - When to deploy: After changes to game client code
+
+3. **Game Server** (api.karmaonline.io)
+   - Code location: `/server`
+   - When to deploy: After changes to server code
+
+### Deployment Process
+
+1. Make changes to the codebase
+2. Push changes to the main branch on GitHub
+3. In the Render dashboard, manually deploy only the affected services
+
+This approach keeps all code in the main branch while giving you control over which services are deployed.
