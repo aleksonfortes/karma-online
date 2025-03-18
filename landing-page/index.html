@@ -109,6 +109,16 @@
         <a href="https://play.karmaonline.io" class="cta-button">Play Now</a>
     </div>
     <div class="domain-info">karmaonline.io</div>
-    <script type="module" src="./src/main.js"></script>
+    
+    <!-- Use an absolute path and add a fallback -->
+    <script>
+        // Fallback in case the module script fails to load
+        window.addEventListener('error', function(e) {
+            if (e.target.tagName === 'SCRIPT') {
+                console.log('Script loading error - using fallback');
+            }
+        }, true);
+    </script>
+    <script type="module" src="/assets/main.js" onerror="console.error('Failed to load main.js')"></script>
 </body>
 </html> 
