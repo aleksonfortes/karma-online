@@ -21,7 +21,11 @@ echo "Vite version: $(vite --version)"
 echo "Building project..."
 if [ "$1" = "landing" ]; then
   echo "Building landing page..."
-  vite build landing-page
+  cd landing-page
+  vite build --outDir dist
+  echo "Build path: $(pwd)/dist"
+  ls -la dist
+  cd ..
 else
   echo "Building client..."
   vite build

@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import { resolve } from 'path';
 
 export default defineConfig({
   root: 'landing-page',
@@ -7,7 +8,7 @@ export default defineConfig({
     host: true
   },
   build: {
-    outDir: '../dist-landing',
+    outDir: 'dist',
     emptyOutDir: true
   }
 }); 
