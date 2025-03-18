@@ -2,7 +2,7 @@ services:
   - name: karma-landing
     type: web
     env: static
-    buildCommand: npm install && npm run build:landing
+    buildCommand: chmod +x render-build.sh && ./render-build.sh landing
     staticPublishPath: landing-page/dist
     domains:
       - karmaonline.io
@@ -17,7 +17,7 @@ services:
   - name: karma-client
     type: web
     env: static
-    buildCommand: npm install && npm run build
+    buildCommand: chmod +x render-build.sh && ./render-build.sh
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
