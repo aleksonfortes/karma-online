@@ -35,47 +35,22 @@ if [ "$1" = "landing" ]; then
   echo "Landing page directory contents:"
   ls -la landing-page
   
-  # Check if Vite config exists
-  echo "Checking for vite config in landing-page..."
-  if [ -f "landing-page/vite.config.js" ]; then
-    echo "Found landing-page/vite.config.js"
-    cat landing-page/vite.config.js
-  else
-    echo "landing-page/vite.config.js not found!"
-  fi
+  # For landing page, we'll use a simple approach that doesn't rely on JS or Vite
+  echo "Using simple static HTML approach for landing page..."
   
-  # Check if index.html exists
-  echo "Checking for index.html in landing-page..."
-  if [ -f "landing-page/index.html" ]; then
-    echo "Found landing-page/index.html"
-  else
-    echo "landing-page/index.html not found!"
-    echo "Contents of landing-page directory:"
-    find landing-page -type f | sort
-  fi
-  
-  # Create a special build script for landing page
-  echo "Creating special landing page build..."
-  
-  # Create a simplified entry point
+  # Create dist directory
   mkdir -p landing-page/dist
   
-  # Copy the index.html directly to ensure it's always available
+  # Directly copy the HTML file
   cp landing-page/index.html landing-page/dist/
   
-  # Create assets directory
-  mkdir -p landing-page/dist/assets
-  
-  # Copy any CSS files
-  if [ -f "landing-page/src/style.css" ]; then
-    cp landing-page/src/style.css landing-page/dist/assets/
+  # Create a simple favicon if it doesn't exist
+  if [ ! -f "landing-page/favicon.svg" ]; then
+    echo "Creating simple favicon..."
+    echo '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><circle cx="16" cy="16" r="15" fill="#333"/><path d="M10 22L16 10L22 22H10Z" fill="#ff6b6b"/></svg>' > landing-page/dist/favicon.svg
+  else
+    cp landing-page/favicon.svg landing-page/dist/
   fi
-  
-  # Build using Vite for additional assets
-  echo "Running vite build for landing page..."
-  cd landing-page
-  npx vite build || echo "Vite build failed, but we have a fallback"
-  cd ..
   
   echo "Final landing-page/dist contents:"
   find landing-page/dist -type f | sort
