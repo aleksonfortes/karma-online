@@ -1,21 +1,23 @@
 services:
   - name: karma-landing
     type: web
-    env: node
-    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npx vite build landing-page
-    startCommand: npm run start:landing
+    env: static
+    buildCommand: ./build.sh && echo "Using landing-page outputs"
+    staticPublishPath: landing-page/dist
     domains:
       - karmaonline.io
     envVars:
       - key: NODE_ENV
         value: production
-      - key: TRUST_CLOUDFLARE_PROXY
-        value: "true"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     
   - name: karma-client
     type: web
     env: static
-    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npx vite build
+    buildCommand: ./build.sh && echo "Using client outputs"
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
@@ -29,9 +31,9 @@ services:
       - key: VITE_ENV
         value: production
       - key: VITE_API_KEY
-        sync: false # This will be manually set in Render dashboard
+        sync: false
       - key: VITE_ANALYTICS_ID
-        sync: false # This will be manually set in Render dashboard
+        sync: false
     routes:
       - type: rewrite
         source: /*
@@ -54,8 +56,8 @@ services:
       - key: TRUST_CLOUDFLARE_PROXY
         value: "true"
       - key: API_KEY
-        sync: false # This will be manually set in Render dashboard
+        sync: false
       - key: JWT_SECRET
-        sync: false # This will be manually set in Render dashboard
+        sync: false
       - key: DATABASE_URL
-        sync: false # This will be manually set in Render dashboard 
+        sync: false 
