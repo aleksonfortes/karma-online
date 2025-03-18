@@ -19,9 +19,9 @@ export class NetworkManager {
         // Get allowed origins from environment or use defaults
         const corsOrigin = process.env.CORS_ORIGIN 
             ? [process.env.CORS_ORIGIN] 
-            : ["https://localhost:5173", "https://localhost:3000", "https://play.karmaonline.io"];
+            : ["https://localhost:5173", "https://localhost:3000", "https://play.karmaonline.io", "https://karmaonline.io"];
         
-        // Initialize socket server
+        // Initialize socket server with Cloudflare-friendly settings
         this.io = new Server(httpServer, {
             cors: {
                 origin: corsOrigin,
@@ -29,7 +29,13 @@ export class NetworkManager {
                 credentials: true
             },
             transports: ['websocket', 'polling'],
-            secure: process.env.NODE_ENV === 'production'
+            secure: process.env.NODE_ENV === 'production',
+            // Cloudflare has a 100 second timeout for WebSockets
+            pingTimeout: 60000,
+            // More frequent pings to keep connections alive
+            pingInterval: 25000,
+            // Increase connection timeout
+            connectTimeout: 45000
         });
         
         this.setupSocketHandlers();

@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "preview:landing": "vite preview landing-page",
     "start": "NODE_ENV=production node server/index.js",
+    "start:landing": "NODE_ENV=production node landing-page/serve.js",
     "deploy": "echo \"Deploying to Render via GitHub integration\"",
     "deploy:prod": "NODE_ENV=production npm run build && npm run build:landing",
     "test": "jest",
