@@ -1,23 +1,21 @@
 services:
   - name: karma-landing
     type: web
-    env: static
-    buildCommand: npm ci && npm run build:landing
-    staticPublishPath: landing-page/dist
+    env: node
+    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npm run build:landing
+    startCommand: npm run start:landing
     domains:
       - karmaonline.io
     envVars:
       - key: NODE_ENV
         value: production
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+      - key: TRUST_CLOUDFLARE_PROXY
+        value: "true"
     
   - name: karma-client
     type: web
     env: static
-    buildCommand: npm ci && npm run build
+    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit && npm run build
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
@@ -42,7 +40,7 @@ services:
   - name: karma-server
     type: web
     env: node
-    buildCommand: npm ci
+    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit
     startCommand: npm run start
     domains:
       - api.karmaonline.io
@@ -53,6 +51,8 @@ services:
         value: 10000
       - key: CORS_ORIGIN
         value: https://play.karmaonline.io
+      - key: TRUST_CLOUDFLARE_PROXY
+        value: "true"
       - key: API_KEY
         sync: false # This will be manually set in Render dashboard
       - key: JWT_SECRET

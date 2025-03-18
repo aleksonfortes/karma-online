@@ -8,6 +8,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
+
+// Trust Cloudflare proxies
+app.set('trust proxy', process.env.TRUST_CLOUDFLARE_PROXY === 'true');
+
 const server = createServer(app);
 
 // Check if dist directory exists and serve static files
