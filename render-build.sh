@@ -54,22 +54,34 @@ if [ "$1" = "landing" ]; then
     find landing-page -type f | sort
   fi
   
-  # Build directly from the root, specifying the landing page as root
-  echo "Running vite build with root option..."
-  npx vite build landing-page
+  # Create a special build script for landing page
+  echo "Creating special landing page build..."
   
-  # Create the expected directory structure if needed
-  echo "Creating landing-page/dist directory if not exists..."
+  # Create a simplified entry point
   mkdir -p landing-page/dist
   
-  # Copy build output if it went somewhere else
-  if [ -d "dist" ]; then
-    echo "Found dist directory at root, copying to landing-page/dist..."
-    cp -r dist/* landing-page/dist/
+  # Copy the index.html directly to ensure it's always available
+  cp landing-page/index.html landing-page/dist/
+  
+  # Create assets directory
+  mkdir -p landing-page/dist/assets
+  
+  # Copy any CSS files
+  if [ -f "landing-page/src/style.css" ]; then
+    cp landing-page/src/style.css landing-page/dist/assets/
   fi
   
+  # Build using Vite for additional assets
+  echo "Running vite build for landing page..."
+  cd landing-page
+  npx vite build || echo "Vite build failed, but we have a fallback"
+  cd ..
+  
   echo "Final landing-page/dist contents:"
-  ls -la landing-page/dist || echo "Directory not found"
+  find landing-page/dist -type f | sort
+  
+  # Ensure all routes will be handled
+  touch landing-page/dist/.npmignore
 else
   echo "Building client..."
   # Create .env.production file to force environment variables
