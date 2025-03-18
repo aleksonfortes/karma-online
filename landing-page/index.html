@@ -196,16 +196,5 @@
         </div>
     </div>
     <div class="domain-info">karmaonline.io</div>
-    
-    <!-- Script fallback for error handling, using absolute path -->
-    <script>
-        // Fallback in case the script fails to load
-        window.addEventListener('error', function(e) {
-            if (e.target.tagName === 'SCRIPT') {
-                console.log('Script loading error - using fallback');
-            }
-        }, true);
-    </script>
-    <script type="module" src="/assets/main.js" onerror="console.error('Failed to load main.js')"></script>
 </body>
 </html> 
