@@ -2,7 +2,9 @@ services:
   - name: karma-landing
     type: web
     env: static
-    buildCommand: ./build.sh && echo "Using landing-page outputs"
+    buildCommand: >
+      npm install vite --no-save &&
+      node_modules/.bin/vite build landing-page
     staticPublishPath: landing-page/dist
     domains:
       - karmaonline.io
@@ -17,7 +19,9 @@ services:
   - name: karma-client
     type: web
     env: static
-    buildCommand: ./build.sh && echo "Using client outputs"
+    buildCommand: >
+      npm install vite --no-save &&
+      node_modules/.bin/vite build
     staticPublishPath: dist
     domains:
       - play.karmaonline.io
@@ -42,7 +46,7 @@ services:
   - name: karma-server
     type: web
     env: node
-    buildCommand: echo "registry=https://registry.npmjs.org/\nalways-auth=false" > .npmrc && npm install --no-fund --no-audit
+    buildCommand: npm install
     startCommand: npm run start
     domains:
       - api.karmaonline.io
@@ -53,8 +57,6 @@ services:
         value: 10000
       - key: CORS_ORIGIN
         value: https://play.karmaonline.io
-      - key: TRUST_CLOUDFLARE_PROXY
-        value: "true"
       - key: API_KEY
         sync: false
       - key: JWT_SECRET
