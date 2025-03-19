@@ -376,76 +376,22 @@ export class MonsterManager {
             return;
         }
         
-        // CRITICAL FIX: Check if we're in a locked state to prevent flickering
-        if (monster.mesh.userData.healthLocked) {
-            // If we have an update ID and it matches the one that locked the health bar, 
-            // this is a duplicate update - skip it
-            if (updateId && monster.mesh.userData.lastHealthUpdateId === updateId) {
-                return;
-            }
-            
-            // If we're locked but this is a different update, proceed silently
-            if (!updateId) {
-                return; // No update ID and locked, so skip
-            }
-            
-            // Otherwise, allow the update to proceed (different update ID)
-        }
-        
-        // Store current health for next comparison
-        monster.mesh.userData.lastHealth = monster.health;
-        
-        // Track the update ID that's being processed
-        if (updateId) {
-            monster.mesh.userData.lastHealthUpdateId = updateId;
-        }
-        
-        // Calculate health percentage
+        // Calculate health percentage 
         const healthPercent = Math.max(0, Math.min(1, monster.health / monster.maxHealth));
         
         // Only update for significant changes to prevent flickering
         if (monster.mesh.userData.lastHealthPercent !== undefined) {
             const diff = Math.abs(monster.mesh.userData.lastHealthPercent - healthPercent);
             
-            // Different thresholds for different scenarios
-            const isDamageUpdate = monster.health < (monster.mesh.userData.lastHealth || monster.maxHealth);
-            const isHealing = monster.health > (monster.mesh.userData.lastHealth || 0);
-            
-            // For most updates, use 7.5% threshold
-            const threshold = 0.075;
-            
             // Only update if the change exceeds our threshold (skip for explicitly tracked updates)
-            if (diff <= threshold && !updateId) {
+            if (diff <= 0.05 && !updateId) {
                 // Skip update for minor changes
                 return;
-            }
-            
-            // Special case: Check if this is a targeted monster in combat
-            const currentTarget = this.game.targetingManager?.currentTarget;
-            const isTargeted = currentTarget && 
-                              currentTarget.type === 'monster' && 
-                              currentTarget.id === monster.id;
-                              
-            // If this is the targeted monster in combat, ensure we don't update too frequently
-            if (isTargeted && !updateId) { // Skip for explicitly tracked updates
-                const now = Date.now();
-                const lastUpdate = monster.mesh.userData.lastHealthBarUpdate || 0;
-                
-                // Limit updates to once every 300ms during combat for smoothness
-                if (now - lastUpdate < 300) {
-                    return;
-                }
-                
-                // Track this update time
-                monster.mesh.userData.lastHealthBarUpdate = now;
             }
         }
         
         // Store current health percentage for future comparison
         monster.mesh.userData.lastHealthPercent = healthPercent;
-        
-        // CRITICAL FIX: Lock health bar updates briefly to prevent flickering
-        monster.mesh.userData.healthLocked = true;
         
         // Clear the canvas
         context.clearRect(0, 0, canvas.width, canvas.height);
@@ -456,30 +402,17 @@ export class MonsterManager {
         
         // Use red for health bar to match player health bar
         context.fillStyle = '#ff0000';
+        
+        // Calculate health width for linear decrease
         const healthWidth = Math.floor(canvas.width * healthPercent);
+        
+        // Draw health bar from left to right
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
         if (healthBarSprite.material && healthBarSprite.material.map) {
             healthBarSprite.material.map.needsUpdate = true;
         }
-        
-        // Unlock after a short delay to allow for new legitimate updates
-        // Use a longer delay for targeted monsters to prevent flickering during combat
-        const currentTarget = this.game.targetingManager?.currentTarget;
-        const isTargeted = currentTarget && 
-                          currentTarget.type === 'monster' && 
-                          currentTarget.id === monster.id;
-        
-        // Automatically unlock when a new update comes in
-        const unlockDelay = 3000; // Much longer delay to ensure we're not getting double updates
-        
-        setTimeout(() => {
-            // Only unlock if we're still processing the same update
-            if (!updateId || monster.mesh.userData.lastHealthUpdateId === updateId) {
-                monster.mesh.userData.healthLocked = false;
-            }
-        }, unlockDelay);
     }
     
     /**

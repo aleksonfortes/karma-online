@@ -346,13 +346,16 @@ export class UIManager {
     // Create a stat ring (life, mana) with modern styling
     createStatRing(primaryColor, secondaryColor, statType) {
         const container = document.createElement('div');
-        container.style.width = '100px'; // Increased from 80px for consistent size
-        container.style.height = '100px'; // Increased from 80px for consistent size
+        container.style.width = '100px';
+        container.style.height = '100px';
         container.style.position = 'relative';
         container.style.borderRadius = '50%';
-        container.style.background = 'rgba(0, 0, 0, 0.7)';
-        container.style.border = '2px solid #333333';
-        container.style.boxShadow = `0 0 15px ${primaryColor}55`;
+        container.style.background = 'rgba(0, 0, 0, 0.6)';
+        
+        // Use a subtle border similar to the XP ring
+        const borderColor = statType === 'Life' ? 'rgba(255, 0, 0, 0.15)' : 'rgba(0, 102, 255, 0.15)';
+        container.style.border = `2px solid ${borderColor}`;
+        container.style.boxShadow = `0 0 20px rgba(0, 0, 0, 0.5)`;
         container.style.display = 'flex';
         container.style.alignItems = 'center';
         container.style.justifyContent = 'center';
@@ -376,37 +379,35 @@ export class UIManager {
         fill.style.left = '0';
         fill.style.width = '100%';
         fill.style.height = '100%';
-        fill.style.background = `radial-gradient(circle, ${primaryColor}, ${secondaryColor})`;
-        fill.style.clipPath = 'circle(50% at center)';
-        fill.style.clipPath = 'inset(0 0 0 0)'; // Start at 100%
+        
+        // Use a radial gradient similar to the XP ring
+        if (statType === 'Life') {
+            fill.style.background = 'radial-gradient(circle, #ff6666, #990000)';
+        } else {
+            fill.style.background = 'radial-gradient(circle, #6699ff, #000099)';
+        }
+        
+        fill.style.opacity = '0.8'; // Match XP ring opacity
+        fill.style.borderRadius = '50%';
+        
+        // Start fully filled
+        fill.style.clipPath = 'inset(0 0 0 0)';
+        // Add smooth transition for visual effect
         fill.style.transition = 'clip-path 0.3s ease-out';
+        
         fillContainer.appendChild(fill);
         
-        // Inner dark background
-        const innerCircle = document.createElement('div');
-        innerCircle.style.position = 'absolute';
-        innerCircle.style.top = '5%';
-        innerCircle.style.left = '5%';
-        innerCircle.style.width = '90%';
-        innerCircle.style.height = '90%';
-        innerCircle.style.borderRadius = '50%';
-        innerCircle.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-        innerCircle.style.zIndex = '2';
-        innerCircle.style.display = 'flex';
-        innerCircle.style.alignItems = 'center';
-        innerCircle.style.justifyContent = 'center';
-        container.appendChild(innerCircle);
-        
-        // Stat value
+        // Stat value - place directly in container instead of inner circle
         const value = document.createElement('div');
         value.className = 'value';
-        value.style.color = '#ffffff';
-        value.style.fontSize = '18px';
+        value.style.color = '#ffffff';  // Set to white for better visibility
+        value.style.fontSize = '24px';
         value.style.fontWeight = 'bold';
-        value.style.textShadow = '0 0 3px #000000';
-        value.textContent = '100';
+        value.style.position = 'relative';
         value.style.zIndex = '3';
-        innerCircle.appendChild(value);
+        value.textContent = '100';
+        
+        container.appendChild(value);
         
         // Tooltip for status
         const tooltip = document.createElement('div');
@@ -422,11 +423,11 @@ export class UIManager {
         tooltip.style.fontSize = '12px';
         tooltip.style.whiteSpace = 'nowrap';
         tooltip.style.display = 'none';
-        tooltip.style.zIndex = '1010'; // Increased z-index to ensure visibility
+        tooltip.style.zIndex = '1010';
         tooltip.textContent = `${statType}: 100/100`;
         container.appendChild(tooltip);
         
-        // Show tooltip on hover - ensure they're visible
+        // Show tooltip on hover
         container.addEventListener('mouseenter', () => {
             tooltip.style.display = 'block';
         });
@@ -454,8 +455,23 @@ export class UIManager {
         
         // Update life ring
         if (this.lifeRingFill) {
+            // Calculate life percentage
             const lifePercentage = Math.max(0, Math.min(100, (currentLife / maxLife) * 100));
-            this.lifeRingFill.style.strokeDashoffset = `calc(600 - (600 * ${lifePercentage} / 100))`;
+            const emptyPercentage = 100 - lifePercentage;
+            
+            // Make sure transitions are enabled for health changes
+            if (!this.lifeRingFill.style.transition) {
+                this.lifeRingFill.style.transition = 'clip-path 0.3s ease-out'; 
+            }
+            
+            // Apply the clip-path from top down (inset from top)
+            this.lifeRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
+            
+            // Also update the text value
+            const lifeValue = this.lifeRingFill.parentNode.parentNode.querySelector('.value');
+            if (lifeValue) {
+                lifeValue.textContent = Math.floor(currentLife);
+            }
             
             if (this.lifeTooltip) {
                 this.lifeTooltip.textContent = `Life: ${Math.floor(currentLife)}/${maxLife}`;
@@ -464,8 +480,23 @@ export class UIManager {
         
         // Update mana ring
         if (this.manaRingFill) {
+            // Calculate mana percentage
             const manaPercentage = Math.max(0, Math.min(100, (currentMana / maxMana) * 100));
-            this.manaRingFill.style.strokeDashoffset = `calc(600 - (600 * ${manaPercentage} / 100))`;
+            const emptyPercentage = 100 - manaPercentage;
+            
+            // Make sure transitions are enabled for mana changes
+            if (!this.manaRingFill.style.transition) {
+                this.manaRingFill.style.transition = 'clip-path 0.3s ease-out'; 
+            }
+            
+            // Apply the clip-path from top down (inset from top)
+            this.manaRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
+            
+            // Also update the text value
+            const manaValue = this.manaRingFill.parentNode.parentNode.querySelector('.value');
+            if (manaValue) {
+                manaValue.textContent = Math.floor(currentMana);
+            }
             
             if (this.manaTooltip) {
                 this.manaTooltip.textContent = `Mana: ${Math.floor(currentMana)}/${maxMana}`;
@@ -688,8 +719,8 @@ export class UIManager {
     createLevelIndicator() {
         // Create circular icon with XP ring
         const iconContainer = document.createElement('div');
-        iconContainer.style.width = '96px';
-        iconContainer.style.height = '96px';
+        iconContainer.style.width = '100px'; // Updated from 96px to match other rings
+        iconContainer.style.height = '100px'; // Updated from 96px to match other rings
         iconContainer.style.position = 'fixed';
         iconContainer.style.bottom = '20px';
         iconContainer.style.left = '20px';
@@ -726,7 +757,7 @@ export class UIManager {
         levelText.style.left = '50%';
         levelText.style.transform = 'translate(-50%, -50%)';
         levelText.style.color = '#FFD700';  // Golden color
-        levelText.style.fontSize = '38px'; 
+        levelText.style.fontSize = '24px'; // Changed from 38px to match other rings
         levelText.style.fontWeight = 'bold';
         levelText.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.7)';  // Golden glow
         levelText.style.letterSpacing = '0.5px';
@@ -1579,7 +1610,9 @@ export class UIManager {
     updateXPRing(experience, experienceToNextLevel, level) {
         if (this.xpRingFill && this.xpTooltip) {
             const xpPercent = Math.min(100, (experience / experienceToNextLevel) * 100);
-            this.xpRingFill.style.strokeDashoffset = `calc(600 - (600 * ${xpPercent} / 100))`;
+            // Use clip-path instead of strokeDashoffset for consistent rendering with other rings
+            const emptyPercentage = 100 - xpPercent;
+            this.xpRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
             
             if (this.xpTooltip) {
                 this.xpTooltip.textContent = `Level ${level}: ${Math.floor(experience)}/${experienceToNextLevel} XP`;

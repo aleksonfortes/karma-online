@@ -1011,9 +1011,13 @@ export class NetworkManager {
         this.socket.on('playerDied', (data) => {
             console.log('Received player died event:', data);
             
-            // Show death message
+            // Show appropriate death message based on killer type
             if (this.game.uiManager) {
-                this.game.uiManager.showNotification(`You were killed by another player!`, '#ff0000');
+                if (data.killerType === 'monster') {
+                    this.game.uiManager.showNotification(`You were killed by a monster!`, '#ff0000');
+                } else {
+                    this.game.uiManager.showNotification(`You were killed by another player!`, '#ff0000');
+                }
             }
         });
         
