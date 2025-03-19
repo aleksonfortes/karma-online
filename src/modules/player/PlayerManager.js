@@ -581,38 +581,10 @@ export class PlayerManager {
                     healthBarSprite.material.visible = true;
                     healthBarSprite.visible = true;
                 }
-                
-                // CRITICAL FIX: Lock the health value to prevent oscillation
-                // This ensures that once we've updated to a value, we don't update again for a short period
-                if (!player.userData.healthLocked) {
-                    player.userData.healthLocked = true;
-                    
-                    // Unlock after a delay to allow for new legitimate updates
-                    setTimeout(() => {
-                        player.userData.healthLocked = false;
-                    }, 1000); // 1 second lock to prevent oscillation
-                } else {
-                    // If we're locked, don't update the visual
-                    return;
-                }
             } else {
                 // No significant change, so don't update the visual
                 return;
             }
-        }
-        
-        // CRITICAL FIX: Check for final health update flag
-        // If this player has a final health update, use the server values directly
-        if (player.userData.finalHealthUpdate && player.userData.serverLife !== undefined) {
-            // Use server values directly for final updates
-            const serverLife = player.userData.serverLife;
-            const serverMaxLife = player.userData.serverMaxLife || 100;
-            
-            // Recalculate health percentage using server values
-            healthPercent = Math.max(0, Math.min(1, serverLife / serverMaxLife));
-            
-            // Log this special case
-            console.log(`Using final health update for player ${player.userData.playerId}: ${Math.round(healthPercent * 100)}%`);
         }
         
         // Clear the canvas
@@ -624,7 +596,11 @@ export class PlayerManager {
         
         // Always use red for health bar to match original design
         context.fillStyle = '#ff0000';
+        
+        // Calculate health width - ensure it's a whole number of pixels for clean rendering
         const healthWidth = Math.floor(canvas.width * healthPercent);
+        
+        // Draw the health bar from left to right (linear decrease)
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
@@ -856,11 +832,6 @@ export class PlayerManager {
         // Get player ID for debugging
         const playerId = player.userData.healthBarPlayerId || player.userData.playerId || 'unknown';
         
-        // CRITICAL FIX: Check if we're in a locked state
-        if (player.userData.healthLocked) {
-            return;
-        }
-        
         // Only log significant changes to reduce spam
         if (player.userData.lastHealthPercent === undefined || 
             Math.abs(player.userData.lastHealthPercent - healthPercent) > 0.05) {
@@ -878,14 +849,6 @@ export class PlayerManager {
                 healthBarSprite.material.visible = true;
                 healthBarSprite.visible = true;
             }
-            
-            // CRITICAL FIX: Lock the health value to prevent oscillation
-            player.userData.healthLocked = true;
-            
-            // Unlock after a delay to allow for new legitimate updates
-            setTimeout(() => {
-                player.userData.healthLocked = false;
-            }, 2000); // 2 second lock to prevent oscillation
         } else {
             // No significant change, so don't update the visual
             return;
@@ -900,7 +863,11 @@ export class PlayerManager {
         
         // Always use red for health bar to match original design
         context.fillStyle = '#ff0000';
+        
+        // Calculate health width - ensure it's a whole number of pixels for clean rendering
         const healthWidth = Math.floor(canvas.width * healthPercent);
+        
+        // Draw the health bar from left to right (linear decrease)
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
