@@ -57,7 +57,11 @@ export class MonsterManager {
             // Add targeting properties
             targetPlayerId: null,
             lastMoveTime: Date.now(),
-            isReturningToSpawn: false
+            isReturningToSpawn: false,
+            // Add attack properties
+            lastAttackTime: 0,
+            isAttacking: false,
+            attackAnimationEndTime: 0
         };
         
         // Add monster to the map
@@ -148,7 +152,13 @@ export class MonsterManager {
             const monsterConfig = GameConstants.MONSTER[monster.type];
             const movementSpeed = monsterConfig.MOVEMENT_SPEED;
             const aggroRadius = monsterConfig.AGGRO_RADIUS;
+            const attackRange = monsterConfig.ATTACK_RANGE;
             const deltaTime = (currentTime - monster.lastMoveTime) / 1000; // Convert to seconds
+            
+            // Skip movement and new targeting if monster is currently playing attack animation
+            if (monster.isAttacking && currentTime < monster.attackAnimationEndTime) {
+                return;
+            }
             
             // Get player monster is currently targeting (if any)
             let targetPlayer = null;
@@ -156,7 +166,7 @@ export class MonsterManager {
                 targetPlayer = players[monster.targetPlayerId];
                 
                 // If target player is no longer in the game or is dead, clear target
-                if (!targetPlayer || targetPlayer.health <= 0) {
+                if (!targetPlayer || targetPlayer.health <= 0 || targetPlayer.isDead) {
                     monster.targetPlayerId = null;
                     targetPlayer = null;
                 } else {
@@ -171,6 +181,9 @@ export class MonsterManager {
                         targetPlayer = null;
                         // Set leashing flag to return to spawn
                         monster.isReturningToSpawn = true;
+                    } else if (distance <= attackRange) {
+                        // Player is in attack range - attack them!
+                        this.attackPlayer(monster.id, targetPlayer.id, playerManager);
                     }
                 }
             }
@@ -182,7 +195,7 @@ export class MonsterManager {
                 
                 Object.values(players).forEach(player => {
                     // Skip dead players
-                    if (player.health <= 0) return;
+                    if (player.health <= 0 || player.isDead) return;
                     
                     const dx = player.position.x - monster.position.x;
                     const dz = player.position.z - monster.position.z;
@@ -199,6 +212,16 @@ export class MonsterManager {
                     targetPlayer = closestPlayer;
                     monster.targetPlayerId = closestPlayer.id;
                     monster.isReturningToSpawn = false;
+                    
+                    // Check if player is already in attack range
+                    const dx = targetPlayer.position.x - monster.position.x;
+                    const dz = targetPlayer.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    if (distance <= attackRange) {
+                        // Player is in attack range - attack them!
+                        this.attackPlayer(monster.id, targetPlayer.id, playerManager);
+                    }
                 }
             }
             
@@ -294,6 +317,98 @@ export class MonsterManager {
             monster.lastMoveTime = currentTime;
             monster.lastUpdateTime = currentTime;
         });
+    }
+    
+    /**
+     * Attack a player
+     * @param {string} monsterId - ID of the monster attacking
+     * @param {string} playerId - ID of the player being attacked
+     * @param {Object} playerManager - Reference to the player manager
+     */
+    attackPlayer(monsterId, playerId, playerManager) {
+        const monster = this.monsters.get(monsterId);
+        if (!monster || !monster.isAlive) return;
+        
+        const player = playerManager.getPlayer(playerId);
+        if (!player) return;
+        
+        const monsterConfig = GameConstants.MONSTER[monster.type];
+        const currentTime = Date.now();
+        
+        // Make sure we're not attacking too frequently
+        if (currentTime - monster.lastAttackTime < monsterConfig.ATTACK_SPEED) return;
+        
+        // Record that we're starting an attack
+        monster.isAttacking = true;
+        monster.lastAttackTime = currentTime;
+        monster.attackAnimationEndTime = currentTime + monsterConfig.ATTACK_ANIMATION_TIME;
+        
+        // Calculate damage
+        const damage = monsterConfig.ATTACK_DAMAGE;
+        
+        // Apply damage to player after the animation delay (simulate hit connecting)
+        setTimeout(() => {
+            // Verify player is still valid
+            const updatedPlayer = playerManager.getPlayer(playerId);
+            if (!updatedPlayer) return;
+            
+            // Verify monster is still valid
+            const updatedMonster = this.monsters.get(monsterId);
+            if (!updatedMonster || !updatedMonster.isAlive) return;
+            
+            // Apply damage to player
+            const previousLife = updatedPlayer.life || 100;
+            updatedPlayer.life = Math.max(0, previousLife - damage);
+            
+            console.log(`Monster ${monsterId} dealt ${damage} damage to player ${playerId}. Health: ${updatedPlayer.life}/${updatedPlayer.maxLife || 100}`);
+            
+            // Emit damage event to player
+            this.gameManager.io.to(playerId).emit('monsterDamage', {
+                monsterId: monsterId,
+                damage: damage,
+                health: updatedPlayer.life,
+                maxHealth: updatedPlayer.maxLife || 100
+            });
+            
+            // Check if player died
+            if (updatedPlayer.life <= 0) {
+                console.log(`Player ${playerId} was killed by monster ${monsterId}`);
+                
+                // Emit death event to player
+                this.gameManager.io.to(playerId).emit('playerDied', {
+                    killerId: monsterId,
+                    killerType: 'monster'
+                });
+                
+                // Handle player death on server
+                playerManager.handlePlayerDeath(playerId, monsterId);
+                
+                // Monster stops attacking this player
+                updatedMonster.targetPlayerId = null;
+            }
+            
+            // Broadcast damage effect to all players
+            this.gameManager.io.emit('damageEffect', {
+                sourceId: monsterId,
+                sourceType: 'monster',
+                targetId: playerId,
+                damage: damage,
+                skillName: 'monster_attack',
+                isCritical: false
+            });
+            
+            // Broadcast health update to ALL players
+            this.gameManager.io.emit('lifeUpdate', {
+                id: playerId,
+                life: updatedPlayer.life,
+                maxLife: updatedPlayer.maxLife || 100,
+                timestamp: Date.now(),
+                final: true
+            });
+            
+            // Attack animation is done
+            updatedMonster.isAttacking = false;
+        }, monsterConfig.ATTACK_ANIMATION_TIME);
     }
     
     /**
