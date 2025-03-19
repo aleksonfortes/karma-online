@@ -395,8 +395,8 @@ export class TargetingManager {
     }
     
     /**
-     * Validate if the current target is still valid
-     * Clears the target if:
+     * Validate the current target to ensure it's still valid
+     * This will clear the target if any of the following are true:
      * 1. The target is dead
      * 2. The target is invisible
      * 3. The target is off-screen
@@ -406,6 +406,8 @@ export class TargetingManager {
         if (!this.currentTarget) {
             return;
         }
+        
+        const camera = this.game.cameraManager.getCamera();
         
         // For monster targets, we need to handle differently since monster.mesh is the actual Object3D
         if (this.currentTarget.type === 'monster') {
@@ -438,13 +440,41 @@ export class TargetingManager {
                 );
             }
             
-            // Skip the remaining checks for monsters - they're handled differently
+            // Check if monster is off-screen (same check as for players)
+            if (camera) {
+                // Get monster position in screen space
+                const monsterPosition = new THREE.Vector3();
+                monster.mesh.getWorldPosition(monsterPosition);
+                
+                // Convert to normalized device coordinates (NDC)
+                monsterPosition.project(camera);
+                
+                // Check if the monster is outside the view frustum
+                if (monsterPosition.x < -1.1 || monsterPosition.x > 1.1 || 
+                    monsterPosition.y < -1.1 || monsterPosition.y > 1.1 || 
+                    monsterPosition.z < -1 || monsterPosition.z > 1) {
+                    console.log('Monster target is off-screen, clearing target');
+                    this.clearTarget();
+                    return;
+                }
+                
+                // Check if monster is too far away
+                const playerPosition = this.game.localPlayer.position;
+                const distanceToTarget = playerPosition.distanceTo(monster.mesh.position);
+                const maxTargetDistance = 50; // Maximum distance to keep a target
+                
+                if (distanceToTarget > maxTargetDistance) {
+                    console.log('Monster target is too far away, clearing target');
+                    this.clearTarget();
+                    return;
+                }
+            }
+            
             return;
         }
         
         // Original validation logic for non-monster targets (players, NPCs)
         const target = this.currentTarget.object;
-        const camera = this.game.cameraManager.getCamera();
         
         // Check if target still exists in the scene
         if (!target.parent) {
