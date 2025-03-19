@@ -215,24 +215,29 @@ export default class GameManager {
         const scalingFactor = GameConstants.EXPERIENCE.SCALING_FACTOR;
         const maxLevel = GameConstants.EXPERIENCE.MAX_LEVEL;
         
-        // Start at level 1 and increment until we find the right level
+        // Start at level 1
         let level = 1;
-        let expRequired = 0;
+        
+        // Track cumulative experience needed for each level
+        let cumulativeExp = 0;
         
         while (level < maxLevel) {
-            // Experience required for next level
-            expRequired = baseExp * Math.pow(scalingFactor, level - 1);
+            // Experience required for current level
+            const expForThisLevel = baseExp * Math.pow(scalingFactor, level - 1);
             
-            // If player's experience is less than required for next level, they are at current level
-            if (experience < expRequired) {
-                break;
+            // Add to cumulative experience
+            cumulativeExp += expForThisLevel;
+            
+            // If player's experience is less than cumulative experience needed, they're at the previous level
+            if (experience < cumulativeExp) {
+                return level;
             }
             
-            // Otherwise, increment level and continue checking
+            // Otherwise, increment level and check the next one
             level++;
         }
         
-        return level;
+        return maxLevel;
     }
     
     cleanup() {

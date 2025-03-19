@@ -987,6 +987,16 @@ export class NetworkManager {
             // Update player stats
             if (this.game.playerStats && data.stats) {
                 Object.assign(this.game.playerStats, data.stats);
+                
+                // Calculate experience required for next level
+                if (data.stats.level) {
+                    const baseExp = 100; // Same as server's GameConstants.EXPERIENCE.BASE_EXPERIENCE
+                    const scalingFactor = 1.5; // Same as server's GameConstants.EXPERIENCE.SCALING_FACTOR
+                    
+                    // Calculate experience needed for the current level
+                    const expForCurrentLevel = baseExp * Math.pow(scalingFactor, data.stats.level - 1);
+                    this.game.playerStats.experienceToNextLevel = expForCurrentLevel;
+                }
             }
             
             // Set path in karma manager
@@ -1005,6 +1015,7 @@ export class NetworkManager {
             // Update UI
             if (this.game.uiManager) {
                 this.game.uiManager.updateSkillBar();
+                this.game.uiManager.updateStatusBars(this.game.playerStats);
             }
             
             console.log('Player state updated from server');
@@ -1195,6 +1206,14 @@ export class NetworkManager {
             if (this.game.playerStats) {
                 this.game.playerStats.experience = data.totalExperience;
                 this.game.playerStats.level = data.level;
+                
+                // Calculate experience required for next level using the same formula as server
+                const baseExp = 100; // Same as server's GameConstants.EXPERIENCE.BASE_EXPERIENCE
+                const scalingFactor = 1.5; // Same as server's GameConstants.EXPERIENCE.SCALING_FACTOR
+                
+                // Calculate experience needed for the current level
+                const expForCurrentLevel = baseExp * Math.pow(scalingFactor, data.level - 1);
+                this.game.playerStats.experienceToNextLevel = expForCurrentLevel;
                 
                 // Ensure path is maintained when leveling up
                 if (data.path) {
@@ -1744,236 +1763,11 @@ export class NetworkManager {
             });
         }, 2000); // Check every 2 seconds
     }
-
+    
     stopPeriodicHealthCheck() {
         if (this.healthCheckInterval) {
             clearInterval(this.healthCheckInterval);
             this.healthCheckInterval = null;
         }
-    }
-
-    /**
-     * Apply any pending updates for a player that were received before the player was created
-     * @param {string} playerId - The ID of the player to apply updates for
-     */
-    applyPendingUpdates(playerId) {
-        if (!this.pendingUpdates || !this.pendingUpdates.has(playerId)) {
-            return;
-        }
-        
-        // Get the player directly through the PlayerManager
-        const player = this.game.playerManager.getPlayerById(playerId);
-        if (!player) {
-            console.warn(`Cannot apply pending updates for player ${playerId} - player not found`);
-            return;
-        }
-        
-        // Process all pending updates for this player
-        const updates = this.pendingUpdates.get(playerId);
-        for (const update of updates) {
-            switch (update.type) {
-                case 'lifeUpdate':
-                    // First check if the PlayerManager has an updatePlayerLife method
-                    if (this.game.playerManager && typeof this.game.playerManager.updatePlayerLife === 'function') {
-                        this.game.playerManager.updatePlayerLife(player, update.data.life, update.data.maxLife);
-                    } 
-                    // For backward compatibility, try player.updateLife method
-                    else if (typeof player.updateLife === 'function') {
-                        player.updateLife(update.data.life, update.data.maxLife);
-                    } 
-                    // Fallback to direct manipulation
-                    else {
-                        // Get the player mesh now that it should exist
-                        const playerMesh = this.game.playerManager.players.get(playerId);
-                        if (!playerMesh) {
-                            continue;
-                        }
-                        
-                        // Update the player's stats
-                        if (!playerMesh.userData.stats) {
-                            playerMesh.userData.stats = {};
-                        }
-                        
-                        playerMesh.userData.stats.life = update.data.life;
-                        playerMesh.userData.stats.maxLife = update.data.maxLife;
-                        
-                        // Update the health bar
-                        this.game.playerManager.updateHealthBar(playerMesh);
-                        
-                        // If this is our player, update the UI
-                        if (this.socket && playerId === this.socket.id && this.game.playerStats) {
-                            this.game.playerStats.currentLife = update.data.life;
-                            this.game.playerStats.maxLife = update.data.maxLife;
-                            
-                            // Update UI
-                            if (this.game.uiManager) {
-                                this.game.uiManager.updateStatusBars();
-                            }
-                        }
-                    }
-                    break;
-                    
-                case 'statsUpdate':
-                    // Handle stats update similarly
-                    const playerForStats = this.game.playerManager.players.get(playerId);
-                    if (playerForStats && update.data.stats) {
-                        if (!playerForStats.userData.stats) {
-                            playerForStats.userData.stats = {};
-                        }
-                        
-                        // Update all stats
-                        Object.assign(playerForStats.userData.stats, update.data.stats);
-                        
-                        // Update health bar
-                        this.game.playerManager.updateHealthBar(playerForStats);
-                        
-                        // Update UI for local player
-                        if (this.socket && playerId === this.socket.id && this.game.playerStats && this.game.uiManager) {
-                            Object.assign(this.game.playerStats, update.data.stats);
-                            this.game.uiManager.updateStatusBars();
-                        }
-                    }
-                    break;
-                    
-                case 'positionUpdate':
-                    // Handle position updates
-                    if (update.data && update.data.position) {
-                        const pos = update.data.position;
-                        if (player.position && typeof player.position.set === 'function') {
-                            player.position.set(pos.x, pos.y, pos.z);
-                        }
-                    }
-                    break;
-                    
-                case 'karmaUpdate':
-                    // Handle karma update similarly
-                    const playerForKarma = this.game.playerManager.players.get(playerId);
-                    if (playerForKarma && update.data) {
-                        if (!playerForKarma.userData.stats) {
-                            playerForKarma.userData.stats = {};
-                        }
-                        
-                        // Update karma stats
-                        playerForKarma.userData.stats.karma = update.data.karma;
-                        playerForKarma.userData.stats.maxKarma = update.data.maxKarma;
-                        
-                        // Update visual status bars
-                        if (this.game.updatePlayerStatus) {
-                            this.game.updatePlayerStatus(playerForKarma, playerForKarma.userData.stats);
-                        }
-                        
-                        // Update UI for local player
-                        if (this.socket && playerId === this.socket.id && this.game.playerStats && this.game.uiManager) {
-                            this.game.playerStats.currentKarma = update.data.karma;
-                            this.game.playerStats.maxKarma = update.data.maxKarma;
-                            this.game.uiManager.updateStatusBars();
-                        }
-                    }
-                    break;
-                    
-                // Add cases for other update types as needed
-            }
-        }
-        
-        // Clear the pending updates for this player
-        this.pendingUpdates.delete(playerId);
-    }
-
-    /**
-     * Emit the local player's movement to the server
-     * Sends current position and rotation data
-     */
-    emitPlayerMovement() {
-        // Skip if we're not connected
-        if (!this.isConnected) {
-            return;
-        }
-        
-        // Skip if there's no local player
-        if (!this.game?.playerManager?.localPlayer) {
-            return;
-        }
-        
-        const localPlayer = this.game.playerManager.localPlayer;
-        
-        // Emit the player movement
-        this.socket.emit('playerMovement', {
-            position: localPlayer.position,
-            quaternion: localPlayer.quaternion
-        });
-    }
-
-    /**
-     * Send a skill use request to the server
-     * @param {string} targetId - The ID of the target player
-     * @param {string} skillId - The ID of the skill to use
-     */
-    useSkill(targetId, skillId) {
-        // Skip if we're not connected
-        if (!this.isConnected) {
-            console.log('Cannot use skill - not connected to server');
-            return;
-        }
-        
-        // Emit the skill usage to the server
-        this.socket.emit('useSkill', {
-            targetId,
-            skillId
-        });
-    }
-
-    /**
-     * Emit that the local player is ready to the server
-     * and request the current player list
-     */
-    emitPlayerReady() {
-        // Skip if we're not connected
-        if (!this.isConnected) {
-            return;
-        }
-        
-        // Emit player ready event
-        this.socket.emit('playerReady');
-        
-        // Request current player list
-        this.socket.emit('requestPlayerList');
-    }
-
-    requestPlayerList() {
-        if (!this.socket) {
-            console.warn('Cannot request player list: No socket connection');
-            return;
-        }
-        
-        // Request current player list
-        this.socket.emit('requestPlayerList');
-    }
-
-    /**
-     * Wait for the monster manager to initialize and then process pending monster data
-     */
-    waitForMonsterManager() {
-        // Check every 500ms if the monster manager is ready
-        const checkInterval = setInterval(() => {
-            if (this.game.monsterManager && this.game.monsterManager.initialized) {
-                // If there's pending monster data, process it
-                if (this.pendingMonsterData) {
-                    console.log('Monster manager now initialized, processing pending monster data');
-                    this.game.monsterManager.processServerMonsters(this.pendingMonsterData);
-                    this.pendingMonsterData = null;
-                }
-                // Stop checking
-                clearInterval(checkInterval);
-            }
-        }, 500);
-        
-        // Set a timeout to stop checking after 10 seconds to prevent potential memory leaks
-        setTimeout(() => {
-            clearInterval(checkInterval);
-            // If we still have pending data, log a warning
-            if (this.pendingMonsterData) {
-                console.warn('Monster manager did not initialize within timeout period');
-            }
-        }, 10000);
     }
 }

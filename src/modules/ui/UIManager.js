@@ -1597,13 +1597,30 @@ export class UIManager {
      */
     updateXPRing(experience, experienceToNextLevel, level) {
         if (this.xpRingFill && this.xpTooltip) {
-            const xpPercent = Math.min(100, (experience / experienceToNextLevel) * 100);
+            const baseExp = 100; // Same as GameConstants.EXPERIENCE.BASE_EXPERIENCE
+            const scalingFactor = 1.5; // Same as GameConstants.EXPERIENCE.SCALING_FACTOR
+            
+            // Calculate total experience needed for previous level
+            let expToPreviousLevel = 0;
+            for (let i = 1; i < level; i++) {
+                expToPreviousLevel += baseExp * Math.pow(scalingFactor, i - 1);
+            }
+            
+            // Calculate experience needed for current level
+            const expForCurrentLevel = baseExp * Math.pow(scalingFactor, level - 1);
+            
+            // Calculate progress within the current level
+            const currentLevelProgress = experience - expToPreviousLevel;
+            
+            // Calculate the percentage filled
+            const xpPercent = Math.min(100, (currentLevelProgress / expForCurrentLevel) * 100);
+            
             // Use clip-path instead of strokeDashoffset for consistent rendering with other rings
             const emptyPercentage = 100 - xpPercent;
             this.xpRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
             
             if (this.xpTooltip) {
-                this.xpTooltip.textContent = `Level ${level}: ${Math.floor(experience)}/${experienceToNextLevel} XP`;
+                this.xpTooltip.textContent = `Level ${level}: ${Math.floor(currentLevelProgress)}/${Math.floor(expForCurrentLevel)} XP`;
             }
         }
         
