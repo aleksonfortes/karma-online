@@ -86,12 +86,43 @@ export class MonsterManager {
      * Initialize monsters in the game world
      */
     initializeMonsters() {
-        // Create monsters at varied positions across the map
-        this.spawnMonsterAtPosition('BASIC', { x: 30, y: 0, z: 30 });
-        this.spawnMonsterAtPosition('BASIC', { x: -30, y: 0, z: 30 });
-        this.spawnMonsterAtPosition('BASIC', { x: 30, y: 0, z: -30 });
-        this.spawnMonsterAtPosition('BASIC', { x: -30, y: 0, z: -30 });
-        this.spawnMonsterAtPosition('BASIC', { x: 0, y: 0, z: 40 });
+        // Define spawn positions away from temple, closer to water edges
+        const spawnPositions = [
+            // North quadrant (closer to water)
+            { x: 0, y: 0, z: 60 },
+            { x: 20, y: 0, z: 60 },
+            { x: -20, y: 0, z: 60 },
+            { x: 40, y: 0, z: 50 },
+            { x: -40, y: 0, z: 50 },
+            
+            // East quadrant (closer to water)
+            { x: 60, y: 0, z: 0 },
+            { x: 60, y: 0, z: 20 },
+            { x: 60, y: 0, z: -20 },
+            { x: 50, y: 0, z: 40 },
+            { x: 50, y: 0, z: -40 },
+            
+            // South quadrant (closer to water)
+            { x: 0, y: 0, z: -60 },
+            { x: 20, y: 0, z: -60 },
+            { x: -20, y: 0, z: -60 },
+            { x: 40, y: 0, z: -50 },
+            { x: -40, y: 0, z: -50 },
+            
+            // West quadrant (closer to water)
+            { x: -60, y: 0, z: 0 },
+            { x: -60, y: 0, z: 20 },
+            { x: -60, y: 0, z: -20 },
+            { x: -50, y: 0, z: 40 },
+            { x: -50, y: 0, z: -40 }
+        ];
+        
+        // Spawn monsters at each position
+        spawnPositions.forEach(position => {
+            this.spawnMonsterAtPosition('BASIC', position);
+        });
+        
+        console.log(`Spawned ${spawnPositions.length} monsters around the map, closer to water edges`);
     }
     
     /**
@@ -202,52 +233,146 @@ export class MonsterManager {
     
     /**
      * Handle monster death
-     * @param {string} monsterId - ID of the monster that died
+     * @param {string} killerId - ID of the player who killed the monster
+     * @param {string} monsterId - ID of the monster that was killed
+     * @returns {Object} The monster that was killed
      */
-    handleMonsterDeath(monsterId) {
+    handleMonsterDeath(killerId, monsterId) {
         const monster = this.monsters.get(monsterId);
         if (!monster) {
             console.warn(`Monster ${monsterId} not found for death handling`);
-            return;
+            return null;
         }
         
-        console.log(`Monster ${monsterId} has died`);
+        console.log(`Monster ${monsterId} was killed by ${killerId}`);
         
-        // Update monster status
+        // Mark monster as dead
         monster.isAlive = false;
         monster.health = 0;
         
-        // Schedule respawn with random time between base time and 2x base time
-        const baseRespawnTime = GameConstants.MONSTER[monster.type].RESPAWN_TIME || 10000;
-        const respawnTime = baseRespawnTime + Math.random() * baseRespawnTime; // 10-20 seconds
+        // Grant experience to the killer if it's a player
+        if (killerId && this.gameManager.playerManager) {
+            // Grant experience to the player
+            this.gameManager.grantExperience(killerId, monster.type);
+        }
         
-        console.log(`Scheduling respawn for monster ${monsterId} in ${respawnTime}ms`);
+        // Notify all clients about the monster death
+        if (this.gameManager && this.gameManager.io) {
+            this.gameManager.io.emit('monster_death', {
+                monsterId: monsterId,
+                killerId: killerId,
+                position: monster.position
+            });
+        }
         
+        // Save original spawn position for reference
+        const originalPosition = { ...monster.position };
+        
+        // Define water edge positions for respawning
+        const waterEdgePositions = [
+            // North water edge
+            { x: 0, y: 0, z: 70 },
+            { x: 20, y: 0, z: 65 },
+            { x: -20, y: 0, z: 65 },
+            { x: 40, y: 0, z: 60 },
+            { x: -40, y: 0, z: 60 },
+            
+            // East water edge
+            { x: 70, y: 0, z: 0 },
+            { x: 65, y: 0, z: 20 },
+            { x: 65, y: 0, z: -20 },
+            { x: 60, y: 0, z: 40 },
+            { x: 60, y: 0, z: -40 },
+            
+            // South water edge
+            { x: 0, y: 0, z: -70 },
+            { x: 20, y: 0, z: -65 },
+            { x: -20, y: 0, z: -65 },
+            { x: 40, y: 0, z: -60 },
+            { x: -40, y: 0, z: -60 },
+            
+            // West water edge
+            { x: -70, y: 0, z: 0 },
+            { x: -65, y: 0, z: 20 },
+            { x: -65, y: 0, z: -20 },
+            { x: -60, y: 0, z: 40 },
+            { x: -60, y: 0, z: -40 }
+        ];
+        
+        // Schedule respawn with a random position from the water edge positions
+        const respawnTime = GameConstants.MONSTER[monster.type].RESPAWN_TIME || 10000; // Default 10 seconds
+        
+        console.log(`Monster ${monsterId} will respawn in ${respawnTime / 1000} seconds`);
+        
+        // Clear any existing respawn timer
+        if (this.respawnTimers.has(monsterId)) {
+            clearTimeout(this.respawnTimers.get(monsterId));
+        }
+        
+        // Set a new respawn timer
         const timerId = setTimeout(() => {
-            this.respawnMonster(monsterId, monster.type);
+            // Choose a random position from water edge positions
+            const randomIndex = Math.floor(Math.random() * waterEdgePositions.length);
+            const newPosition = waterEdgePositions[randomIndex];
+            
+            // Create randomness around the chosen position to avoid monsters stacking
+            const randomOffset = {
+                x: (Math.random() * 10) - 5, // ±5 units
+                z: (Math.random() * 10) - 5  // ±5 units
+            };
+            
+            const finalPosition = {
+                x: newPosition.x + randomOffset.x,
+                y: 0,
+                z: newPosition.z + randomOffset.z
+            };
+            
+            // Ensure the position is valid (not in temple)
+            if (this.isInTemple(finalPosition)) {
+                // If somehow in temple, use a completely random position
+                const randomPos = this.getRandomSpawnPosition();
+                finalPosition.x = randomPos.x;
+                finalPosition.z = randomPos.z;
+            }
+            
+            // Reset monster state
+            monster.isAlive = true;
+            monster.health = GameConstants.MONSTER[monster.type].MAX_HEALTH;
+            monster.position = finalPosition;
+            monster.spawnPosition = finalPosition; // Set new spawn position for return-to-spawn behavior
+            monster.targetPlayerId = null;
+            monster.isReturningToSpawn = false;
+            monster.isAttacking = false;
+            monster.lastAttackTime = 0;
+            monster.lastMoveTime = Date.now();
+            monster.wanderAngle = Math.random() * Math.PI * 2;
+            monster.wanderTimer = 0;
+            monster.wanderInterval = 2000 + Math.random() * 3000;
+            
+            console.log(`Monster ${monsterId} respawned at new position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)} (Original: x=${originalPosition.x.toFixed(2)}, z=${originalPosition.z.toFixed(2)})`);
+            
+            // Notify all clients about the monster respawn
+            if (this.gameManager && this.gameManager.io) {
+                this.gameManager.io.emit('monster_respawn', {
+                    monster: {
+                        id: monsterId,
+                        type: monster.type,
+                        position: finalPosition,
+                        health: monster.health,
+                        maxHealth: GameConstants.MONSTER[monster.type].MAX_HEALTH,
+                        isAlive: true
+                    }
+                });
+            }
+            
+            // Remove from respawn timers
+            this.respawnTimers.delete(monsterId);
         }, respawnTime);
         
-        // Store timer ID to clear it if needed
+        // Store the timer ID for cleanup
         this.respawnTimers.set(monsterId, timerId);
-    }
-    
-    /**
-     * Respawn a previously killed monster
-     * @param {string} monsterId - ID of the monster to respawn
-     * @param {string} monsterType - Type of the monster
-     */
-    respawnMonster(monsterId, monsterType) {
-        // Get a random position for the respawn
-        const spawnPosition = this.getRandomSpawnPosition();
         
-        // Remove the old monster
-        this.monsters.delete(monsterId);
-        this.respawnTimers.delete(monsterId);
-        
-        // Spawn a new monster at the random position
-        this.spawnMonsterAtPosition(monsterType, spawnPosition);
-        
-        console.log(`Monster ${monsterId} has been respawned at position ${JSON.stringify(spawnPosition)}`);
+        return monster;
     }
     
     /**
