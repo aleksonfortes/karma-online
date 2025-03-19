@@ -777,9 +777,9 @@ export class NetworkManager {
                         this.game.playerStats.currentLife = data.life;
                         this.game.playerStats.maxLife = data.maxLife;
                         
-                        // Update UI
+                        // Update UI with the updated playerStats object
                         if (this.game.uiManager) {
-                            this.game.uiManager.updateStatusBars();
+                            this.game.uiManager.updateStatusBars(this.game.playerStats);
                         }
                     }
                 }
@@ -1047,43 +1047,129 @@ export class NetworkManager {
         
         // Handle respawn confirmation
         this.socket.on('respawnConfirmed', (data) => {
-            console.log('Respawn confirmed:', data);
+            console.log('=======================================');
+            console.log('RESPAWN CONFIRMED:', data);
+            console.log('Local player before respawn:', 
+                this.game.localPlayer ? 
+                `visible: ${this.game.localPlayer.visible}, position: ${JSON.stringify({
+                    x: this.game.localPlayer.position.x,
+                    y: this.game.localPlayer.position.y,
+                    z: this.game.localPlayer.position.z
+                })}` : 'null');
             
-            // Update player position
-            if (this.game.localPlayer && data.position) {
-                this.game.localPlayer.position.set(
-                    data.position.x,
-                    data.position.y,
-                    data.position.z
-                );
+            // CRITICAL: Check if player exists
+            if (!this.game.localPlayer) {
+                console.error('Local player not found during respawn confirmation');
+                return;
             }
             
-            // Update player stats
+            // Make sure we have temple position data
+            if (!data.position) {
+                console.error('No position data in respawn confirmation');
+                return;
+            }
+            
+            // STEP 1: Keep player invisible during teleport
+            this.game.localPlayer.visible = false;
+            console.log('Set player invisible for teleportation');
+            
+            // STEP 2: IMMEDIATELY teleport player to temple position
+            const templePosX = data.position.x;
+            const templePosY = data.position.y;
+            const templePosZ = data.position.z;
+            
+            this.game.localPlayer.position.set(templePosX, templePosY, templePosZ);
+            console.log(`Teleported player to temple at: ${templePosX}, ${templePosY}, ${templePosZ}`);
+            
+            // Set player rotation to correct direction (facing south)
+            if (data.rotation) {
+                this.game.localPlayer.rotation.y = data.rotation.y;
+                console.log(`Set player rotation to: ${data.rotation.y}`);
+            } else {
+                // Default rotation (south) if not provided
+                this.game.localPlayer.rotation.y = 0;
+                console.log(`Set player rotation to default (south): 0`);
+            }
+            
+            // STEP 3: Reset camera position immediately
+            if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
+                this.game.cameraManager.resetCamera();
+                console.log('Camera position reset to follow player at temple');
+            } else {
+                console.error('Cannot reset camera - cameraManager or resetCamera method not available');
+            }
+            
+            // STEP 4: Update player stats before making visible
             if (this.game.playerStats) {
                 this.game.playerStats.currentLife = data.life;
                 this.game.playerStats.maxLife = data.maxLife;
                 
+                // Update death count from server if provided
+                if (data.deathCount !== undefined) {
+                    this.game.playerStats.deaths = data.deathCount;
+                    console.log(`Updated player death count: ${data.deathCount}`);
+                }
+                
+                console.log(`Updated player stats: Life ${this.game.playerStats.currentLife}/${this.game.playerStats.maxLife}`);
+                
                 // Update UI
                 if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars();
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
                     this.game.uiManager.hideDeathScreen();
-                    this.game.uiManager.showNotification('You have respawned!', '#00ff00');
+                    console.log('Updated UI status bars and hid death screen');
                 }
             }
             
-            // Mark player as alive
+            // Also store death count in player userData for reference
+            if (this.game.localPlayer && data.deathCount !== undefined) {
+                if (!this.game.localPlayer.userData) {
+                    this.game.localPlayer.userData = {};
+                }
+                this.game.localPlayer.userData.deathCount = data.deathCount;
+            }
+            
+            // STEP 5: Mark player as alive
             this.game.isAlive = true;
             this.playerDead = false;
+            console.log('Marked player as alive');
             
-            // Re-enable controls if available
+            // STEP 6: Re-enable controls
             if (this.game.controlsManager && this.game.controlsManager.enableControls) {
                 this.game.controlsManager.enableControls();
+                console.log('Re-enabled player controls');
             }
             
-            // Reset camera if needed
-            if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
-                this.game.cameraManager.resetCamera();
-            }
+            // STEP 7: FINALLY make player visible after a short delay
+            setTimeout(() => {
+                if (this.game.localPlayer) {
+                    // Double-check position before making visible
+                    console.log(`Player position before making visible: ${JSON.stringify({
+                        x: this.game.localPlayer.position.x.toFixed(2),
+                        y: this.game.localPlayer.position.y.toFixed(2),
+                        z: this.game.localPlayer.position.z.toFixed(2)
+                    })}`);
+                    
+                    // Make absolutely sure we're at temple position
+                    this.game.localPlayer.position.set(templePosX, templePosY, templePosZ);
+                    
+                    // Make player visible
+                    this.game.localPlayer.visible = true;
+                    console.log('Player made visible at temple position');
+                    
+                    // Reset camera one more time for good measure
+                    if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
+                        this.game.cameraManager.resetCamera();
+                        console.log('Camera position reset again after player made visible');
+                    }
+                    
+                    // Show respawn notification
+                    if (this.game.uiManager) {
+                        this.game.uiManager.showNotification('You have respawned in the temple!', '#00ff00');
+                        console.log('Showed respawn notification');
+                    }
+                }
+                console.log('=======================================');
+            }, 300); // Slightly longer delay to ensure everything is set up
         });
         
         // Handle player respawn (for other players)

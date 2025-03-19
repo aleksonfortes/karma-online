@@ -617,6 +617,70 @@ export class NetworkManager {
                     });
                 }
             });
+            
+            // Handle player respawn request
+            socket.on('requestRespawn', () => {
+                console.log(`Player ${socket.id} requested respawn`);
+                
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    console.warn(`Player ${socket.id} not found for respawn request`);
+                    return;
+                }
+                
+                // Even if player is not marked as dead, force respawn
+                if (!player.isDead) {
+                    console.warn(`Player ${socket.id} requested respawn but is not marked as dead - forcing respawn anyway`);
+                }
+                
+                // Respawn the player at the temple
+                this.playerManager.respawnPlayer(socket.id);
+                
+                // Log temple position for debugging
+                console.log(`Temple position for respawn: ${JSON.stringify(GameConstants.PLAYER.SPAWN_POSITION)}`);
+                
+                // Send respawn confirmation with temple coordinates
+                const respawnData = {
+                    position: { 
+                        x: GameConstants.PLAYER.SPAWN_POSITION.x,
+                        y: GameConstants.PLAYER.SPAWN_POSITION.y,
+                        z: GameConstants.PLAYER.SPAWN_POSITION.z 
+                    },
+                    rotation: {
+                        y: GameConstants.PLAYER.DEFAULT_ROTATION.y // Make sure player faces south (same as initial spawn)
+                    },
+                    life: player.life,
+                    maxLife: player.maxLife || 100,
+                    deathCount: player.deathCount || 0
+                };
+                
+                socket.emit('respawnConfirmed', respawnData);
+                console.log(`Sent respawnConfirmed to player ${socket.id} with position:`, respawnData.position, `and rotation:`, respawnData.rotation);
+                
+                // Update player's rotation in server state
+                player.rotation = { ...GameConstants.PLAYER.DEFAULT_ROTATION };
+                
+                // Broadcast updated player position to all clients EXCEPT the respawning player
+                // This ensures other clients see the player in temple
+                socket.broadcast.emit('playerMoved', {
+                    id: socket.id,
+                    position: { ...GameConstants.PLAYER.SPAWN_POSITION },
+                    rotation: { ...GameConstants.PLAYER.DEFAULT_ROTATION },
+                    timestamp: Date.now()
+                });
+                
+                // Also notify all clients that this player has respawned
+                this.io.emit('playerRespawned', {
+                    id: socket.id,
+                    position: { ...GameConstants.PLAYER.SPAWN_POSITION },
+                    stats: {
+                        life: player.life,
+                        maxLife: player.maxLife
+                    }
+                });
+                
+                console.log(`Broadcast player ${socket.id} respawn to all clients`);
+            });
         });
     }
     
