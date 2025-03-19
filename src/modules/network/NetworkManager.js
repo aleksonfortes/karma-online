@@ -51,6 +51,9 @@ export class NetworkManager {
         this.pendingInputs = [];
         this.pendingUpdates = new Map(); // Store updates for players that don't exist yet
         this.lastHealthLog = {};
+        
+        // Storage for monster data received before monster manager is initialized
+        this.pendingMonsterData = null;
     }
 
     async init() {
@@ -150,7 +153,16 @@ export class NetworkManager {
             
             // Process monster data if available
             if (gameState.monsters && this.game.monsterManager) {
-                this.game.monsterManager.processServerMonsters(gameState.monsters);
+                // Only process monster data if the monster manager is fully initialized
+                if (this.game.monsterManager.initialized) {
+                    this.game.monsterManager.processServerMonsters(gameState.monsters);
+                } else {
+                    console.log('Monster manager not fully initialized, storing monster data for later processing');
+                    // Store monster data to process after initialization
+                    this.pendingMonsterData = gameState.monsters;
+                    // Check periodically if monster manager has initialized and process data when ready
+                    this.waitForMonsterManager();
+                }
             }
             
             // Send our initial state to all players
@@ -683,6 +695,13 @@ export class NetworkManager {
                 playerMesh.userData.stats.maxLife = data.maxLife;
                 playerMesh.userData.stats.currentLife = data.life; // Ensure currentLife is also updated
                 
+                // Store server values for future reference
+                playerMesh.userData.serverLife = data.life;
+                playerMesh.userData.serverMaxLife = data.maxLife;
+                
+                // Record when we received this authoritative update
+                playerMesh.userData.lastServerUpdateTime = Date.now();
+                
                 // Update the health bar
                 this.game.playerManager.updateHealthBar(playerMesh);
                 
@@ -850,6 +869,9 @@ export class NetworkManager {
             
             // Set a flag to indicate we're processing a damage effect
             targetPlayer.userData.processingDamageEffect = true;
+            
+            // Record the time of this damage effect to prevent immediate health corrections
+            targetPlayer.userData.lastDamageTime = Date.now();
             
             // Show damage number if available
             if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
@@ -1028,14 +1050,25 @@ export class NetworkManager {
         // Set up monster data handler
         this.socket.on('monster_data', (monsterData) => {
             if (this.game.monsterManager) {
-                this.game.monsterManager.processServerMonsters(monsterData);
+                if (this.game.monsterManager.initialized) {
+                    this.game.monsterManager.processServerMonsters(monsterData);
+                } else {
+                    console.log('Monster manager not fully initialized yet, storing monster data for later processing');
+                    this.pendingMonsterData = monsterData;
+                    this.waitForMonsterManager();
+                }
             }
         });
         
         // Set up monster update handler
         this.socket.on('monster_update', (updateData) => {
             if (this.game.monsterManager) {
-                this.game.monsterManager.processMonsterUpdate(updateData);
+                if (this.game.monsterManager.initialized) {
+                    this.game.monsterManager.processMonsterUpdate(updateData);
+                } else {
+                    console.log('Monster manager not fully initialized yet, ignoring monster update');
+                    // Updates can be safely ignored as they'll be included in the next full monster_data
+                }
             }
         });
     }
@@ -1505,7 +1538,17 @@ export class NetworkManager {
             // Check all players
             this.game.playerManager.players.forEach((playerMesh, playerId) => {
                 // Skip if player doesn't have stored server values
-                if (!playerMesh.userData.serverLife) {
+                if (playerMesh.userData.serverLife === undefined) {
+                    return;
+                }
+                
+                // Skip if we're in a damage effect processing - this avoids conflicts
+                if (playerMesh.userData.processingDamageEffect) {
+                    return;
+                }
+                
+                // Skip if health is locked - this indicates a recent update to the health bar
+                if (playerMesh.userData.healthLocked) {
                     return;
                 }
                 
@@ -1514,14 +1557,37 @@ export class NetworkManager {
                     (playerMesh.userData.stats.life !== playerMesh.userData.serverLife || 
                      playerMesh.userData.stats.maxLife !== playerMesh.userData.serverMaxLife)) {
                     
-                    console.log(`Correcting health values for player ${playerId} from ${playerMesh.userData.stats.life} to ${playerMesh.userData.serverLife}`);
+                    // Only correct if:
+                    // 1. Health has increased (implying server regeneration)
+                    // 2. Or more than 5 seconds have passed since last damage effect
+                    const timeNow = Date.now();
+                    const lastDamageTime = playerMesh.userData.lastDamageTime || 0;
+                    const timeSinceLastDamage = timeNow - lastDamageTime;
                     
-                    // Restore the server values
-                    playerMesh.userData.stats.life = playerMesh.userData.serverLife;
-                    playerMesh.userData.stats.maxLife = playerMesh.userData.serverMaxLife;
+                    // Only make corrections in the following cases:
+                    const shouldCorrect = 
+                        // If server health is higher (implies regeneration)
+                        playerMesh.userData.serverLife > playerMesh.userData.stats.life || 
+                        // Or if the server health is lower and it's a significant difference (>5%)
+                        (playerMesh.userData.serverLife < playerMesh.userData.stats.life && 
+                         Math.abs(playerMesh.userData.serverLife - playerMesh.userData.stats.life) / 
+                         playerMesh.userData.serverMaxLife > 0.05) ||
+                        // Or if at least 5 seconds have passed since last damage (avoids visual glitches)
+                        timeSinceLastDamage > 5000;
                     
-                    // Update the health bar
-                    this.game.playerManager.updateHealthBar(playerMesh);
+                    if (shouldCorrect) {
+                        console.log(`Correcting health values for player ${playerId} from ${playerMesh.userData.stats.life} to ${playerMesh.userData.serverLife}`);
+                        
+                        // Restore the server values
+                        playerMesh.userData.stats.life = playerMesh.userData.serverLife;
+                        playerMesh.userData.stats.maxLife = playerMesh.userData.serverMaxLife;
+                        
+                        // Update the health bar
+                        this.game.playerManager.updateHealthBar(playerMesh);
+                    } else {
+                        // If we don't correct, we should still track that the server has a different value
+                        console.log(`Deferring health correction for player ${playerId} - too soon after damage (${timeSinceLastDamage}ms)`);
+                    }
                 }
             });
         }, 2000); // Check every 2 seconds
@@ -1729,5 +1795,33 @@ export class NetworkManager {
         
         // Request current player list
         this.socket.emit('requestPlayerList');
+    }
+
+    /**
+     * Wait for the monster manager to initialize and then process pending monster data
+     */
+    waitForMonsterManager() {
+        // Check every 500ms if the monster manager is ready
+        const checkInterval = setInterval(() => {
+            if (this.game.monsterManager && this.game.monsterManager.initialized) {
+                // If there's pending monster data, process it
+                if (this.pendingMonsterData) {
+                    console.log('Monster manager now initialized, processing pending monster data');
+                    this.game.monsterManager.processServerMonsters(this.pendingMonsterData);
+                    this.pendingMonsterData = null;
+                }
+                // Stop checking
+                clearInterval(checkInterval);
+            }
+        }, 500);
+        
+        // Set a timeout to stop checking after 10 seconds to prevent potential memory leaks
+        setTimeout(() => {
+            clearInterval(checkInterval);
+            // If we still have pending data, log a warning
+            if (this.pendingMonsterData) {
+                console.warn('Monster manager did not initialize within timeout period');
+            }
+        }, 10000);
     }
 }
