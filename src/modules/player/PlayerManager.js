@@ -741,6 +741,35 @@ export class PlayerManager {
             }
         });
         
+        // Remove any death effect spheres that might be around the player
+        // This removes the blue circle that appears when a player dies
+        if (player.userData.deathEffectSphere) {
+            this.game.scene.remove(player.userData.deathEffectSphere);
+            player.userData.deathEffectSphere = null;
+        }
+        
+        // Also look for any generic blue sphere-like objects attached to or near the player
+        // Use a unique name to identify blue spheres in the scene that might be death effects
+        this.game.scene.traverse((object) => {
+            if (object.userData.isDeathEffect || 
+                (object.type === 'Mesh' && 
+                 object.geometry && 
+                 object.geometry.type.includes('Sphere') && 
+                 object.material && 
+                 object.material.color && 
+                 object.material.color.b > 0.7)) {
+                
+                // Calculate distance to the player
+                const distance = player.position.distanceTo(object.position);
+                
+                // If this sphere is close to the player, it's likely the death effect
+                if (distance < 5) {
+                    console.log('Removing death effect sphere');
+                    this.game.scene.remove(object);
+                }
+            }
+        });
+        
         // For local player, request respawn position from server
         if (player === this.game.localPlayer) {
             this.game.networkManager.socket.emit('requestRespawn');
