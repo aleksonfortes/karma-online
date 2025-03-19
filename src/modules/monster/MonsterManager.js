@@ -12,6 +12,7 @@ export class MonsterManager {
         this.monsters = new Map();
         this.monsterModels = {};
         this.initialized = false;
+        this.healthCheckInterval = null;
     }
     
     /**
@@ -32,6 +33,9 @@ export class MonsterManager {
         // We no longer need to set up the attack handler here
         // as it's now handled in Game.js
         
+        // Start the health check interval
+        this.startHealthCheck();
+        
         this.initialized = true;
         console.log('Monster Manager initialized');
     }
@@ -41,6 +45,16 @@ export class MonsterManager {
      */
     async preloadMonsterModels() {
         console.log('Preloading monster models');
+        
+        // Create a simple fallback model immediately
+        // This ensures we always have at least a basic model available
+        const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
+        const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
+        const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+        
+        // Store fallback under both uppercase and lowercase keys
+        this.monsterModels['FALLBACK'] = fallbackMesh;
+        this.monsterModels['fallback'] = fallbackMesh;
         
         try {
             const loader = new GLTFLoader();
@@ -57,20 +71,9 @@ export class MonsterManager {
                         console.log(`Loading cerberus model: ${(progress.loaded / progress.total * 100).toFixed(2)}%`);
                     },
                     (error) => {
-                        console.warn('Error loading cerberus model, falling back to basic:', error);
-                        // Try to load the basic model as fallback
-                        loader.load(
-                            '/models/monster_basic.glb',
-                            (basicGltf) => {
-                                console.log('Successfully loaded basic monster model as fallback');
-                                resolve(basicGltf);
-                            },
-                            undefined,
-                            (basicError) => {
-                                console.error('Failed to load fallback model:', basicError);
-                                reject(basicError);
-                            }
-                        );
+                        console.warn('Error loading cerberus model:', error);
+                        // Return the fallback model instead of trying to load another model
+                        reject(error);
                     }
                 );
             });
@@ -85,15 +88,10 @@ export class MonsterManager {
         } catch (error) {
             console.error('Error preloading monster models:', error);
             
-            // Fallback to using a simple mesh if model loading fails
-            console.log('Using fallback monster model');
-            const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
-            const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
-            const fallbackMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
-            
-            // Store under both uppercase and lowercase keys for reliability
-            this.monsterModels['BASIC'] = fallbackMesh;
-            this.monsterModels['basic'] = fallbackMesh;
+            // Use the fallback model for BASIC type
+            console.log('Using fallback monster model for BASIC type');
+            this.monsterModels['BASIC'] = this.monsterModels['FALLBACK'];
+            this.monsterModels['basic'] = this.monsterModels['FALLBACK'];
         }
     }
     
@@ -129,6 +127,9 @@ export class MonsterManager {
             return;
         }
         
+        // Flag to track if we're processing a batch of new monsters
+        const startTime = Date.now();
+        
         // Track existing monsters to find ones that should be removed
         const existingMonsterIds = new Set(this.monsters.keys());
         
@@ -142,7 +143,13 @@ export class MonsterManager {
                 this.updateMonster(monster);
             } else {
                 // Create new monster
-                this.createMonster(monster);
+                const newMonster = this.createMonster(monster);
+                
+                // Mark creation time to prevent initial health bar flickering
+                if (newMonster && newMonster.mesh) {
+                    newMonster.mesh.userData.creationTime = startTime;
+                    newMonster.mesh.userData.lastDamageTime = startTime;
+                }
             }
         });
         
@@ -177,9 +184,18 @@ export class MonsterManager {
             modelTemplate = this.monsterModels['BASIC'];
         }
         
+        // If still no model, use FALLBACK
         if (!modelTemplate) {
-            console.error(`No model found for monster type and no fallback available`);
-            return;
+            console.warn(`No BASIC model found, using FALLBACK model`);
+            modelTemplate = this.monsterModels['FALLBACK'];
+        }
+        
+        // If all else fails, create a simple box model on the fly
+        if (!modelTemplate) {
+            console.warn(`Creating emergency fallback model for monster ${monsterData.id}`);
+            const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
+            const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
+            modelTemplate = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
         }
         
         // Clone the model to create a new instance
@@ -220,24 +236,30 @@ export class MonsterManager {
         
         // Store a reference to the health bar for updates
         monsterModel.userData.healthBar = healthBar;
-        monsterModel.userData.healthBarInner = healthBar.children[0];
+        monsterModel.userData.healthBarCanvas = healthBar.userData.canvas;
+        monsterModel.userData.healthBarContext = healthBar.userData.context;
         
         // Add to scene
         this.game.scene.add(monsterModel);
         
-        // Store monster reference
+        // Store monster reference with health info
         const monster = {
             id: monsterData.id,
             type: monsterData.type,
             mesh: monsterModel,
-            health: monsterData.health,
-            maxHealth: monsterData.maxHealth,
+            health: monsterData.health || 100,
+            maxHealth: monsterData.maxHealth || 100,
             position: monsterModel.position,
             collisionRadius: monsterData.collisionRadius || 1
         };
         
         // Store in monsters Map
         this.monsters.set(monsterData.id, monster);
+        
+        // Initialize the health bar
+        this.updateHealthBar(monster);
+        
+        console.log(`Monster created with health: ${monster.health}/${monster.maxHealth}, health bar initialized`);
         
         return monster;
     }
@@ -246,33 +268,36 @@ export class MonsterManager {
      * Create a health bar for a monster
      */
     createHealthBar(monsterData) {
-        // Create container
-        const healthBarContainer = new THREE.Object3D();
+        // Create canvas for health bar
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 8;
+        const context = canvas.getContext('2d');
         
-        // Create background - make it wider for better visibility on larger model
-        const backgroundGeometry = new THREE.PlaneGeometry(1.5, 0.15);
-        const backgroundMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
-        const background = new THREE.Mesh(backgroundGeometry, backgroundMaterial);
+        // Create sprite for health bar
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true,
+            sizeAttenuation: true, // Make the sprite maintain consistent size regardless of distance
+            depthTest: false // Ensure it renders on top
+        });
         
-        // Create health bar - match the wider size
-        const healthGeometry = new THREE.PlaneGeometry(1.5, 0.15);
-        const healthMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        const healthBar = new THREE.Mesh(healthGeometry, healthMaterial);
+        const healthBarSprite = new THREE.Sprite(material);
         
-        // Position the health bar slightly in front of the background to avoid z-fighting
-        healthBar.position.set(0, 0, 0.01);
+        // Set size and position to match player health bars
+        const healthBarWidth = 0.7;  // Same as player health bar
+        const healthBarHeight = 0.08; // Same as player health bar
+        healthBarSprite.scale.set(healthBarWidth, healthBarHeight, 1);
         
-        // Add health bar to container
-        healthBarContainer.add(background);
-        healthBarContainer.add(healthBar);
+        // Position at the current optimal position (y=1.0)
+        healthBarSprite.position.set(0, 1.0, 0);
         
-        // Position above the monster - adjust height for the much larger cerberus model
-        healthBarContainer.position.set(0, 8.0, 0); // Increased height for the larger model
+        // Store references for updating
+        healthBarSprite.userData.canvas = canvas;
+        healthBarSprite.userData.context = context;
         
-        // Make sure the health bar always faces the camera
-        healthBarContainer.userData.isBillboard = true;
-        
-        return healthBarContainer;
+        return healthBarSprite;
     }
     
     /**
@@ -302,32 +327,159 @@ export class MonsterManager {
         
         // Update health
         if (monsterData.health !== undefined) {
+            // Store previous health for damage time tracking
+            const prevHealth = monster.health;
+            
+            // CRITICAL FIX: Track this update with a unique ID to prevent duplicate updates
+            const updateId = `${monsterData.id}-${monsterData.health}-${Date.now()}`;
+            monster.lastHealthUpdateId = updateId;
+            
+            // Update health values
             monster.health = monsterData.health;
             monster.maxHealth = monsterData.maxHealth || monster.maxHealth;
             
-            // Update health bar
-            this.updateHealthBar(monster);
+            // Store server values for reference
+            monster.serverHealth = monsterData.health;
+            monster.serverMaxHealth = monsterData.maxHealth || monster.maxHealth;
+            
+            // Record the time of this server update
+            monster.lastServerUpdateTime = Date.now();
+            
+            // If this was a damage event (health decreased), record it
+            if (monsterData.health < prevHealth) {
+                // Only log significant health changes
+                if (Math.abs(prevHealth - monsterData.health) > 5) {
+                    console.log(`Monster ${monsterData.id} health changed from ${prevHealth} to ${monsterData.health}`);
+                }
+                monster.mesh.userData.lastDamageTime = Date.now();
+            }
+            
+            // Update the health bar, passing the update ID to prevent duplicates
+            this.updateHealthBar(monster, updateId);
         }
     }
     
     /**
      * Update the visual health bar for a monster
      */
-    updateHealthBar(monster) {
-        const healthBar = monster.mesh.userData.healthBarInner;
-        if (!healthBar) return;
+    updateHealthBar(monster, updateId) {
+        if (!monster || !monster.mesh) return;
+        
+        const healthBarSprite = monster.mesh.userData.healthBar;
+        if (!healthBarSprite) return;
+        
+        const canvas = healthBarSprite.userData.canvas;
+        const context = healthBarSprite.userData.context;
+        
+        if (!canvas || !context) {
+            console.warn('Missing canvas or context for monster health bar');
+            return;
+        }
+        
+        // CRITICAL FIX: Check if we're in a locked state to prevent flickering
+        if (monster.mesh.userData.healthLocked) {
+            // If we have an update ID and it matches the one that locked the health bar, 
+            // this is a duplicate update - skip it
+            if (updateId && monster.mesh.userData.lastHealthUpdateId === updateId) {
+                return;
+            }
+            
+            // If we're locked but this is a different update, proceed silently
+            if (!updateId) {
+                return; // No update ID and locked, so skip
+            }
+            
+            // Otherwise, allow the update to proceed (different update ID)
+        }
+        
+        // Store current health for next comparison
+        monster.mesh.userData.lastHealth = monster.health;
+        
+        // Track the update ID that's being processed
+        if (updateId) {
+            monster.mesh.userData.lastHealthUpdateId = updateId;
+        }
         
         // Calculate health percentage
-        const healthPercent = monster.health / monster.maxHealth;
+        const healthPercent = Math.max(0, Math.min(1, monster.health / monster.maxHealth));
         
-        // Clamp between 0 and 1
-        const clampedPercent = Math.max(0, Math.min(1, healthPercent));
+        // Only update for significant changes to prevent flickering
+        if (monster.mesh.userData.lastHealthPercent !== undefined) {
+            const diff = Math.abs(monster.mesh.userData.lastHealthPercent - healthPercent);
+            
+            // Different thresholds for different scenarios
+            const isDamageUpdate = monster.health < (monster.mesh.userData.lastHealth || monster.maxHealth);
+            const isHealing = monster.health > (monster.mesh.userData.lastHealth || 0);
+            
+            // For most updates, use 7.5% threshold
+            const threshold = 0.075;
+            
+            // Only update if the change exceeds our threshold (skip for explicitly tracked updates)
+            if (diff <= threshold && !updateId) {
+                // Skip update for minor changes
+                return;
+            }
+            
+            // Special case: Check if this is a targeted monster in combat
+            const currentTarget = this.game.targetingManager?.currentTarget;
+            const isTargeted = currentTarget && 
+                              currentTarget.type === 'monster' && 
+                              currentTarget.id === monster.id;
+                              
+            // If this is the targeted monster in combat, ensure we don't update too frequently
+            if (isTargeted && !updateId) { // Skip for explicitly tracked updates
+                const now = Date.now();
+                const lastUpdate = monster.mesh.userData.lastHealthBarUpdate || 0;
+                
+                // Limit updates to once every 300ms during combat for smoothness
+                if (now - lastUpdate < 300) {
+                    return;
+                }
+                
+                // Track this update time
+                monster.mesh.userData.lastHealthBarUpdate = now;
+            }
+        }
         
-        // Update health bar scale
-        healthBar.scale.x = clampedPercent;
+        // Store current health percentage for future comparison
+        monster.mesh.userData.lastHealthPercent = healthPercent;
         
-        // Center the scaling on the left edge
-        healthBar.position.x = (clampedPercent - 1) / 2;
+        // CRITICAL FIX: Lock health bar updates briefly to prevent flickering
+        monster.mesh.userData.healthLocked = true;
+        
+        // Clear the canvas
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw the background (dark backing) - same as player health bar
+        context.fillStyle = '#222222';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Use red for health bar to match player health bar
+        context.fillStyle = '#ff0000';
+        const healthWidth = Math.floor(canvas.width * healthPercent);
+        context.fillRect(0, 0, healthWidth, canvas.height);
+        
+        // Update the texture
+        if (healthBarSprite.material && healthBarSprite.material.map) {
+            healthBarSprite.material.map.needsUpdate = true;
+        }
+        
+        // Unlock after a short delay to allow for new legitimate updates
+        // Use a longer delay for targeted monsters to prevent flickering during combat
+        const currentTarget = this.game.targetingManager?.currentTarget;
+        const isTargeted = currentTarget && 
+                          currentTarget.type === 'monster' && 
+                          currentTarget.id === monster.id;
+        
+        // Automatically unlock when a new update comes in
+        const unlockDelay = 3000; // Much longer delay to ensure we're not getting double updates
+        
+        setTimeout(() => {
+            // Only unlock if we're still processing the same update
+            if (!updateId || monster.mesh.userData.lastHealthUpdateId === updateId) {
+                monster.mesh.userData.healthLocked = false;
+            }
+        }, unlockDelay);
     }
     
     /**
@@ -344,10 +496,47 @@ export class MonsterManager {
             return;
         }
         
-        // Update health if provided
+        // Update health if provided - always use server values for authoritative state
         if (updateData.health !== undefined) {
+            // Store previous health for logging
+            const prevHealth = monster.health;
+            
+            // CRITICAL FIX: Generate a unique update ID to prevent duplicate updates
+            const updateId = `${monsterId}-${updateData.health}-${Date.now()}`;
+            
+            // If this is the same health value that was just updated, skip to prevent double updates
+            if (monster.health === updateData.health && 
+                monster.lastHealthUpdateId && 
+                Date.now() - monster.lastServerUpdateTime < 1000) {
+                // Skip without logging
+                return;
+            }
+            
+            // Track this update
+            monster.lastHealthUpdateId = updateId;
+            
+            // Store server values for reference
+            monster.serverHealth = updateData.health;
+            monster.serverMaxHealth = updateData.maxHealth || monster.maxHealth;
+            
+            // Record the time of this server health update
+            monster.lastServerUpdateTime = Date.now();
+            
+            // Normal case - just apply the update directly
+            // Apply the health change immediately
             monster.health = updateData.health;
-            this.updateHealthBar(monster);
+            monster.maxHealth = updateData.maxHealth || monster.maxHealth;
+            
+            // Log significant health changes only for damage (important for debugging)
+            if (monster.health < prevHealth && Math.abs(prevHealth - monster.health) > 5) {
+                console.log(`Monster ${monsterId} health changed from ${prevHealth} to ${monster.health} (server authority)`);
+                
+                // If this is a damage event (health decreased), record it
+                monster.mesh.userData.lastDamageTime = Date.now();
+            }
+            
+            // Update the health bar, passing the update ID
+            this.updateHealthBar(monster, updateId);
             
             // If this monster is currently targeted, update the target display
             const currentTarget = this.game.targetingManager?.currentTarget;
@@ -368,7 +557,7 @@ export class MonsterManager {
             }
         }
         
-        // Handle monster death
+        // Handle monster death - server authoritative
         if (updateData.health <= 0 || updateData.isAlive === false) {
             // Keep the monster in the collection but visually indicate it's dead
             this.handleMonsterDeath(monsterId);
@@ -384,8 +573,11 @@ export class MonsterManager {
         
         console.log(`Handling monster death: ${monsterId}`);
         
-        // Set health to zero and update health bar
+        // Set health to zero - server is authoritative
         monster.health = 0;
+        monster.serverHealth = 0;
+        
+        // Update health bar to show zero health
         this.updateHealthBar(monster);
         
         // Visual indication of death - make the monster semi-transparent
@@ -406,7 +598,13 @@ export class MonsterManager {
             }
         });
         
-        // Schedule removal after fade animation
+        // Make health bar fade out too
+        const healthBar = monster.mesh.userData.healthBar;
+        if (healthBar && healthBar.material) {
+            healthBar.material.opacity = 0.5;
+        }
+        
+        // Schedule removal after fade animation - only on server confirmation
         setTimeout(() => {
             this.removeMonster(monsterId);
         }, 2000);
@@ -441,13 +639,16 @@ export class MonsterManager {
     update(delta) {
         // Update each monster
         this.monsters.forEach(monster => {
-            // Make health bars face the camera
+            // Skip if monster has no mesh
+            if (!monster.mesh) return;
+            
+            // Handle sprite-based health bar - sprites automatically face the camera
             const healthBar = monster.mesh.userData.healthBar;
-            if (healthBar && healthBar.userData.isBillboard) {
-                // Get camera position
-                const camera = this.game.cameraManager.getCamera();
-                if (camera) {
-                    healthBar.lookAt(camera.position);
+            if (healthBar) {
+                // Ensure the health bar is visible
+                healthBar.visible = true;
+                if (healthBar.material) {
+                    healthBar.material.visible = true;
                 }
             }
         });
@@ -457,13 +658,81 @@ export class MonsterManager {
      * Clean up resources
      */
     cleanup() {
-        // Remove all monsters from scene
-        this.monsters.forEach(monster => {
-            this.game.scene.remove(monster.mesh);
-        });
+        console.log('Cleaning up Monster Manager');
         
-        // Clear collections
-        this.monsters.clear();
+        // Stop the health check interval
+        this.stopHealthCheck();
+        
+        // Clear monster models
+        this.monsterModels = {};
+        
+        // Remove all monsters from the scene
+        this.removeAllMonsters();
+        
+        // Reset initialized flag
+        this.initialized = false;
+    }
+    
+    /**
+     * Start a periodic health check to reconcile monster health values
+     */
+    startHealthCheck() {
+        // Clear any existing interval
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+        }
+        
+        // We're disabling automatic health reconciliation for monsters
+        // because it's causing the health bar flickering issue.
+        // Server updates already provide authoritative health values.
+        
+        // Still set up a minimal interval just to verify monsters are properly
+        // initialized and to log any significant discrepancies
+        this.healthCheckInterval = setInterval(() => {
+            // Check all monsters
+            this.monsters.forEach((monster, monsterId) => {
+                // Skip if monster doesn't have stored server values
+                if (monster.serverHealth === undefined) {
+                    return;
+                }
+                
+                // Skip if monster mesh doesn't exist 
+                if (!monster.mesh || !monster.mesh.userData) {
+                    return;
+                }
+                
+                // Skip monsters with locked health bars
+                if (monster.mesh.userData.healthLocked) {
+                    return;
+                }
+                
+                // Skip targeted monsters
+                const currentTarget = this.game.targetingManager?.currentTarget;
+                if (currentTarget && currentTarget.type === 'monster' && currentTarget.id === monsterId) {
+                    return;
+                }
+                
+                // Only log significant discrepancies without correcting them
+                if (monster.health !== monster.serverHealth) {
+                    const diff = Math.abs(monster.health - monster.serverHealth);
+                    const diffPercent = diff / monster.serverMaxHealth;
+                    
+                    if (diffPercent > 0.2) { // Only log very large discrepancies (20% instead of 10%)
+                        console.log(`Health discrepancy for monster ${monsterId}: client=${monster.health}, server=${monster.serverHealth}`);
+                    }
+                }
+            });
+        }, 10000); // Check less frequently - just monitoring, not correcting
+    }
+    
+    /**
+     * Stop the health check interval
+     */
+    stopHealthCheck() {
+        if (this.healthCheckInterval) {
+            clearInterval(this.healthCheckInterval);
+            this.healthCheckInterval = null;
+        }
     }
 }
 

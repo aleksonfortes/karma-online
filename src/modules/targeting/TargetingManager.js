@@ -535,6 +535,17 @@ export class TargetingManager {
         }
         return this.currentTarget.id;
     }
+    
+    /**
+     * Get the current target's type (player, monster, etc.)
+     * @returns {string|null} The type of the current target, or null if no target
+     */
+    getTargetType() {
+        if (!this.currentTarget) {
+            return null;
+        }
+        return this.currentTarget.type;
+    }
 }
 
 export default TargetingManager;

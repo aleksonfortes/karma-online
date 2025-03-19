@@ -989,4 +989,31 @@ export class PlayerManager {
         console.warn('Could not find local player');
         return null;
     }
+
+    /**
+     * Get a player by ID
+     * @param {string} id - The player's ID
+     * @returns {Object} The player object if found, or null otherwise
+     */
+    getPlayerById(id) {
+        // First check the players Map
+        const playerMesh = this.players.get(id);
+        
+        if (!playerMesh) {
+            console.log(`Player mesh not found for id: ${id}`);
+            return null;
+        }
+        
+        // Return a player object with the expected structure
+        // based on player.userData.stats which is the format expected by SkillsManager/TargetingManager
+        return {
+            id: id,
+            type: 'player',
+            mesh: playerMesh,
+            position: playerMesh.position,
+            life: playerMesh.userData?.stats?.life || 100,
+            maxLife: playerMesh.userData?.stats?.maxLife || 100,
+            level: playerMesh.userData?.level || 1
+        };
+    }
 }

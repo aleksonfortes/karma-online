@@ -25,7 +25,13 @@ export class SkillsManager {
         this.updateActiveEffects(delta);
     }
     
+    /**
+     * Use a skill
+     * @param {string} skillId - The ID of the skill to use
+     * @returns {boolean} - True if the skill was used successfully
+     */
     useSkill(skillId) {
+        // Check if the skill exists
         if (!this.skills[skillId]) {
             console.warn(`Skill ${skillId} not found`);
             return false;
@@ -60,12 +66,16 @@ export class SkillsManager {
             return false;
         }
         
-        // Get target from targeting system
+        // Get target information
         const targetId = this.game.targetingManager.getTargetId();
+        const targetType = this.game.targetingManager.getTargetType();
+        
         if (!targetId) {
             console.log('No target selected for skill use');
             return false;
         }
+        
+        console.log(`Using skill ${skillId} on target ${targetType}-${targetId}`);
         
         // Check range
         if (!this.isTargetInRange(targetId, skillId)) {
@@ -158,37 +168,56 @@ export class SkillsManager {
         this.createMartialArtsEffect(targetPlayer);
     }
     
+    /**
+     * Use the Dark Strike skill
+     */
     useDarkStrike() {
-        if (!this.game.isAlive) {
-            console.log('Cannot use skills while dead');
+        // Get target information
+        const targetId = this.game.targetingManager.getTargetId();
+        const targetType = this.game.targetingManager.getTargetType();
+        
+        if (!targetId) {
+            console.log('No target selected for Dark Strike');
             return;
         }
-
-        // Check if player has the dark path - but skip in test environment
-        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
-        if (!isTestEnvironment) {
-            const playerPath = this.game.playerStats?.path || null;
-            if (playerPath !== 'dark') {
-                console.log(`Cannot use dark_strike - requires dark path (current: ${playerPath || 'none'})`);
-                return;
+        
+        console.log(`Using Dark Strike on ${targetType} ${targetId}`);
+        
+        // Create attack effect for both player and monster targets
+        if (targetType === 'monster') {
+            const monster = this.game.monsterManager.getMonsterById(targetId);
+            if (monster && monster.mesh) {
+                // Visual effect - flash the monster red
+                this.createAttackEffect(monster.mesh);
+                
+                // If in PVE testing mode, apply damage directly
+                const isTestMode = this.game.isPVETestMode;
+                if (isTestMode) {
+                    this.applyDamageEffect(monster, this.skills.dark_strike.damage);
+                }
+            } else {
+                console.warn(`Monster ${targetId} not found for Dark Strike`);
             }
-        }
-
-        if (!this.useSkill('dark_strike')) {
-            return;
+        } else if (targetType === 'player') {
+            const targetPlayer = this.game.playerManager.players.get(targetId);
+            if (targetPlayer) {
+                // Visual effect - flash the player red
+                this.createAttackEffect(targetPlayer);
+                
+                // Apply damage effect with proper player ID for PVP
+                this.applyDamageEffect({
+                    player: targetPlayer,
+                    playerId: targetId,
+                    distance: 0 // We don't use distance here, but include for consistency
+                }, this.skills.dark_strike.damage);
+            } else {
+                console.warn(`Player ${targetId} not found for Dark Strike`);
+            }
+        } else {
+            console.warn(`Unknown target type: ${targetType}`);
         }
         
-        const targets = this.findTargetsInRange(this.skills.dark_strike.range);
-        if (targets.length === 0) {
-            console.log('No targets in range');
-            return;
-        }
-        
-        targets.forEach(target => {
-            this.applyDamageEffect(target, this.skills.dark_strike.damage);
-        });
-        
-        this.createDarkStrikeEffect();
+        console.log('Successfully attacked target with dark_strike');
     }
     
     createMartialArtsEffect(targetPlayer) {
@@ -323,90 +352,124 @@ export class SkillsManager {
         return targets;
     }
     
+    /**
+     * Apply a damage effect to a target
+     * @param {Object} target - The target object (monster or player)
+     * @param {number} damage - The amount of damage to apply
+     */
     applyDamageEffect(target, damage) {
-        if (!target || !target.playerId) {
+        if (!target) {
+            console.warn('Cannot apply damage effect: Target is undefined');
             return;
         }
         
-        if (this.game.networkManager && this.game.networkManager.socket) {
-            this.game.networkManager.socket.emit('useSkill', {
-                targetId: target.playerId,
-                damage: damage,
-                skillName: 'martial_arts'
-            });
-        }
-        
-        if (target.player) {
-            this.createDamageEffect(target.player, damage);
-        }
-    }
-    
-    createDamageEffect(targetPlayer, damage, isCritical = false) {
-        if (!targetPlayer || !this.game.scene) return;
-        
-        // Visual feedback on the target (flash red)
-        if (targetPlayer.material) {
-            const originalColor = targetPlayer.material.color.clone();
-            targetPlayer.material.color.set(0xff0000);
+        // Handle different target types
+        if (target.mesh) {
+            // This is a monster target
+            console.log(`Applying ${damage} damage to monster`);
             
-            setTimeout(() => {
-                targetPlayer.material.color.copy(originalColor);
-            }, 200);
-        }
-        
-        // Create floating damage text
-        const damageId = `damage-${Date.now()}-${Math.random()}`;
-        const damageText = document.createElement('div');
-        damageText.id = damageId;
-        damageText.textContent = damage;
-        damageText.style.position = 'fixed';
-        damageText.style.color = isCritical ? '#ff9900' : '#ffffff';
-        damageText.style.fontSize = isCritical ? '24px' : '20px';
-        damageText.style.fontWeight = 'bold';
-        damageText.style.textShadow = '2px 2px 2px rgba(0,0,0,0.5)';
-        damageText.style.pointerEvents = 'none';
-        damageText.style.zIndex = '1000';
-        document.body.appendChild(damageText);
-        
-        this.updateDamageTextPosition(damageText, targetPlayer);
-        
-        let opacity = 1;
-        let y = parseFloat(damageText.style.top);
-        
-        const animate = () => {
-            opacity -= 0.02;
-            y -= 1;
-            
-            damageText.style.opacity = opacity;
-            damageText.style.top = y + 'px';
-            
-            if (opacity <= 0) {
-                const element = document.getElementById(damageId);
-                if (element) {
-                    document.body.removeChild(element);
+            // Only for test mode - in production damage comes from server
+            if (this.game.isPVETestMode) {
+                // Reduce monster health
+                target.health = Math.max(0, target.health - damage);
+                
+                // Update the monster's health bar
+                if (this.game.monsterManager) {
+                    this.game.monsterManager.updateHealthBar(target);
                 }
-                return;
+                
+                // Check if monster died
+                if (target.health <= 0) {
+                    console.log('Monster killed by damage');
+                    // Apply death effect if needed
+                    if (this.game.monsterManager) {
+                        this.game.monsterManager.handleMonsterDeath(target.id);
+                    }
+                }
+            }
+        } else if (target.player) {
+            // This is a player target
+            console.log(`Applying ${damage} damage to player`);
+            
+            // Send network event to the server for PVP damage
+            if (this.game.networkManager && this.game.networkManager.socket && target.playerId) {
+                // Emit the useSkill event to the server
+                this.game.networkManager.socket.emit('useSkill', {
+                    targetId: target.playerId,
+                    skillName: 'dark_strike', // Default to dark_strike for backward compatibility
+                    damage: damage
+                });
+                
+                console.log(`Sent damage event to server for player ${target.playerId}`);
             }
             
-            requestAnimationFrame(animate);
-        };
-        
-        animate();
+            // Visual effect only - server handles actual damage
+            const player = target.player;
+            this.createDamageNumber(player, damage);
+        }
     }
     
-    updateDamageTextPosition(damageText, targetPlayer) {
-        if (!targetPlayer || !this.game.camera) return;
+    /**
+     * Create a floating damage number
+     * @param {THREE.Object3D} target - The target object
+     * @param {number} damage - The damage amount to display
+     * @param {boolean} isCritical - Whether this is critical damage
+     */
+    createDamageNumber(target, damage, isCritical = false) {
+        if (!target || !target.position) return;
         
-        const position = targetPlayer.position.clone();
-        position.y += 2; 
+        // Create a HTML element for the damage number
+        const damageElement = document.createElement('div');
+        damageElement.className = 'damage-number';
+        damageElement.textContent = isCritical ? `${damage}!` : damage;
+        damageElement.style.position = 'absolute';
+        damageElement.style.color = isCritical ? '#ff0000' : '#ffffff';
+        damageElement.style.fontSize = isCritical ? '24px' : '20px';
+        damageElement.style.fontWeight = 'bold';
+        damageElement.style.textShadow = '2px 2px 2px rgba(0, 0, 0, 0.7)';
+        damageElement.style.pointerEvents = 'none';
+        damageElement.style.zIndex = '1000';
+        document.body.appendChild(damageElement);
         
-        const vector = position.project(this.game.camera);
+        // Get screen position of target
+        const screenPosition = new THREE.Vector3();
+        screenPosition.copy(target.position);
+        screenPosition.y += 2; // Position above the target's head
         
-        const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-(vector.y * 0.5) + 0.5) * window.innerHeight;
+        // Project 3D position to 2D screen space
+        screenPosition.project(this.game.camera);
         
-        damageText.style.left = x + 'px';
-        damageText.style.top = y + 'px';
+        // Convert to CSS coordinates
+        const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
+        
+        // Initial position
+        damageElement.style.left = `${x}px`;
+        damageElement.style.top = `${y}px`;
+        
+        // Animate the damage number
+        let animationFrame = 0;
+        const animateNumber = () => {
+            animationFrame++;
+            
+            // Move upward and fade out
+            const newY = y - animationFrame * 1;
+            const opacity = 1 - (animationFrame / 60);
+            
+            damageElement.style.top = `${newY}px`;
+            damageElement.style.opacity = opacity.toString();
+            
+            // Continue animation until fully faded
+            if (opacity > 0) {
+                requestAnimationFrame(animateNumber);
+            } else {
+                // Remove the element when animation is complete
+                document.body.removeChild(damageElement);
+            }
+        };
+        
+        // Start animation
+        requestAnimationFrame(animateNumber);
     }
     
     getActiveSkills() {
@@ -518,16 +581,39 @@ export class SkillsManager {
         }
         
         const skill = this.skills[skillId];
-        const targetPlayer = this.game.playerManager.getPlayerById(targetId);
+        let targetObject = null;
+        let targetPosition = null;
         
-        if (!targetPlayer) {
-            console.warn(`Target player ${targetId} not found when checking range`);
+        // Check if this is a monster target
+        if (targetId.startsWith('monster-') && this.game.monsterManager) {
+            const monster = this.game.monsterManager.getMonsterById(targetId);
+            if (monster && monster.mesh) {
+                targetObject = monster;
+                targetPosition = monster.mesh.position;
+            }
+        } else {
+            // This is a player target
+            const targetPlayer = this.game.playerManager.getPlayerById(targetId);
+            if (targetPlayer) {
+                targetObject = targetPlayer;
+                // Handle both cases: if position is directly available or if it's in a mesh property
+                targetPosition = targetPlayer.position || (targetPlayer.mesh ? targetPlayer.mesh.position : null);
+            }
+        }
+        
+        if (!targetPosition) {
+            console.warn(`Target ${targetId} position not found when checking range`);
             return false;
         }
         
         // Get the distance between the local player and the target
         const localPlayer = this.game.playerManager.localPlayer;
-        const distance = localPlayer.position.distanceTo(targetPlayer.position);
+        if (!localPlayer || !localPlayer.position) {
+            console.warn('Local player position not available');
+            return false;
+        }
+        
+        const distance = localPlayer.position.distanceTo(targetPosition);
         
         console.log(`Checking range: Skill=${skillId}, Distance=${distance}, Range=${skill.range}`);
         
@@ -913,5 +999,40 @@ export class SkillsManager {
                 icon: '⚔️'
             }
         };
+    }
+    
+    /**
+     * Create a visual attack effect on a target
+     * @param {THREE.Object3D} target - The target object
+     */
+    createAttackEffect(target) {
+        if (!target) {
+            console.warn('Cannot create attack effect: Target is undefined');
+            return;
+        }
+        
+        // Find the character model's material
+        let characterMaterial;
+        target.traverse((child) => {
+            if (child.isMesh && child.material) {
+                characterMaterial = child.material;
+            }
+        });
+        
+        // Flash the target red
+        if (characterMaterial) {
+            // Store original color
+            const originalColor = characterMaterial.color ? characterMaterial.color.clone() : new THREE.Color(0xffffff);
+            
+            // Set to red
+            characterMaterial.color = new THREE.Color(0xff0000);
+            
+            // Restore original color after a delay
+            setTimeout(() => {
+                if (characterMaterial) {  // Check if still exists
+                    characterMaterial.color.copy(originalColor);
+                }
+            }, 200);
+        }
     }
 }
