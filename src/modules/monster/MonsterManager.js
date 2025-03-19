@@ -642,6 +642,37 @@ export class MonsterManager {
             // Skip if monster has no mesh
             if (!monster.mesh) return;
             
+            // Add subtle animation to make monster movement more natural
+            if (monster.mesh.userData.lastPosition) {
+                const oldPos = monster.mesh.userData.lastPosition;
+                const currentPos = monster.mesh.position;
+                
+                // If the monster has moved significantly since last frame
+                const dx = currentPos.x - oldPos.x;
+                const dz = currentPos.z - oldPos.z;
+                const hasMoved = Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01;
+                
+                if (hasMoved) {
+                    // Make the monster bob up and down slightly while moving
+                    const time = Date.now() / 1000;
+                    const bobHeight = Math.sin(time * 4) * 0.1; // Subtle bobbing effect
+                    
+                    // Apply the bobbing motion
+                    monster.mesh.position.y += bobHeight;
+                    
+                    // If the model has moving parts, animate them here
+                    monster.mesh.traverse((child) => {
+                        if (child.name === 'leg' || child.name.includes('leg')) {
+                            // Animate legs if they exist
+                            child.rotation.x = Math.sin(time * 8) * 0.2;
+                        }
+                    });
+                }
+            }
+            
+            // Store current position for next frame
+            monster.mesh.userData.lastPosition = monster.mesh.position.clone();
+            
             // Handle sprite-based health bar - sprites automatically face the camera
             const healthBar = monster.mesh.userData.healthBar;
             if (healthBar) {

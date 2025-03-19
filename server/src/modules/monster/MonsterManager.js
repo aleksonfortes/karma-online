@@ -17,11 +17,12 @@ export class MonsterManager {
         this.initializeMonsters();
     }
     
+    /**
+     * Initialize monsters in the game world
+     */
     initializeMonsters() {
-        // Create a basic monster outside the temple
+        // Create initial monsters
         this.spawnMonster('BASIC');
-        
-        console.log('Server monsters initialized:', this.monsters.size);
     }
     
     /**
@@ -48,7 +49,15 @@ export class MonsterManager {
             health: monsterConfig.MAX_HEALTH,
             maxHealth: monsterConfig.MAX_HEALTH,
             isAlive: true,
-            lastUpdateTime: Date.now()
+            lastUpdateTime: Date.now(),
+            // Add wandering behavior properties
+            wanderAngle: Math.random() * Math.PI * 2,
+            wanderTimer: 0,
+            wanderInterval: 2000 + Math.random() * 3000, // Random interval between 2-5 seconds
+            // Add targeting properties
+            targetPlayerId: null,
+            lastMoveTime: Date.now(),
+            isReturningToSpawn: false
         };
         
         // Add monster to the map
@@ -59,7 +68,7 @@ export class MonsterManager {
     }
     
     /**
-     * Handle monster death and schedule respawn
+     * Handle monster death
      * @param {string} monsterId - ID of the monster that died
      */
     handleMonsterDeath(monsterId) {
@@ -69,25 +78,22 @@ export class MonsterManager {
             return;
         }
         
-        // Mark the monster as dead but keep it in the collection
+        console.log(`Monster ${monsterId} has died`);
+        
+        // Update monster status
         monster.isAlive = false;
-        console.log(`Monster ${monsterId} died, scheduling respawn`);
-        
-        // Get monster type for respawn configuration
-        const monsterType = monster.type;
-        const respawnTime = GameConstants.MONSTER[monsterType]?.RESPAWN_TIME || 10000;
-        
-        // Clear any existing timer for this monster
-        if (this.respawnTimers.has(monsterId)) {
-            clearTimeout(this.respawnTimers.get(monsterId));
-        }
+        monster.health = 0;
         
         // Schedule respawn
+        const respawnTime = GameConstants.MONSTER[monster.type].RESPAWN_TIME || 10000;
+        
+        console.log(`Scheduling respawn for monster ${monsterId} in ${respawnTime}ms`);
+        
         const timerId = setTimeout(() => {
-            this.respawnMonster(monsterId, monsterType);
+            this.respawnMonster(monsterId, monster.type);
         }, respawnTime);
         
-        // Store the timer ID
+        // Store timer ID to clear it if needed
         this.respawnTimers.set(monsterId, timerId);
     }
     
@@ -108,19 +114,22 @@ export class MonsterManager {
     }
     
     /**
-     * Get all monsters for initial client state
+     * Get all monsters as array for network sync
+     * @returns {Array} Array of monster data
      */
     getAllMonsters() {
+        // Only return alive monsters to the client
         return Array.from(this.monsters.values())
-            .filter(monster => monster.isAlive); // Only send alive monsters
+            .filter(monster => monster.isAlive);
     }
     
     /**
-     * Get a specific monster by ID
+     * Get a monster by ID
      * @param {string} monsterId - ID of the monster to get
+     * @returns {Object} The monster data, or null if not found
      */
     getMonsterById(monsterId) {
-        return this.monsters.get(monsterId);
+        return this.monsters.get(monsterId) || null;
     }
     
     /**
@@ -136,31 +145,153 @@ export class MonsterManager {
             // Skip dead monsters
             if (!monster.isAlive) return;
             
-            // Simple AI: find closest player within aggro radius
-            let closestPlayer = null;
-            let closestDistance = Infinity;
+            const monsterConfig = GameConstants.MONSTER[monster.type];
+            const movementSpeed = monsterConfig.MOVEMENT_SPEED;
+            const aggroRadius = monsterConfig.AGGRO_RADIUS;
+            const deltaTime = (currentTime - monster.lastMoveTime) / 1000; // Convert to seconds
             
-            Object.values(players).forEach(player => {
-                const dx = player.position.x - monster.position.x;
-                const dz = player.position.z - monster.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
+            // Get player monster is currently targeting (if any)
+            let targetPlayer = null;
+            if (monster.targetPlayerId) {
+                targetPlayer = players[monster.targetPlayerId];
                 
-                if (distance < GameConstants.MONSTER[monster.type].AGGRO_RADIUS && distance < closestDistance) {
-                    closestPlayer = player;
-                    closestDistance = distance;
+                // If target player is no longer in the game or is dead, clear target
+                if (!targetPlayer || targetPlayer.health <= 0) {
+                    monster.targetPlayerId = null;
+                    targetPlayer = null;
+                } else {
+                    // Check if target player has run away beyond aggro radius
+                    const dx = targetPlayer.position.x - monster.position.x;
+                    const dz = targetPlayer.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    // If player has moved beyond 1.5x the aggro radius, stop following
+                    if (distance > aggroRadius * 1.5) {
+                        monster.targetPlayerId = null;
+                        targetPlayer = null;
+                        // Set leashing flag to return to spawn
+                        monster.isReturningToSpawn = true;
+                    }
                 }
-            });
-            
-            // Update monster rotation to face closest player
-            if (closestPlayer) {
-                const angle = Math.atan2(
-                    monster.position.x - closestPlayer.position.x,
-                    monster.position.z - closestPlayer.position.z
-                );
-                monster.rotation.y = angle;
             }
             
-            // Update the monster's last update time
+            // If no target player, find closest player within aggro radius
+            if (!targetPlayer && !monster.isReturningToSpawn) {
+                let closestPlayer = null;
+                let closestDistance = Infinity;
+                
+                Object.values(players).forEach(player => {
+                    // Skip dead players
+                    if (player.health <= 0) return;
+                    
+                    const dx = player.position.x - monster.position.x;
+                    const dz = player.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    if (distance < aggroRadius && distance < closestDistance) {
+                        closestPlayer = player;
+                        closestDistance = distance;
+                    }
+                });
+                
+                // Set new target player if found
+                if (closestPlayer) {
+                    targetPlayer = closestPlayer;
+                    monster.targetPlayerId = closestPlayer.id;
+                    monster.isReturningToSpawn = false;
+                }
+            }
+            
+            // Calculate distance to spawn point
+            const spawnPosition = monsterConfig.SPAWN_POSITION;
+            const dxSpawn = spawnPosition.x - monster.position.x;
+            const dzSpawn = spawnPosition.z - monster.position.z;
+            const distanceToSpawn = Math.sqrt(dxSpawn * dxSpawn + dzSpawn * dzSpawn);
+            
+            // Check if monster is too far from spawn point
+            const maxRoamDistance = monsterConfig.MAX_FOLLOW_DISTANCE || 30;
+            if (distanceToSpawn > maxRoamDistance) {
+                // Force return to spawn behavior
+                monster.isReturningToSpawn = true;
+                monster.targetPlayerId = null;
+                targetPlayer = null;
+            }
+            
+            // Movement logic
+            if (targetPlayer) {
+                // Calculate direction to target player
+                const dx = targetPlayer.position.x - monster.position.x;
+                const dz = targetPlayer.position.z - monster.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                // Update monster rotation to face player
+                const angle = Math.atan2(dx, dz);
+                monster.rotation.y = angle;
+                
+                // Move toward player if not too close
+                if (distance > monsterConfig.COLLISION_RADIUS + 1.0) {
+                    const moveStep = movementSpeed * deltaTime;
+                    
+                    // Normalize direction vector
+                    const normalizedDx = dx / distance;
+                    const normalizedDz = dz / distance;
+                    
+                    // Move toward player
+                    monster.position.x += normalizedDx * moveStep;
+                    monster.position.z += normalizedDz * moveStep;
+                }
+            } else if (monster.isReturningToSpawn) {
+                // Return to spawn behavior
+                const dx = spawnPosition.x - monster.position.x;
+                const dz = spawnPosition.z - monster.position.z;
+                const distance = Math.sqrt(dx * dx + dz * dz);
+                
+                // If we're close enough to spawn, stop returning
+                if (distance < 1.0) {
+                    monster.isReturningToSpawn = false;
+                    monster.position.x = spawnPosition.x;
+                    monster.position.z = spawnPosition.z;
+                    // Reset wandering
+                    monster.wanderAngle = Math.random() * Math.PI * 2;
+                    monster.wanderTimer = 0;
+                } else {
+                    // Update monster rotation to face spawn point
+                    const angle = Math.atan2(dx, dz);
+                    monster.rotation.y = angle;
+                    
+                    // Calculate movement
+                    const moveStep = movementSpeed * 1.5 * deltaTime; // Move faster when returning
+                    
+                    // Normalize direction vector
+                    const normalizedDx = dx / distance;
+                    const normalizedDz = dz / distance;
+                    
+                    // Move toward spawn
+                    monster.position.x += normalizedDx * moveStep;
+                    monster.position.z += normalizedDz * moveStep;
+                }
+            } else {
+                // Wandering behavior
+                monster.wanderTimer += deltaTime * 1000; // Convert to milliseconds
+                
+                if (monster.wanderTimer >= monster.wanderInterval) {
+                    // Pick a new random direction every wanderInterval
+                    monster.wanderAngle = Math.random() * Math.PI * 2;
+                    monster.wanderTimer = 0;
+                    monster.wanderInterval = 2000 + Math.random() * 3000; // 2-5 seconds
+                }
+                
+                // Calculate movement direction
+                const moveStep = (movementSpeed * 0.5) * deltaTime; // Slower when wandering
+                monster.position.x += Math.sin(monster.wanderAngle) * moveStep;
+                monster.position.z += Math.cos(monster.wanderAngle) * moveStep;
+                
+                // Update rotation to match movement direction
+                monster.rotation.y = monster.wanderAngle;
+            }
+            
+            // Update the monster's last move time
+            monster.lastMoveTime = currentTime;
             monster.lastUpdateTime = currentTime;
         });
     }
@@ -174,8 +305,8 @@ export class MonsterManager {
             clearTimeout(timerId);
         });
         
-        this.monsters.clear();
         this.respawnTimers.clear();
+        this.monsters.clear();
     }
 }
 
