@@ -437,7 +437,7 @@ export class SkillsManager {
         screenPosition.y += 2; // Position above the target's head
         
         // Project 3D position to 2D screen space
-        screenPosition.project(this.game.camera);
+        screenPosition.project(this.game.cameraManager.camera);
         
         // Convert to CSS coordinates
         const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;

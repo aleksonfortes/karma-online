@@ -646,8 +646,8 @@ export class NPCManager {
                 darkNPC.interactionSprite.visible = distance < darkConfig.COLLISION_RADIUS + 3;
                 
                 // Make interaction sprite face camera
-                if (this.game.camera && darkNPC.interactionSprite) {
-                    darkNPC.interactionSprite.quaternion.copy(this.game.camera.quaternion);
+                if (this.game.cameraManager && this.game.cameraManager.camera && darkNPC.interactionSprite) {
+                    darkNPC.interactionSprite.quaternion.copy(this.game.cameraManager.camera.quaternion);
                 }
             }
             
@@ -661,8 +661,8 @@ export class NPCManager {
                 lightNPC.interactionSprite.visible = distance < lightConfig.COLLISION_RADIUS + 3;
                 
                 // Make interaction sprite face camera
-                if (this.game.camera && lightNPC.interactionSprite) {
-                    lightNPC.interactionSprite.quaternion.copy(this.game.camera.quaternion);
+                if (this.game.cameraManager && this.game.cameraManager.camera && lightNPC.interactionSprite) {
+                    lightNPC.interactionSprite.quaternion.copy(this.game.cameraManager.camera.quaternion);
                 }
             }
         }
@@ -678,8 +678,8 @@ export class NPCManager {
             npcMesh.userData.interactionSprite.visible = distance < npcData.collisionRadius + 3;
             
             // Make interaction sprite face camera
-            if (this.game.camera && npcMesh.userData.interactionSprite) {
-                npcMesh.userData.interactionSprite.quaternion.copy(this.game.camera.quaternion);
+            if (this.game.cameraManager && this.game.cameraManager.camera && npcMesh.userData.interactionSprite) {
+                npcMesh.userData.interactionSprite.quaternion.copy(this.game.cameraManager.camera.quaternion);
             }
         });
         

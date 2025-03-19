@@ -131,7 +131,7 @@ export class MockTargetingManager {
     this.log(`Handling targeting with mouse position: ${mousePosition}`);
     
     // Set up raycaster
-    this.raycaster.setFromCamera(mousePosition, this.game.camera);
+    this.raycaster.setFromCamera(mousePosition, this.game.cameraManager.camera);
     
     // Get all targetable objects
     const targetableObjects = this.getTargetableObjects();

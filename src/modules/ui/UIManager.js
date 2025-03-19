@@ -1247,7 +1247,7 @@ export class UIManager {
         // Project player position to screen coordinates
         const vector = new THREE.Vector3();
         vector.setFromMatrixPosition(player.matrixWorld);
-        vector.project(this.game.camera);
+        vector.project(this.game.cameraManager.camera);
         
         // Convert to screen coordinates
         const x = (vector.x * 0.5 + 0.5) * window.innerWidth;

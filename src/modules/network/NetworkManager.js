@@ -1494,7 +1494,7 @@ export class NetworkManager {
             
             // Position the damage number above the player's head
             const updatePosition = () => {
-                if (!targetPlayer.position || !this.game.camera) return;
+                if (!targetPlayer.position || !this.game.cameraManager || !this.game.cameraManager.camera) return;
                 
                 // Convert 3D position to screen position
                 const position = new THREE.Vector3();
@@ -1502,7 +1502,7 @@ export class NetworkManager {
                 position.y += 2; // Position above the player's head
                 
                 // Project the 3D position to 2D screen coordinates
-                position.project(this.game.camera);
+                position.project(this.game.cameraManager.camera);
                 
                 // Convert to screen coordinates
                 const x = (position.x * 0.5 + 0.5) * window.innerWidth;
