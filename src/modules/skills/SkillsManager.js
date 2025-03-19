@@ -83,6 +83,29 @@ export class SkillsManager {
             return false;
         }
         
+        // Check if target is in temple safe zone (only for player targets)
+        if (targetType === 'player') {
+            const targetPlayer = this.game.targetingManager.getTargetObject();
+            
+            // Skip temple check in test environment
+            if (!isTestEnvironment && this.game.environmentManager && targetPlayer) {
+                const targetPos = targetPlayer.position;
+                const playerPos = this.game.localPlayer.position;
+                
+                // Check if target is in temple safe zone
+                if (this.game.environmentManager.isInTempleSafeZone(targetPos)) {
+                    console.log('Cannot attack target in temple safe zone');
+                    return false;
+                }
+                
+                // Check if attack crosses temple boundary
+                if (this.game.environmentManager.isAttackBlockedByTemple(playerPos, targetPos)) {
+                    console.log('Attack blocked by temple safe zone');
+                    return false;
+                }
+            }
+        }
+        
         // Set skill as used
         const skill = this.skills[skillId];
         skill.lastUsed = Date.now();
@@ -840,6 +863,24 @@ export class SkillsManager {
         if (!this.isMonsterInRange(monster, skillId)) {
             console.log(`Monster is out of range for ${skillId}`);
             return false;
+        }
+        
+        // Check if monster is in temple safe zone
+        if (!isTestEnvironment && this.game.environmentManager && monster.mesh) {
+            const monsterPos = monster.mesh.position;
+            const playerPos = this.game.localPlayer.position;
+            
+            // Check if monster is in temple safe zone
+            if (this.game.environmentManager.isInTempleSafeZone(monsterPos)) {
+                console.log('Cannot attack monster in temple safe zone');
+                return false;
+            }
+            
+            // Check if attack crosses temple boundary
+            if (this.game.environmentManager.isAttackBlockedByTemple(playerPos, monsterPos)) {
+                console.log('Attack blocked by temple safe zone');
+                return false;
+            }
         }
         
         // Set skill as used
