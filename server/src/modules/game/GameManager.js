@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import PlayerManager from '../player/PlayerManager.js';
 import NPCManager from '../npc/NPCManager.js';
 import MonsterManager from '../monster/MonsterManager.js';
+import GameConstants from '../../config/GameConstants.js';
 
 export default class GameManager {
     constructor(io) {
@@ -152,6 +153,44 @@ export default class GameManager {
             return null;
         }
         
+        // Award experience points to the player who killed the monster
+        const player = this.playerManager.getPlayer(playerId);
+        if (player) {
+            const monsterConfig = GameConstants.MONSTER[monster.type || 'BASIC'];
+            const expReward = monsterConfig.EXPERIENCE_REWARD;
+            
+            // Store the player's path before updating
+            const playerPath = player.path || null;
+            const playerSkills = player.skills || [];
+            
+            // Add experience to player
+            player.experience = (player.experience || 0) + expReward;
+            
+            // Check if player leveled up
+            const newLevel = this.calculatePlayerLevel(player.experience);
+            const didLevelUp = newLevel > (player.level || 1);
+            player.level = newLevel;
+            
+            // Ensure player path is maintained after level up
+            if (playerPath) {
+                player.path = playerPath;
+            }
+            
+            // Ensure player skills are maintained
+            player.skills = playerSkills;
+            
+            // Notify the player about experience gain and possible level up
+            this.io.to(playerId).emit('experienceGain', {
+                amount: expReward,
+                totalExperience: player.experience,
+                level: player.level,
+                levelUp: didLevelUp,
+                path: player.path
+            });
+            
+            console.log(`Player ${playerId} gained ${expReward} exp for killing monster ${monsterId}. Total: ${player.experience}, Level: ${player.level}, Path: ${player.path || 'none'}`);
+        }
+        
         // Trigger monster death and respawn
         this.monsterManager.handleMonsterDeath(monsterId);
         
@@ -162,6 +201,38 @@ export default class GameManager {
         });
         
         return monster;
+    }
+    
+    /**
+     * Calculate player level based on experience points
+     * @param {number} experience - The player's total experience
+     * @returns {number} The player's level
+     */
+    calculatePlayerLevel(experience) {
+        if (!experience) return 1;
+        
+        const baseExp = GameConstants.EXPERIENCE.BASE_EXPERIENCE;
+        const scalingFactor = GameConstants.EXPERIENCE.SCALING_FACTOR;
+        const maxLevel = GameConstants.EXPERIENCE.MAX_LEVEL;
+        
+        // Start at level 1 and increment until we find the right level
+        let level = 1;
+        let expRequired = 0;
+        
+        while (level < maxLevel) {
+            // Experience required for next level
+            expRequired = baseExp * Math.pow(scalingFactor, level - 1);
+            
+            // If player's experience is less than required for next level, they are at current level
+            if (experience < expRequired) {
+                break;
+            }
+            
+            // Otherwise, increment level and continue checking
+            level++;
+        }
+        
+        return level;
     }
     
     cleanup() {

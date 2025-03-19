@@ -29,7 +29,9 @@ export class PlayerManager {
             path: GameConstants.PLAYER.DEFAULT_PATH,
             effects: [],
             modelScale: GameConstants.PLAYER.MODEL_SCALE,
-            displayName: `Player-${socketId.substring(0, 5)}`
+            displayName: `Player-${socketId.substring(0, 5)}`,
+            experience: 0,
+            level: 1
         };
     }
 

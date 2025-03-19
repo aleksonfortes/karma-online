@@ -513,7 +513,9 @@ export class NetworkManager {
                 life: data.life,
                 maxLife: data.maxLife,
                 mana: data.mana,
-                maxMana: data.maxMana
+                maxMana: data.maxMana,
+                experience: data.experience,
+                level: data.level
             };
 
             // Update the visual status bars
@@ -527,6 +529,8 @@ export class NetworkManager {
                 this.game.playerStats.maxLife = data.maxLife;
                 this.game.playerStats.currentMana = data.mana;
                 this.game.playerStats.maxMana = data.maxMana;
+                this.game.playerStats.experience = data.experience;
+                this.game.playerStats.level = data.level;
                 if (this.game.updateStatusBars) {
                     this.game.updateStatusBars();
                 }
@@ -1182,6 +1186,41 @@ export class NetworkManager {
                 }
             }
         });
+        
+        // Handle experience gain when killing a monster
+        this.socket.on('experienceGain', (data) => {
+            console.log('Received experience gain event:', data);
+            
+            // Update player stats
+            if (this.game.playerStats) {
+                this.game.playerStats.experience = data.totalExperience;
+                this.game.playerStats.level = data.level;
+                
+                // Ensure path is maintained when leveling up
+                if (data.path) {
+                    this.game.playerStats.path = data.path;
+                    
+                    // Also update karma manager if available
+                    if (this.game.karmaManager) {
+                        this.game.karmaManager.chosenPath = data.path;
+                    }
+                }
+                
+                // Update the UI status bars for experience
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                }
+            }
+            
+            // Use the new experience gain notification
+            if (this.game.uiManager && this.game.uiManager.showExperienceGain) {
+                this.game.uiManager.showExperienceGain(
+                    data.amount,
+                    data.levelUp,
+                    data.level
+                );
+            }
+        });
     }
 
     handlePathSelectionResult(result) {
@@ -1421,7 +1460,9 @@ export class NetworkManager {
                     mana: player.mana ?? 100,
                     maxMana: player.maxMana ?? 100,
                     karma: player.karma ?? 50,
-                    maxKarma: player.maxKarma ?? 100
+                    maxKarma: player.maxKarma ?? 100,
+                    experience: player.experience ?? 0,
+                    level: player.level ?? 1
                 };
                 
                 // Store player ID and stats

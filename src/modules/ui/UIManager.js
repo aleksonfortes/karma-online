@@ -265,82 +265,70 @@ export class UIManager {
         return skillBarContainer;
     }
     
-    // Helper method to create status bars with modern styling
+    /**
+     * Create a modern looking status bar
+     * @param {string} label - Text label for the bar
+     * @param {string} backgroundColor - Background color of the bar
+     * @param {string} fillColor - Fill color for the bar
+     * @returns {HTMLElement} - The created status bar
+     */
     createModernStatusBar(label, backgroundColor, fillColor) {
-        const container = document.createElement('div');
-        container.style.position = 'relative';
-        container.style.width = '100%';
-        container.style.height = '12px';
-        container.style.marginBottom = '4px';
-        container.style.borderRadius = '6px';
-        container.style.overflow = 'hidden';
+        // Create container for status bar with text
+        const barContainer = document.createElement('div');
+        barContainer.style.width = '300px';
+        barContainer.style.marginBottom = '5px';
+        barContainer.style.display = 'flex';
+        barContainer.style.flexDirection = 'column';
         
-        // Bar background (white for karma, darker for others)
-        const background = document.createElement('div');
-        background.style.position = 'absolute';
-        background.style.top = '0';
-        background.style.left = '0';
-        background.style.width = '100%';
-        background.style.height = '100%';
-        background.style.background = backgroundColor;
-        background.style.borderRadius = '6px';
-        container.appendChild(background);
+        // Create label
+        const barLabel = document.createElement('div');
+        barLabel.style.display = 'flex';
+        barLabel.style.justifyContent = 'space-between';
+        barLabel.style.marginBottom = '3px';
+        barLabel.style.fontFamily = "'Arial', sans-serif";
+        barLabel.style.fontSize = '12px';
+        barLabel.style.color = '#ffffff';
+        barLabel.style.textShadow = '1px 1px 1px rgba(0, 0, 0, 0.8)';
         
-        // Bar fill that shows from left to right
-        const fill = document.createElement('div');
-        fill.className = 'fill';
-        fill.style.position = 'absolute';
-        fill.style.top = '0';
-        fill.style.left = '0';
-        fill.style.width = '50%'; // Default 50%
-        fill.style.height = '100%';
-        fill.style.background = fillColor;
-        fill.style.borderRadius = '6px';
-        fill.style.transition = 'width 0.3s ease-out';
-        container.appendChild(fill);
+        // Left side label text
+        const labelText = document.createElement('span');
+        labelText.textContent = label;
+        barLabel.appendChild(labelText);
         
-        // Text label
-        const text = document.createElement('span');
-        text.className = 'text';
-        text.style.position = 'absolute';
-        text.style.top = '50%';
-        text.style.left = '10px';
-        text.style.transform = 'translateY(-50%)';
-        text.style.color = '#ffffff';
-        text.style.fontSize = '10px';
-        text.style.fontWeight = 'bold';
-        text.style.textShadow = '1px 1px 1px #000000';
-        text.style.zIndex = '5';
-        text.textContent = label;
-        container.appendChild(text);
+        // Right side status text (current/max)
+        const statusText = document.createElement('span');
+        statusText.className = 'status-text';
+        statusText.textContent = '100/100';
+        barLabel.appendChild(statusText);
         
-        // Tooltip (hidden by default)
-        const tooltip = document.createElement('div');
-        tooltip.className = 'tooltip';
-        tooltip.style.position = 'absolute';
-        tooltip.style.bottom = '120%';
-        tooltip.style.left = '50%';
-        tooltip.style.transform = 'translateX(-50%)';
-        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        tooltip.style.color = '#ffffff';
-        tooltip.style.padding = '5px 10px';
-        tooltip.style.borderRadius = '4px';
-        tooltip.style.fontSize = '12px';
-        tooltip.style.whiteSpace = 'nowrap';
-        tooltip.style.display = 'none';
-        tooltip.style.zIndex = '10';
-        container.appendChild(tooltip);
+        // Create the actual bar
+        const bar = document.createElement('div');
+        bar.style.height = '10px';
+        bar.style.backgroundColor = backgroundColor;
+        bar.style.borderRadius = '5px';
+        bar.style.overflow = 'hidden';
+        bar.style.position = 'relative';
         
-        // Show tooltip on hover
-        container.addEventListener('mouseenter', () => {
-            tooltip.style.display = 'block';
-        });
+        // Create the fill for the bar
+        const barFill = document.createElement('div');
+        barFill.className = 'bar-fill';
+        barFill.style.height = '100%';
+        barFill.style.width = '100%';
+        barFill.style.backgroundColor = fillColor;
+        barFill.style.borderRadius = '5px';
+        barFill.style.position = 'absolute';
+        barFill.style.top = '0';
+        barFill.style.left = '0';
+        barFill.style.transition = 'width 0.3s ease-out';
         
-        container.addEventListener('mouseleave', () => {
-            tooltip.style.display = 'none';
-        });
+        // Assemble the bar
+        bar.appendChild(barFill);
         
-        return container;
+        // Assemble the container
+        barContainer.appendChild(barLabel);
+        barContainer.appendChild(bar);
+        
+        return barContainer;
     }
     
     // Create a stat ring (life, mana) with modern styling
@@ -1664,5 +1652,87 @@ export class UIManager {
         this.messageTimeout = setTimeout(() => {
             this.messageElement.style.display = 'none';
         }, duration);
+    }
+
+    /**
+     * Create a tooltip for the karma bar
+     * @param {HTMLElement} karmaBar - The karma bar element
+     */
+    createKarmaTooltip(karmaBar) {
+        // Create karma tooltip
+        const karmaTooltip = document.createElement('div');
+        karmaTooltip.className = 'tooltip';
+        karmaTooltip.style.position = 'absolute';
+        karmaTooltip.style.bottom = '25px';
+        karmaTooltip.style.left = '50%';
+        karmaTooltip.style.transform = 'translateX(-50%)';
+        karmaTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        karmaTooltip.style.color = '#ffffff';
+        karmaTooltip.style.padding = '5px 10px';
+        karmaTooltip.style.borderRadius = '4px';
+        karmaTooltip.style.fontSize = '12px';
+        karmaTooltip.style.whiteSpace = 'nowrap';
+        karmaTooltip.style.display = 'none';
+        karmaTooltip.style.zIndex = '1500';
+        karmaTooltip.textContent = 'Karma: Neutral (50/100)';
+        
+        // Add to document body
+        document.body.appendChild(karmaTooltip);
+        
+        // Store reference
+        this.karmaTooltip = karmaTooltip;
+        
+        // Add hover event listeners
+        karmaBar.addEventListener('mouseenter', () => {
+            const rect = karmaBar.getBoundingClientRect();
+            karmaTooltip.style.left = `${rect.left + rect.width / 2}px`;
+            karmaTooltip.style.bottom = `${window.innerHeight - rect.top + 5}px`;
+            karmaTooltip.style.display = 'block';
+        });
+        
+        karmaBar.addEventListener('mouseleave', () => {
+            karmaTooltip.style.display = 'none';
+        });
+    }
+
+    /**
+     * Shows a notification for experience gained
+     * @param {number} amount - Amount of experience gained
+     * @param {boolean} levelUp - Whether a level up also occurred
+     * @param {number} newLevel - The new level if leveled up
+     */
+    showExperienceGain(amount, levelUp = false, newLevel = null) {
+        // Experience gain notification with animation
+        const xpNotification = document.createElement('div');
+        xpNotification.textContent = `+${amount} XP`;
+        xpNotification.style.position = 'fixed';
+        xpNotification.style.bottom = '130px'; // Position above XP ring
+        xpNotification.style.left = '70px'; // Aligned with XP ring
+        xpNotification.style.color = '#FFD700'; // Golden color
+        xpNotification.style.fontWeight = 'bold';
+        xpNotification.style.fontSize = '20px';
+        xpNotification.style.textShadow = '0 0 5px rgba(255, 215, 0, 0.7)';
+        xpNotification.style.zIndex = '1200';
+        xpNotification.style.opacity = '0';
+        xpNotification.style.transform = 'translateY(0)';
+        xpNotification.style.transition = 'opacity 0.3s ease-in, transform 1s ease-out';
+        document.body.appendChild(xpNotification);
+        
+        // Fade in and float up
+        setTimeout(() => {
+            xpNotification.style.opacity = '1';
+            xpNotification.style.transform = 'translateY(-30px)';
+        }, 50);
+        
+        // Fade out and remove
+        setTimeout(() => {
+            xpNotification.style.opacity = '0';
+            setTimeout(() => xpNotification.remove(), 500);
+        }, 2000);
+        
+        // If level up occurred, show a level up notification
+        if (levelUp && newLevel) {
+            this.showNotification(`Level up! You are now level ${newLevel}`, 3000, 'yellow');
+        }
     }
 } 
