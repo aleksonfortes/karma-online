@@ -1586,7 +1586,66 @@ export class UIManager {
             setTimeout(() => {
                 this.deathScreen.container.style.display = 'none';
             }, 500);
+            
+            // Clear any damage effects/indicators that might still be visible
+            this.clearDamageEffects();
         }
+    }
+    
+    /**
+     * Clear any damage effects or indicators from the scene
+     */
+    clearDamageEffects() {
+        // Remove any damage effect elements from the DOM
+        const damageElements = document.querySelectorAll('.damage-effect, .damage-indicator');
+        damageElements.forEach(element => {
+            element.remove();
+        });
+        
+        // Also clear any red flash overlay
+        if (this.damageOverlay) {
+            this.damageOverlay.style.opacity = '0';
+            setTimeout(() => {
+                this.damageOverlay.style.display = 'none';
+            }, 300);
+        }
+        
+        // Note: This method only clears visual effects, not actual health data
+        // The server remains the authority for player health values
+    }
+
+    /**
+     * Creates a red flash effect overlay to indicate player damage
+     */
+    flashDamageEffect() {
+        // Create damage overlay if it doesn't exist
+        if (!this.damageOverlay) {
+            this.damageOverlay = document.createElement('div');
+            this.damageOverlay.style.position = 'fixed';
+            this.damageOverlay.style.top = '0';
+            this.damageOverlay.style.left = '0';
+            this.damageOverlay.style.width = '100%';
+            this.damageOverlay.style.height = '100%';
+            this.damageOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+            this.damageOverlay.style.zIndex = '1500';
+            this.damageOverlay.style.pointerEvents = 'none'; // Allow click-through
+            this.damageOverlay.style.transition = 'opacity 0.3s ease-out';
+            this.damageOverlay.style.opacity = '0';
+            document.body.appendChild(this.damageOverlay);
+        }
+        
+        // Make sure it's visible
+        this.damageOverlay.style.display = 'block';
+        
+        // Flash effect
+        this.damageOverlay.style.opacity = '0.5';
+        
+        // Fade out after short delay
+        setTimeout(() => {
+            if (this.damageOverlay) {
+                this.damageOverlay.style.opacity = '0';
+            }
+        }, 200);
     }
 
     /**

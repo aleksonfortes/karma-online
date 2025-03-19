@@ -695,119 +695,102 @@ export class PlayerManager {
     handlePlayerDeath(player) {
         if (!player) return;
         
+        console.log(`==== PLAYER DEATH HANDLING ====`);
         console.log(`Handling death for player: ${player.userData.id || 'unknown'}`);
         
-        // Visual changes for dead player
-        player.traverse((child) => {
-            if (child.isMesh && child.material) {
-                child.material.transparent = true;
-                child.material.opacity = 0.5;
-            }
-        });
+        // Save original player position for debugging
+        const deathPosition = {
+            x: player.position.x,
+            y: player.position.y,
+            z: player.position.z
+        };
+        console.log(`Player death position: ${JSON.stringify(deathPosition)}`);
         
-        // If this is the local player, show death UI
+        // Mark player as dead immediately to prevent further interaction
+        player.userData.isDead = true;
+        
+        // IMPORTANT: Make player completely invisible immediately so monsters can't see/target them
+        player.visible = false;
+        console.log('Made player invisible at death location');
+        
+        // Track death count
+        if (!player.userData.deathCount) {
+            player.userData.deathCount = 0;
+        }
+        player.userData.deathCount++;
+        console.log(`Player death count increased to: ${player.userData.deathCount}`);
+        
+        // If this is the local player, show death UI and handle game state
         if (player === this.game.localPlayer) {
+            console.log('Local player died - updating game state and UI');
+            
+            // Update game state
             this.game.isAlive = false;
             
-            // Show notification
-            if (this.game.uiManager) {
-                this.game.uiManager.showNotification('You have died! Respawning in ' + (this.respawnDelay / 1000) + ' seconds...', '#ff0000');
-                
-                // Show death screen
-                if (this.game.uiManager.showDeathScreen) {
-                    this.game.uiManager.showDeathScreen();
+            // Track death in player stats if available
+            if (this.game.playerStats) {
+                if (!this.game.playerStats.deaths) {
+                    this.game.playerStats.deaths = 0;
                 }
+                this.game.playerStats.deaths++;
+                console.log(`Death count in player stats updated: ${this.game.playerStats.deaths}`);
             }
             
-            // The respawn will now be handled by the UI's countdown timer
-            // No need to set a timeout here as the UI will call respawnPlayer when ready
+            // Disable controls while dead
+            if (this.game.controlsManager && this.game.controlsManager.disableControls) {
+                this.game.controlsManager.disableControls();
+                console.log('Disabled player controls');
+            }
+            
+            // Show death notification and UI
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('You have died! Respawning soon...', '#ff0000');
+                
+                if (this.game.uiManager.showDeathScreen) {
+                    this.game.uiManager.showDeathScreen();
+                    console.log('Showed death screen with countdown');
+                }
+            }
         }
+        console.log(`==== END PLAYER DEATH HANDLING ====`);
     }
     
     respawnPlayer(player) {
         if (!player) return;
         
-        // Reset player stats
-        if (player.userData.stats) {
-            player.userData.stats.currentLife = player.userData.stats.maxLife;
-            this.updatePlayerLife(player, player.userData.stats.currentLife, player.userData.stats.maxLife);
-        }
+        console.log(`==== PLAYER RESPAWN INITIATED ====`);
         
-        // Visual changes for respawned player
-        player.traverse((child) => {
-            if (child.isMesh && child.material) {
-                child.material.transparent = false;
-                child.material.opacity = 1.0;
-            }
-        });
+        // Current player position (should be far below ground)
+        console.log(`Player position before respawn: ${JSON.stringify({
+            x: player.position.x,
+            y: player.position.y,
+            z: player.position.z
+        })}`);
         
-        // Remove any death effect spheres that might be around the player
-        // This removes the blue circle that appears when a player dies
-        if (player.userData.deathEffectSphere) {
-            this.game.scene.remove(player.userData.deathEffectSphere);
-            player.userData.deathEffectSphere = null;
-        }
-        
-        // Also look for any generic blue sphere-like objects attached to or near the player
-        // Use a unique name to identify blue spheres in the scene that might be death effects
-        this.game.scene.traverse((object) => {
-            if (object.userData.isDeathEffect || 
-                (object.type === 'Mesh' && 
-                 object.geometry && 
-                 object.geometry.type.includes('Sphere') && 
-                 object.material && 
-                 object.material.color && 
-                 object.material.color.b > 0.7)) {
-                
-                // Calculate distance to the player
-                const distance = player.position.distanceTo(object.position);
-                
-                // If this sphere is close to the player, it's likely the death effect
-                if (distance < 5) {
-                    console.log('Removing death effect sphere');
-                    this.game.scene.remove(object);
-                }
-            }
-        });
+        // Keep player invisible until server confirms respawn with temple position
+        // The player will become visible only after being properly teleported to temple
+        player.visible = false;
+        console.log('Player kept invisible during respawn process');
         
         // For local player, request respawn position from server
         if (player === this.game.localPlayer) {
+            console.log('Requesting respawn from server');
             this.game.networkManager.socket.emit('requestRespawn');
             
-            // Set temporary position until server responds
-            player.position.set(
-                GameConstants.PLAYER.DEFAULT_POSITION.x,
-                GameConstants.PLAYER.DEFAULT_POSITION.y,
-                GameConstants.PLAYER.DEFAULT_POSITION.z
-            );
-        }
-        // For network players, position will be updated by server
-        
-        // Reset rotation
-        player.rotation.set(0, 0, 0);
-        
-        // If this is the local player, handle respawn UI
-        if (player === this.game.localPlayer) {
-            this.game.isAlive = true;
+            // NOTE: The NetworkManager.respawnConfirmed event handler will:
+            // 1. Teleport player to temple
+            // 2. Reset camera position
+            // 3. Make player visible at temple
+            // 4. Update UI
             
-            // Hide death screen
+            // Clear death screen UI
             if (this.game.uiManager) {
                 this.game.uiManager.hideDeathScreen();
-            }
-            
-            // Notify server
-            if (this.game.socket && this.game.socket.connected) {
-                this.game.socket.emit('playerRespawn', {
-                    id: this.game.socket.id,
-                    position: {
-                        x: player.position.x,
-                        y: player.position.y,
-                        z: player.position.z
-                    },
-                    stats: player.userData.stats
-                });
+                console.log('Hiding death screen');
             }
         }
+        
+        console.log(`==== PLAYER RESPAWN REQUEST SENT ====`);
     }
     
     checkCollision(newPosition, previousPosition) {

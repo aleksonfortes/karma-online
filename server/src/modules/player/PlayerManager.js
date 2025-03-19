@@ -135,8 +135,8 @@ export class PlayerManager {
 
     /**
      * Handle player death
-     * @param {string} socketId - The socket ID of the player who died
-     * @param {string} killerId - The socket ID of the player who killed them (optional)
+     * @param {string} socketId - ID of the player who died
+     * @param {string} killerId - ID of the entity that killed the player (can be null)
      */
     handlePlayerDeath(socketId, killerId = null) {
         const player = this.getPlayer(socketId);
@@ -146,7 +146,16 @@ export class PlayerManager {
         player.isDead = true;
         player.life = 0;
         
-        console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''}`);
+        // Also mark as invulnerable while dead to prevent further damage
+        player.isInvulnerable = true;
+        
+        // Track death count
+        if (!player.deathCount) {
+            player.deathCount = 0;
+        }
+        player.deathCount++;
+        
+        console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''} (Death #${player.deathCount})`);
         
         // Schedule respawn
         setTimeout(() => {
@@ -166,10 +175,26 @@ export class PlayerManager {
         player.isDead = false;
         player.life = player.maxLife || GameConstants.PLAYER.DEFAULT_MAX_LIFE;
         
-        // Reset player position to spawn point
-        player.position = { ...GameConstants.PLAYER.SPAWN_POSITION };
+        // Apply invulnerability for a few seconds after respawn to prevent spawn camping
+        player.isInvulnerable = true;
         
-        console.log(`Player ${socketId} respawned`);
+        // Reset player position to temple spawn point with exact coordinates
+        player.position = { 
+            x: GameConstants.PLAYER.SPAWN_POSITION.x,
+            y: GameConstants.PLAYER.SPAWN_POSITION.y,
+            z: GameConstants.PLAYER.SPAWN_POSITION.z
+        };
+        
+        console.log(`Player ${socketId} respawned in temple at position:`, player.position);
+        
+        // Remove temporary invulnerability after 3 seconds
+        setTimeout(() => {
+            const updatedPlayer = this.getPlayer(socketId);
+            if (updatedPlayer) {
+                updatedPlayer.isInvulnerable = false;
+                console.log(`Player ${socketId} is no longer invulnerable after respawn`);
+            }
+        }, 3000);
     }
 }
 

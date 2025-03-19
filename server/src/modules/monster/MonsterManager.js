@@ -294,6 +294,11 @@ export class MonsterManager {
                 monster.targetPlayerId = null;
             }
             
+            // Reset isAttacking flag if attack animation is complete
+            if (monster.isAttacking && currentTime >= monster.attackAnimationEndTime) {
+                monster.isAttacking = false;
+            }
+            
             // Skip movement and new targeting if monster is currently playing attack animation
             if (monster.isAttacking && currentTime < monster.attackAnimationEndTime) {
                 return;
@@ -304,47 +309,72 @@ export class MonsterManager {
             if (monster.targetPlayerId) {
                 targetPlayer = players[monster.targetPlayerId];
                 
-                // If target player is no longer in the game or is dead, clear target
-                if (!targetPlayer || targetPlayer.health <= 0 || targetPlayer.isDead) {
+                // Comprehensive target check - clear target in any of these cases:
+                // 1. Player no longer exists
+                // 2. Player is dead (isDead flag)
+                // 3. Player has no health
+                // 4. Player is invisible
+                // 5. Player is in the temple
+                if (!targetPlayer || 
+                    targetPlayer.isDead || 
+                    targetPlayer.life <= 0 || 
+                    targetPlayer.health <= 0 ||
+                    targetPlayer.isInvulnerable ||
+                    targetPlayer.visible === false) {
+                    console.log(`Monster ${monster.id} cleared target ${monster.targetPlayerId} (player dead, invisible, or missing)`);
                     monster.targetPlayerId = null;
                     targetPlayer = null;
-                } else {
+                    monster.isReturningToSpawn = true;
+                } else if (targetPlayer.position && this.isInTemple(targetPlayer.position)) {
                     // Check if target player is in temple area - if so, clear target
-                    if (targetPlayer.position && this.isInTemple(targetPlayer.position)) {
+                    console.log(`Monster ${monster.id} cleared target ${monster.targetPlayerId} (player in temple)`);
+                    monster.targetPlayerId = null;
+                    targetPlayer = null;
+                    // Set leashing flag to return to spawn
+                    monster.isReturningToSpawn = true;
+                } else {
+                    // Check if target player has run away beyond aggro radius
+                    const dx = targetPlayer.position.x - monster.position.x;
+                    const dz = targetPlayer.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    if (distance > aggroRadius * 1.5) { // 1.5x aggro radius for leashing
+                        console.log(`Monster ${monster.id} cleared target ${monster.targetPlayerId} (player out of aggro range)`);
                         monster.targetPlayerId = null;
                         targetPlayer = null;
                         // Set leashing flag to return to spawn
                         monster.isReturningToSpawn = true;
-                    } else {
-                        // Check if target player has run away beyond aggro radius
-                        const dx = targetPlayer.position.x - monster.position.x;
-                        const dz = targetPlayer.position.z - monster.position.z;
-                        const distance = Math.sqrt(dx * dx + dz * dz);
-                        
-                        // If player has moved beyond 1.5x the aggro radius, stop following
-                        if (distance > aggroRadius * 1.5) {
-                            monster.targetPlayerId = null;
-                            targetPlayer = null;
-                            // Set leashing flag to return to spawn
-                            monster.isReturningToSpawn = true;
-                        } else if (distance <= attackRange) {
-                            // Player is in attack range - attack them!
-                            this.attackPlayer(monster.id, targetPlayer.id, playerManager);
-                        }
+                    } else if (distance <= attackRange && !monster.isAttacking) {
+                        // Player is in attack range - attack them
+                        this.attackPlayer(monster.id, targetPlayer.id, playerManager);
                     }
                 }
             }
             
-            // If no target player, find closest player within aggro radius
+            // Find a new target if we don't have one
             if (!targetPlayer && !monster.isReturningToSpawn) {
+                // Calculate closest player
                 let closestPlayer = null;
                 let closestDistance = Infinity;
                 
-                Object.values(players).forEach(player => {
-                    // Skip dead players
-                    if (player.health <= 0 || player.isDead) return;
+                for (const [playerId, player] of Object.entries(players)) {
+                    // Skip players that are:
+                    // 1. Dead or have no health
+                    // 2. In the temple area
+                    // 3. Invulnerable
+                    // 4. Invisible
+                    if (player.health <= 0 || 
+                        player.life <= 0 || 
+                        player.isDead || 
+                        player.isInvulnerable || 
+                        player.visible === false) {
+                        continue;
+                    }
+                    
                     // Skip players in temple area
-                    if (player.position && this.isInTemple(player.position)) return;
+                    if (player.position && this.isInTemple(player.position)) {
+                        continue;
+                    }
                     
                     const dx = player.position.x - monster.position.x;
                     const dz = player.position.z - monster.position.z;
@@ -354,63 +384,12 @@ export class MonsterManager {
                         closestPlayer = player;
                         closestDistance = distance;
                     }
-                });
-                
-                // Set new target player if found
-                if (closestPlayer) {
-                    targetPlayer = closestPlayer;
-                    monster.targetPlayerId = closestPlayer.id;
-                    monster.isReturningToSpawn = false;
-                    
-                    // Check if player is already in attack range
-                    const dx = targetPlayer.position.x - monster.position.x;
-                    const dz = targetPlayer.position.z - monster.position.z;
-                    const distance = Math.sqrt(dx * dx + dz * dz);
-                    
-                    if (distance <= attackRange) {
-                        // Player is in attack range - attack them!
-                        this.attackPlayer(monster.id, targetPlayer.id, playerManager);
-                    }
                 }
-            }
-            // Even if returning to spawn, check for nearby players to engage
-            else if (!targetPlayer && monster.isReturningToSpawn) {
-                let closestPlayer = null;
-                let closestDistance = Infinity;
                 
-                Object.values(players).forEach(player => {
-                    // Skip dead players
-                    if (player.health <= 0 || player.isDead) return;
-                    // Skip players in temple area
-                    if (player.position && this.isInTemple(player.position)) return;
-                    
-                    const dx = player.position.x - monster.position.x;
-                    const dz = player.position.z - monster.position.z;
-                    const distance = Math.sqrt(dx * dx + dz * dz);
-                    
-                    // Use a slightly smaller aggro radius when returning to prevent constant back-and-forth
-                    const returningAggroRadius = aggroRadius * 0.8;
-                    if (distance < returningAggroRadius && distance < closestDistance) {
-                        closestPlayer = player;
-                        closestDistance = distance;
-                    }
-                });
-                
-                // Set new target player if found
                 if (closestPlayer) {
-                    targetPlayer = closestPlayer;
                     monster.targetPlayerId = closestPlayer.id;
-                    monster.isReturningToSpawn = false;
-                    
-                    // Check if player is already in attack range
-                    const dx = targetPlayer.position.x - monster.position.x;
-                    const dz = targetPlayer.position.z - monster.position.z;
-                    const distance = Math.sqrt(dx * dx + dz * dz);
-                    
-                    if (distance <= attackRange) {
-                        // Player is in attack range - attack them!
-                        this.attackPlayer(monster.id, targetPlayer.id, playerManager);
-                    }
+                    targetPlayer = closestPlayer;
+                    console.log(`Monster ${monster.id} acquired new target: ${closestPlayer.id}`);
                 }
             }
             
@@ -588,110 +567,100 @@ export class MonsterManager {
     }
     
     /**
-     * Attack a player
-     * @param {string} monsterId - ID of the monster attacking
-     * @param {string} playerId - ID of the player being attacked
-     * @param {Object} playerManager - Reference to the player manager
+     * Make a monster attack a player
+     * @param {string} monsterId - ID of the attacking monster
+     * @param {string} playerId - ID of the player to attack
+     * @param {Object} playerManager - Reference to the player manager to get the player
      */
     attackPlayer(monsterId, playerId, playerManager) {
         const monster = this.monsters.get(monsterId);
-        if (!monster || !monster.isAlive) return;
+        if (!monster) return;
         
         const player = playerManager.getPlayer(playerId);
         if (!player) return;
         
-        // Check if player is in temple area - if so, don't attack
-        if (player.position && this.isInTemple(player.position)) {
-            // Stop targeting this player since they're in a safe zone
+        // Comprehensive check to prevent attacks on:
+        // 1. Dead players (isDead flag)
+        // 2. Players with no health
+        // 3. Invulnerable players
+        // 4. Invisible players
+        // 5. Players in temple
+        if (player.isDead || 
+            player.isInvulnerable || 
+            player.life <= 0 || 
+            player.health <= 0 || 
+            player.visible === false) {
+            console.log(`Monster ${monsterId} cannot attack player ${playerId} (player is dead, invisible, or invulnerable)`);
+            
+            // Clear the monster's target since this player shouldn't be attacked
             monster.targetPlayerId = null;
+            monster.isReturningToSpawn = true;
             return;
         }
         
+        // Check if player is in temple area (safe zone)
+        if (player.position && this.isInTemple(player.position)) {
+            console.log(`Monster ${monsterId} cannot attack player ${playerId} (player is in temple)`);
+            monster.targetPlayerId = null;
+            monster.isReturningToSpawn = true;
+            return;
+        }
+        
+        // Check if monster is in attack range
+        const dx = player.position.x - monster.position.x;
+        const dz = player.position.z - monster.position.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
         const monsterConfig = GameConstants.MONSTER[monster.type];
+        const attackRange = monsterConfig.ATTACK_RANGE;
+        
+        if (distance > attackRange) {
+            return; // Too far to attack
+        }
+        
+        // Check if monster is on cooldown
         const currentTime = Date.now();
+        if (monster.lastAttackTime && currentTime - monster.lastAttackTime < monsterConfig.ATTACK_SPEED) {
+            return; // Still on cooldown
+        }
         
-        // Make sure we're not attacking too frequently
-        if (currentTime - monster.lastAttackTime < monsterConfig.ATTACK_SPEED) return;
-        
-        // Record that we're starting an attack
+        // Set attack animation
         monster.isAttacking = true;
-        monster.lastAttackTime = currentTime;
         monster.attackAnimationEndTime = currentTime + monsterConfig.ATTACK_ANIMATION_TIME;
+        monster.lastAttackTime = currentTime;
         
         // Calculate damage
-        const damage = monsterConfig.ATTACK_DAMAGE;
+        const damageAmount = monsterConfig.ATTACK_DAMAGE;
         
-        // Apply damage to player after the animation delay (simulate hit connecting)
-        setTimeout(() => {
-            // Verify player is still valid
-            const updatedPlayer = playerManager.getPlayer(playerId);
-            if (!updatedPlayer) return;
-            
-            // Verify monster is still valid
-            const updatedMonster = this.monsters.get(monsterId);
-            if (!updatedMonster || !updatedMonster.isAlive) return;
-            
-            // Check if player is now in temple area - if so, don't apply damage
-            if (updatedPlayer.position && this.isInTemple(updatedPlayer.position)) {
-                // Player moved into temple during attack animation, abort attack
-                updatedMonster.targetPlayerId = null;
-                updatedMonster.isAttacking = false;
-                return;
-            }
-            
-            // Apply damage to player
-            const previousLife = updatedPlayer.life || 100;
-            updatedPlayer.life = Math.max(0, previousLife - damage);
-            
-            console.log(`Monster ${monsterId} dealt ${damage} damage to player ${playerId}. Health: ${updatedPlayer.life}/${updatedPlayer.maxLife || 100}`);
-            
-            // Emit damage event to player
+        // Apply damage to player
+        player.life -= damageAmount;
+        if (player.life < 0) player.life = 0;
+        
+        // Notify client
+        if (this.gameManager && this.gameManager.io) {
             this.gameManager.io.to(playerId).emit('monsterDamage', {
-                monsterId: monsterId,
-                damage: damage,
-                health: updatedPlayer.life,
-                maxHealth: updatedPlayer.maxLife || 100
-            });
-            
-            // Check if player died
-            if (updatedPlayer.life <= 0) {
-                console.log(`Player ${playerId} was killed by monster ${monsterId}`);
-                
-                // Emit death event to player
-                this.gameManager.io.to(playerId).emit('playerDied', {
-                    killerId: monsterId,
-                    killerType: 'monster'
-                });
-                
-                // Handle player death on server
-                playerManager.handlePlayerDeath(playerId, monsterId);
-                
-                // Monster stops attacking this player
-                updatedMonster.targetPlayerId = null;
-            }
-            
-            // Broadcast damage effect to all players
-            this.gameManager.io.emit('damageEffect', {
-                sourceId: monsterId,
-                sourceType: 'monster',
                 targetId: playerId,
-                damage: damage,
-                skillName: 'monster_attack',
-                isCritical: false
+                monsterId: monsterId,
+                damage: damageAmount,
+                monsterType: monster.type
             });
             
-            // Broadcast health update to ALL players
+            // Broadcast health update to all players
             this.gameManager.io.emit('lifeUpdate', {
                 id: playerId,
-                life: updatedPlayer.life,
-                maxLife: updatedPlayer.maxLife || 100,
-                timestamp: Date.now(),
-                final: true
+                life: player.life,
+                maxLife: player.maxLife || 100,
+                timestamp: currentTime
             });
-            
-            // Attack animation is done
-            updatedMonster.isAttacking = false;
-        }, monsterConfig.ATTACK_ANIMATION_TIME);
+        }
+        
+        console.log(`Monster ${monsterId} attacked player ${playerId} for ${damageAmount} damage`);
+        
+        // Check if player died
+        if (player.life <= 0 && !player.isDead) {
+            // Handle player death through player manager
+            playerManager.handlePlayerDeath(playerId, monsterId);
+        }
     }
     
     /**
