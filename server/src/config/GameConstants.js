@@ -75,8 +75,9 @@ const GameConstants = {
             COLLISION_RADIUS: 1.0,
             MAX_HEALTH: 100,
             RESPAWN_TIME: 10000, // 10 seconds in milliseconds
-            MOVEMENT_SPEED: 2,
-            AGGRO_RADIUS: 8
+            MOVEMENT_SPEED: 1.5, // Units per second
+            AGGRO_RADIUS: 10,    // Detection radius in units
+            MAX_FOLLOW_DISTANCE: 30 // Maximum distance monster can be from spawn point
         }
     }
 };
