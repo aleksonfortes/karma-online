@@ -77,7 +77,12 @@ const GameConstants = {
             RESPAWN_TIME: 10000, // 10 seconds in milliseconds
             MOVEMENT_SPEED: 1.5, // Units per second
             AGGRO_RADIUS: 10,    // Detection radius in units
-            MAX_FOLLOW_DISTANCE: 30 // Maximum distance monster can be from spawn point
+            MAX_FOLLOW_DISTANCE: 30, // Maximum distance monster can be from spawn point
+            // Attack properties
+            ATTACK_DAMAGE: 10,         // Base damage per attack
+            ATTACK_RANGE: 2.0,         // Range at which monster can attack
+            ATTACK_SPEED: 2000,        // Milliseconds between attacks
+            ATTACK_ANIMATION_TIME: 500 // Milliseconds for attack animation
         }
     }
 };

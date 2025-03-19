@@ -859,23 +859,69 @@ export class NetworkManager {
         // Handle damage effect
         this.socket.on('damageEffect', (data) => {
             // Get the target player
-            const targetPlayer = this.game.playerManager.players.get(data.targetId);
+            let targetPlayer;
+            if (data.targetId === this.socket.id) {
+                targetPlayer = this.game.localPlayer;
+            } else {
+                targetPlayer = this.game.playerManager.players.get(data.targetId);
+            }
+            
             if (!targetPlayer) {
                 console.warn(`Target player not found for damage effect: ${data.targetId}`);
                 return;
             }
             
-            console.log(`Received damage effect:`, data);
+            // Prevent processing multiple damage effects in quick succession
+            if (targetPlayer.userData && targetPlayer.userData.processingDamageEffect) {
+                return;
+            }
             
-            // Set a flag to indicate we're processing a damage effect
-            targetPlayer.userData.processingDamageEffect = true;
+            // Mark player as processing damage effect
+            if (targetPlayer.userData) {
+                targetPlayer.userData.processingDamageEffect = true;
+                targetPlayer.userData.lastDamageTime = Date.now();
+            }
             
-            // Record the time of this damage effect to prevent immediate health corrections
-            targetPlayer.userData.lastDamageTime = Date.now();
+            // Get the source entity (player or monster)
+            let sourceEntity;
+            if (data.sourceType === 'monster') {
+                // Source is a monster
+                if (this.game.monsterManager) {
+                    const monster = this.game.monsterManager.getMonsterById(data.sourceId);
+                    if (monster) {
+                        sourceEntity = monster.mesh;
+                    }
+                }
+            } else {
+                // Source is a player (default)
+                if (data.sourceId === this.socket.id) {
+                    sourceEntity = this.game.localPlayer;
+                } else {
+                    sourceEntity = this.game.playerManager.players.get(data.sourceId);
+                }
+            }
             
-            // Show damage number if available
-            if (this.game.effectsManager && this.game.effectsManager.showDamageNumber) {
-                this.game.effectsManager.showDamageNumber(targetPlayer, data.damage, data.isCritical);
+            // Create visual effect between source and target
+            if (sourceEntity && targetPlayer && this.game.skillsManager) {
+                if (data.skillName === 'monster_attack') {
+                    // Monster attack effect
+                    this.game.skillsManager.createAttackEffect(targetPlayer, '#ff0000', 0.5);
+                } else {
+                    // Player skill effect
+                    this.game.skillsManager.createSkillEffect(
+                        data.skillName,
+                        sourceEntity.position,
+                        targetPlayer.position
+                    );
+                }
+                
+                // Create damage number
+                this.game.skillsManager.createDamageNumber(
+                    targetPlayer,
+                    data.damage,
+                    true,
+                    data.isCritical
+                );
             }
             
             // Update the health bar immediately with the expected new health
@@ -1068,6 +1114,49 @@ export class NetworkManager {
                 } else {
                     console.log('Monster manager not fully initialized yet, ignoring monster update');
                     // Updates can be safely ignored as they'll be included in the next full monster_data
+                }
+            }
+        });
+        
+        // Handle monster damage to player
+        this.socket.on('monsterDamage', (data) => {
+            console.log('Received monster damage event:', data);
+            
+            // Create visual damage effect
+            if (this.game.localPlayer && this.socket.id === data.targetId) {
+                // Flash the screen red for player damage
+                this.game.uiManager.flashDamageEffect();
+                
+                // Show damage number
+                if (this.game.skillsManager) {
+                    this.game.skillsManager.createDamageNumber(
+                        this.game.localPlayer, 
+                        data.damage, 
+                        true // Mark as received damage
+                    );
+                }
+                
+                // Show notification for significant damage
+                if (data.damage > 20) {
+                    this.game.uiManager.showNotification(
+                        `You received ${data.damage} damage from a monster!`, 
+                        '#ff3333'
+                    );
+                }
+                
+                // Update local player stats
+                if (this.game.playerStats) {
+                    // Apply damage to local stats
+                    this.game.playerStats.currentLife = data.health;
+                    this.game.playerStats.maxLife = data.maxHealth;
+                    
+                    // Update UI
+                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                }
+                
+                // Play hit sound
+                if (this.game.soundManager) {
+                    this.game.soundManager.playSound('player_hit');
                 }
             }
         });
