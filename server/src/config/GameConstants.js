@@ -82,8 +82,16 @@ const GameConstants = {
             ATTACK_DAMAGE: 10,         // Base damage per attack
             ATTACK_RANGE: 2.0,         // Range at which monster can attack
             ATTACK_SPEED: 2000,        // Milliseconds between attacks
-            ATTACK_ANIMATION_TIME: 500 // Milliseconds for attack animation
+            ATTACK_ANIMATION_TIME: 500, // Milliseconds for attack animation
+            EXPERIENCE_REWARD: 50      // Experience points rewarded when killed
         }
+    },
+    
+    // Experience and leveling system
+    EXPERIENCE: {
+        BASE_EXPERIENCE: 100,  // Base experience needed for level 2
+        SCALING_FACTOR: 1.5,   // How much more experience each level requires
+        MAX_LEVEL: 50          // Maximum player level
     }
 };
 

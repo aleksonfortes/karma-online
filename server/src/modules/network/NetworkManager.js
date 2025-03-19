@@ -495,6 +495,34 @@ export class NetworkManager {
                 }
             });
             
+            // Handle request for player state update
+            socket.on('requestStateUpdate', () => {
+                console.log(`Player ${socket.id} requested state update`);
+                
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    console.warn(`Player ${socket.id} not found for state update request`);
+                    return;
+                }
+                
+                // Send the complete player state including path and skills
+                socket.emit('playerState', {
+                    stats: {
+                        life: player.life,
+                        maxLife: player.maxLife || 100,
+                        mana: player.mana || 100,
+                        maxMana: player.maxMana || 100,
+                        karma: player.karma || 50,
+                        maxKarma: player.maxKarma || 100,
+                        experience: player.experience || 0,
+                        level: player.level || 1,
+                        path: player.path || null
+                    },
+                    path: player.path || null,
+                    skills: player.skills || []
+                });
+            });
+            
             // Set up a stats interval for this socket and store it for cleanup
             const statsInterval = setInterval(() => {
                 const player = this.playerManager.getPlayer(socket.id);
@@ -641,6 +669,8 @@ export class NetworkManager {
                     life: life,
                     maxLife: maxLife,
                     isDead: isDead,
+                    experience: player.experience || 0,
+                    level: player.level || 1,
                     // Add a unique update ID to prevent race conditions
                     updateId: `${playerId}-${Date.now()}`
                 });
