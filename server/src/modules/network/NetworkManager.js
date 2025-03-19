@@ -202,23 +202,42 @@ export class NetworkManager {
 
             // Handle skill use
             socket.on('useSkill', (data) => {
-                // Validate data
-                if (!data || !data.targetId || !data.skillName || !data.damage) {
-                    return;
+                if (!data || !data.targetId || !data.skillName) {
+                    return this.logSecurityEvent(`Invalid skill data from ${socket.id}`);
                 }
                 
                 // Get the player
                 const player = this.playerManager.getPlayer(socket.id);
                 if (!player) {
-                    console.warn(`Player ${socket.id} not found for skill ${data.skillName}`);
-                    return;
+                    return this.logSecurityEvent(`Player ${socket.id} not found for skill use`);
                 }
                 
                 // Get the target player
                 const targetPlayer = this.playerManager.getPlayer(data.targetId);
-                
                 if (!targetPlayer) {
                     console.warn(`Target player ${data.targetId} not found for skill ${data.skillName} by player ${socket.id}`);
+                    return;
+                }
+                
+                // Check if player or target is in temple area
+                const isPlayerInTemple = this.isPositionInTemple(player.position);
+                const isTargetInTemple = this.isPositionInTemple(targetPlayer.position);
+                
+                // Prevent attacks in temple safe zone
+                if (isTargetInTemple) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot attack players in temple safe zone'
+                    });
+                    return;
+                }
+                
+                // Prevent attacks from outside temple to inside temple
+                if (!isPlayerInTemple && isTargetInTemple) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Temple safe zone blocks your attack'
+                    });
                     return;
                 }
                 
@@ -508,6 +527,28 @@ export class NetworkManager {
                     return this.logSecurityEvent(`Monster ${data.monsterId} not found for attack_monster from ${socket.id}`);
                 }
                 
+                // Check if monster is in temple area
+                const isMonsterInTemple = this.isPositionInTemple(monster.position);
+                const isPlayerInTemple = this.isPositionInTemple(player.position);
+                
+                // Prevent attacks on monsters in temple safe zone
+                if (isMonsterInTemple) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot attack monsters in temple safe zone'
+                    });
+                    return;
+                }
+                
+                // Prevent attacks from outside temple to inside temple
+                if (!isPlayerInTemple && isMonsterInTemple) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Temple safe zone blocks your attack'
+                    });
+                    return;
+                }
+                
                 // Check if the monster is within range
                 const playerPos = player.position;
                 const monsterPos = monster.position;
@@ -730,6 +771,33 @@ export class NetworkManager {
         const dz = pos1.z - pos2.z;
         
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    /**
+     * Check if a position is in the temple area
+     */
+    isPositionInTemple(position) {
+        // Temple dimensions with buffer zone to ensure the edges are protected
+        const buffer = 1.5; // Buffer of 1.5 units around the temple
+        const baseHalfWidth = 15 + buffer; // 30/2 for base platform + buffer
+        const crossVerticalHalfWidth = 4 + buffer; // 8/2 for vertical part + buffer
+        const crossHorizontalHalfWidth = 12 + buffer; // 24/2 for horizontal part + buffer
+        const crossVerticalHalfLength = 12 + buffer; // 24/2 for vertical part + buffer
+        const crossHorizontalHalfLength = 4 + buffer; // 8/2 for horizontal part + buffer
+        
+        // Check if position is within base platform bounds
+        const isOnBase = Math.abs(position.x) <= baseHalfWidth && 
+                        Math.abs(position.z) <= baseHalfWidth;
+        
+        // Check if position is within cross vertical part
+        const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && 
+                            Math.abs(position.z) <= crossVerticalHalfLength;
+        
+        // Check if position is within cross horizontal part
+        const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
+                                Math.abs(position.z) <= crossHorizontalHalfLength;
+
+        return isOnBase || isOnVertical || isOnHorizontal;
     }
 }
 

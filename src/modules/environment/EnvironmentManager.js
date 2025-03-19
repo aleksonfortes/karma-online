@@ -409,26 +409,84 @@ export class EnvironmentManager {
 
     // Check if a position is on the temple platform
     isOnTemple(position) {
-        // Temple dimensions - EXACTLY matching the original implementation
-        const baseHalfWidth = 15; // 30/2 for base platform
-        const crossVerticalHalfWidth = 4; // 8/2 for vertical part
-        const crossHorizontalHalfWidth = 12; // 24/2 for horizontal part
-        const crossVerticalHalfLength = 12; // 24/2 for vertical part
-        const crossHorizontalHalfLength = 4; // 8/2 for horizontal part
+        // Temple dimensions with buffer zone to ensure the edges are protected
+        const buffer = 2.5; // Increased buffer from 1.5 to 2.5 for better coverage
         
-        // Check if position is within base platform bounds
-        const isOnBase = Math.abs(position.x) <= baseHalfWidth && 
-                        Math.abs(position.z) <= baseHalfWidth;
+        // Base safe zone dimensions
+        const baseHalfWidth = 15 + buffer; // 30/2 for base platform + buffer
+        const crossVerticalHalfWidth = 4 + buffer; // 8/2 for vertical part + buffer
+        const crossHorizontalHalfWidth = 12 + buffer; // 24/2 for horizontal part + buffer
+        const crossVerticalHalfLength = 12 + buffer; // 24/2 for vertical part + buffer
+        const crossHorizontalHalfLength = 4 + buffer; // 8/2 for horizontal part + buffer
         
-        // Check if position is within cross vertical part
-        const isOnVertical = Math.abs(position.x) <= crossVerticalHalfWidth && 
-                           Math.abs(position.z) <= crossVerticalHalfLength;
+        // Add a height check - temple protection should only extend to a reasonable height
+        const maxHeight = 15; // Protection extends 15 units up from ground
+        if (position.y > maxHeight) {
+            return false; // Position is too high to be protected by temple
+        }
         
-        // Check if position is within cross horizontal part
-        const isOnHorizontal = Math.abs(position.x) <= crossHorizontalHalfWidth && 
-                              Math.abs(position.z) <= crossHorizontalHalfLength;
+        // Instead of adjusting position, expand the safe zone to better match the visual temple
+        // First check the basic shape centered at origin
+        const isInBasicZone = (
+            // Base platform check
+            (Math.abs(position.x) <= baseHalfWidth && 
+             Math.abs(position.z) <= baseHalfWidth) ||
+            
+            // Cross vertical part check
+            (Math.abs(position.x) <= crossVerticalHalfWidth && 
+             Math.abs(position.z) <= crossVerticalHalfLength) ||
+            
+            // Cross horizontal part check
+            (Math.abs(position.x) <= crossHorizontalHalfWidth && 
+             Math.abs(position.z) <= crossHorizontalHalfLength)
+        );
+        
+        // If in basic zone, return true
+        if (isInBasicZone) {
+            return true;
+        }
+        
+        // Additional check for the northern section (z+) that needed the 2.5 offset
+        // This adds extra protection to the north side without affecting other sides
+        const northZ = position.z - 2.5; // Apply the 2.5 offset only to the north check
+        
+        const isInNorthZone = (
+            // North base check
+            (Math.abs(position.x) <= baseHalfWidth && 
+             Math.abs(northZ) <= baseHalfWidth) ||
+            
+            // North cross vertical part check
+            (Math.abs(position.x) <= crossVerticalHalfWidth && 
+             Math.abs(northZ) <= crossVerticalHalfLength) ||
+            
+            // North cross horizontal part check
+            (Math.abs(position.x) <= crossHorizontalHalfWidth && 
+             Math.abs(northZ) <= crossHorizontalHalfLength)
+        );
+        
+        return isInNorthZone;
+    }
 
-        return isOnBase || isOnVertical || isOnHorizontal;
+    // Check if a position is in the temple safe zone (same as isOnTemple)
+    isInTempleSafeZone(position) {
+        return this.isOnTemple(position);
+    }
+
+    // Check if an attack from outside the temple can reach inside the safe zone
+    // Returns true if the attack is protected (blocked) by the temple safe zone
+    isAttackBlockedByTemple(attackerPosition, targetPosition) {
+        // If the attacker is inside temple, attack is not blocked
+        if (this.isInTempleSafeZone(attackerPosition)) {
+            return false;
+        }
+        
+        // If the target is inside temple, attack is blocked
+        if (this.isInTempleSafeZone(targetPosition)) {
+            return true;
+        }
+        
+        // Otherwise, not blocked
+        return false;
     }
 
     // Get all statue colliders
@@ -473,7 +531,7 @@ export class EnvironmentManager {
     }
 
     update(delta) {
-        // No need for updates without ambient particles
+        // No need for updates
     }
     
     cleanup() {

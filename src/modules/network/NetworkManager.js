@@ -871,6 +871,15 @@ export class NetworkManager {
                 return;
             }
             
+            // Check if target is in temple safe zone - no damage effects in temple
+            if (this.game.environmentManager && 
+                this.game.environmentManager.isInTempleSafeZone && 
+                targetPlayer.position && 
+                this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
+                console.log('Target in temple safe zone - ignoring damage effect');
+                return; // Don't apply damage effects when target is in temple
+            }
+            
             // Prevent processing multiple damage effects in quick succession
             if (targetPlayer.userData && targetPlayer.userData.processingDamageEffect) {
                 return;
@@ -1125,6 +1134,15 @@ export class NetworkManager {
         // Handle monster damage to player
         this.socket.on('monsterDamage', (data) => {
             console.log('Received monster damage event:', data);
+            
+            // Check if player is in temple safe zone - no damage in temple
+            if (this.game.environmentManager && 
+                this.game.localPlayer && 
+                this.game.environmentManager.isInTempleSafeZone && 
+                this.game.environmentManager.isInTempleSafeZone(this.game.localPlayer.position)) {
+                console.log('Player in temple safe zone - ignoring monster damage');
+                return; // Don't apply damage when in temple
+            }
             
             // Create visual damage effect
             if (this.game.localPlayer && this.socket.id === data.targetId) {

@@ -70,7 +70,7 @@ const GameConstants = {
     // Monster configurations
     MONSTER: {
         BASIC: {
-            SPAWN_POSITION: { x: 15, y: 0, z: 15 }, // Position outside the temple area
+            SPAWN_POSITION: { x: 30, y: 0, z: 30 }, // Position further away from the temple area
             SCALE: 0.8,
             COLLISION_RADIUS: 1.0,
             MAX_HEALTH: 100,
