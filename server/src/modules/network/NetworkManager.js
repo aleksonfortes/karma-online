@@ -467,16 +467,12 @@ export class NetworkManager {
                 player.karma = Math.max(0, Math.min(player.maxKarma, data.karma));
                 player.maxKarma = data.maxKarma;
                 
-                // Update player path based on karma level
-                if (player.karma > player.maxKarma * 0.7) {
-                    player.path = "dark";
-                } else if (player.karma < player.maxKarma * 0.3) {
-                    player.path = "light";
-                } else {
-                    player.path = null;
-                }
+                // Don't update path based on karma - only preserve existing path
+                // Path is only changed through explicit choosePath event
                 
-                console.log(`Updated karma for player ${socket.id}: ${previousKarma} -> ${player.karma} (${player.path || 'neutral'} path)`);
+                // Log karma changes without modifying path
+                const pathStatus = player.path || 'neutral';
+                console.log(`Updated karma for player ${socket.id}: ${previousKarma} -> ${player.karma} (${pathStatus} path)`);
                 
                 // Update player effects based on new karma value
                 this.playerManager.updatePlayerEffects(player);
@@ -486,7 +482,7 @@ export class NetworkManager {
                     id: socket.id,
                     karma: player.karma,
                     maxKarma: player.maxKarma,
-                    path: player.path,
+                    path: player.path, // Send the preserved path, not an auto-calculated one
                     timestamp: Date.now()
                 });
             });

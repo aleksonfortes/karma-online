@@ -80,13 +80,14 @@ export class PlayerManager {
         // Create a new default player
         const defaultPlayer = this.createPlayer(socketId);
         
-        // Preserve only the ID and display name
+        // Preserve ID, display name, and path
         defaultPlayer.displayName = player.displayName;
+        defaultPlayer.path = player.path; // Preserve the player's chosen path
         
         // Replace the existing player with the reset player
         this.players.set(socketId, defaultPlayer);
         
-        console.log(`Player ${socketId} has been reset to default state`);
+        console.log(`Player ${socketId} has been reset to default state (preserving path: ${defaultPlayer.path})`);
         return defaultPlayer;
     }
 
@@ -186,6 +187,7 @@ export class PlayerManager {
         };
         
         console.log(`Player ${socketId} respawned in temple at position:`, player.position);
+        console.log(`Preserving player path during respawn: ${player.path}`);
         
         // Remove temporary invulnerability after 3 seconds
         setTimeout(() => {
