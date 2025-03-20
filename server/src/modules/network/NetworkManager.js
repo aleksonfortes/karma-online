@@ -295,6 +295,13 @@ export class NetworkManager {
                 
                 if (distance > skillRange) {
                     console.log(`Player ${socket.id} tried to attack ${data.targetId} but is out of range (${distance} > ${skillRange})`);
+                    // Send error message to client about range
+                    console.log(`Sending out of range error to client: ${socket.id}`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Target is out of range'
+                    });
+                    console.log('Error message sent, returning from useSkill handler');
                     return;
                 }
                 

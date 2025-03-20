@@ -399,8 +399,7 @@ export class TargetingManager {
      * This will clear the target if any of the following are true:
      * 1. The target is dead
      * 2. The target is invisible
-     * 3. The target is off-screen
-     * 4. The target no longer exists
+     * 3. The target no longer exists
      */
     validateCurrentTarget() {
         if (!this.currentTarget) {
@@ -440,110 +439,39 @@ export class TargetingManager {
                 );
             }
             
-            // Check if monster is off-screen (same check as for players)
-            if (camera) {
-                // Get monster position in screen space
-                const monsterPosition = new THREE.Vector3();
-                monster.mesh.getWorldPosition(monsterPosition);
+            // No longer clearing target if off-screen to maintain target for PVP combat
+        } else if (this.currentTarget.type === 'player') {
+            // For player targets, we need to look at the players Map in playerManager
+            const playerId = this.currentTarget.id;
+            const playerObject = this.game.playerManager.getPlayerById(playerId);
+            
+            // Check if the player still exists
+            if (!playerObject) {
+                console.log('Target no longer in scene, clearing target');
+                this.clearTarget();
+                return;
+            }
+            
+            // Update the target display with current player info - do this every validation check
+            // to ensure UI is always in sync with actual player health
+            if (this.game.uiManager && playerObject && playerObject.userData && playerObject.userData.stats) {
+                const stats = playerObject.userData.stats;
+                const health = stats.life || 0;
+                const maxHealth = stats.maxLife || 100;
                 
-                // Convert to normalized device coordinates (NDC)
-                monsterPosition.project(camera);
+                // Get player name from userData if available
+                const playerName = playerObject.userData.name || `Player ${playerId.substring(0, 6)}`;
                 
-                // Check if the monster is outside the view frustum
-                if (monsterPosition.x < -1.1 || monsterPosition.x > 1.1 || 
-                    monsterPosition.y < -1.1 || monsterPosition.y > 1.1 || 
-                    monsterPosition.z < -1 || monsterPosition.z > 1) {
-                    console.log('Monster target is off-screen, clearing target');
-                    this.clearTarget();
-                    return;
-                }
-                
-                // Check if monster is too far away
-                const playerPosition = this.game.localPlayer.position;
-                const distanceToTarget = playerPosition.distanceTo(monster.mesh.position);
-                const maxTargetDistance = 50; // Maximum distance to keep a target
-                
-                if (distanceToTarget > maxTargetDistance) {
-                    console.log('Monster target is too far away, clearing target');
-                    this.clearTarget();
-                    return;
-                }
+                this.game.uiManager.updateTargetDisplay(
+                    playerName,
+                    health,
+                    maxHealth,
+                    'player',
+                    1
+                );
             }
             
-            return;
-        }
-        
-        // Original validation logic for non-monster targets (players, NPCs)
-        const target = this.currentTarget.object;
-        
-        // Check if target still exists in the scene
-        if (!target.parent) {
-            console.log('Target no longer in scene, clearing target');
-            this.clearTarget();
-            return;
-        }
-        
-        // Check if target is dead (multiple checks to ensure we catch all cases)
-        if (target.userData) {
-            // Check direct stats
-            if (target.userData.stats && 
-                (target.userData.stats.currentLife <= 0 || 
-                 target.userData.stats.life <= 0)) {
-                console.log('Target has 0 health, clearing target');
-                this.clearTarget();
-                return;
-            }
-            
-            // Check isDead flag
-            if (target.userData.isDead === true) {
-                console.log('Target is marked as dead, clearing target');
-                this.clearTarget();
-                return;
-            }
-            
-            // Check game.isAlive for local player
-            if (this.game.localPlayer === target && this.game.isAlive === false) {
-                console.log('Local player is dead, clearing target');
-                this.clearTarget();
-                return;
-            }
-        }
-        
-        // Check if target is invisible
-        if (target.userData && target.userData.isInvisible) {
-            console.log('Target is invisible, clearing target');
-            this.clearTarget();
-            return;
-        }
-        
-        // Check if target is off-screen
-        if (camera) {
-            // Get target position in screen space
-            const targetPosition = new THREE.Vector3();
-            target.getWorldPosition(targetPosition);
-            
-            // Convert to normalized device coordinates (NDC)
-            targetPosition.project(camera);
-            
-            // Check if the target is outside the view frustum
-            if (targetPosition.x < -1.1 || targetPosition.x > 1.1 || 
-                targetPosition.y < -1.1 || targetPosition.y > 1.1 || 
-                targetPosition.z < -1 || targetPosition.z > 1) {
-                console.log('Target is off-screen, clearing target');
-                this.clearTarget();
-                return;
-            }
-            
-            // Check if target is too far away (optional, adjust distance as needed)
-            const playerPosition = this.game.localPlayer.position;
-            const distanceToTarget = playerPosition.distanceTo(target.position);
-            const maxTargetDistance = 50; // Maximum distance to keep a target
-            
-            if (distanceToTarget > maxTargetDistance) {
-                console.log('Target is too far away, clearing target');
-                this.clearTarget();
-                return;
-            }
+            // No longer clearing target if off-screen to maintain target for PVP combat
         }
     }
     
@@ -575,6 +503,32 @@ export class TargetingManager {
             return null;
         }
         return this.currentTarget.type;
+    }
+
+    /**
+     * Get the current target object
+     * @returns {Object|null} The current target object, or null if no target
+     */
+    getTargetObject() {
+        if (!this.currentTarget) {
+            return null;
+        }
+
+        // For player targets
+        if (this.currentTarget.type === 'player') {
+            const playerId = this.currentTarget.id;
+            return this.game.playerManager.getPlayerById(playerId);
+        }
+        
+        // For monster targets
+        if (this.currentTarget.type === 'monster') {
+            const monsterId = this.currentTarget.id;
+            const monster = this.game.monsterManager.getMonsterById(monsterId);
+            return monster?.mesh || null;
+        }
+        
+        // For any other target type, return the object directly
+        return this.currentTarget.object || null;
     }
 }
 

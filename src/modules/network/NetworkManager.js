@@ -27,6 +27,9 @@ export class NetworkManager {
             maxReconnectDelay: 30000
         };
         
+        // Store pending updates for players that haven't been created yet
+        this.pendingUpdates = new Map();
+        
         // Fix for monster manager waiting
         this.pendingMonsterData = null;
         this.monsterManagerCheckInterval = null;
@@ -2419,34 +2422,42 @@ export class NetworkManager {
     }
 
     /**
-     * Send a skill use request to the server
-     * @param {string} targetId - The ID of the target player or monster
+     * Use a skill and validate with the server
+     * @param {string} targetId - The ID of the target
      * @param {string} skillName - The name of the skill to use
-     * @param {number} damage - The amount of damage to deal
-     * @returns {Promise<boolean>} - Promise that resolves to true if skill was confirmed by server
+     * @param {number} damage - The damage the skill should do
+     * @returns {Promise} - A promise that resolves when the server confirms the skill
      */
     useSkill(targetId, skillName, damage = 0) {
         if (!this.connected || !this.socket) {
             console.warn('Cannot use skill: Not connected to server');
-            return Promise.resolve(false);
+            return Promise.resolve({ success: false, errorType: 'not_connected' });
         }
         
         if (!targetId || !skillName) {
             console.warn('Invalid skill parameters');
-            return Promise.resolve(false);
+            return Promise.resolve({ success: false, errorType: 'invalid_params' });
         }
+        
+        // Debugging info
+        console.log(`Attempting to use ${skillName} on target ${targetId} with damage ${damage}`);
+        
+        // Track if we've already received damage feedback for this skill
+        let damageProcessed = false;
         
         // Return a promise that resolves when the server confirms the skill hit
         return new Promise((resolve) => {
             // Create a one-time listener for skill damage confirmation
             const confirmationListener = (data) => {
-                if (data.sourceId === this.socket.id && data.targetId === targetId) {
-                    // Remove the listener to prevent memory leaks
+                if (data.targetId === targetId && data.skillName === skillName) {
+                    // Clear timeout and remove listeners
+                    clearTimeout(timeout);
                     this.socket.off('skillDamage', confirmationListener);
+                    this.socket.off('errorMessage', errorListener);
                     
-                    // Server confirmed the skill hit!
-                    console.log(`Server confirmed ${skillName} skill hit on ${targetId}`);
-                    resolve(true);
+                    console.log(`Skill hit confirmed: ${skillName} on ${targetId} for ${data.damage} damage`);
+                    damageProcessed = true;
+                    resolve({ success: true });
                 }
             };
             
@@ -2460,22 +2471,66 @@ export class NetworkManager {
                     this.socket.off('skillDamage', confirmationListener);
                     this.socket.off('errorMessage', errorListener);
                     
-                    // Only mark as failed if this error is for this skill (check if mentions cooldown)
-                    resolve(false);
+                    // Clear the timeout since we received a response
+                    clearTimeout(timeout);
+                    
+                    // Don't resolve if damage was already processed
+                    if (!damageProcessed) {
+                        // Pass the specific error message to allow proper handling
+                        resolve({ success: false, errorType: data.message });
+                    }
                 }
             };
             
+            // Look for life update events - we might get these before skill confirmation
+            const lifeUpdateListener = (data) => {
+                if (data.id === targetId) {
+                    console.log(`Detected life update for target ${targetId} - likely from our skill use`);
+                    // Mark that damage was processed
+                    damageProcessed = true;
+                    
+                    // Since we've seen the damage effect, consider this a success
+                    // only if we haven't already resolved with an error
+                    setTimeout(() => {
+                        // If still waiting after a short delay, resolve as success
+                        if (!resolved) {
+                            clearTimeout(timeout);
+                            this.socket.off('skillDamage', confirmationListener);
+                            this.socket.off('errorMessage', errorListener);
+                            this.socket.off('lifeUpdate', lifeUpdateListener);
+                            resolve({ success: true });
+                            resolved = true;
+                        }
+                    }, 100);
+                }
+            };
+            
+            // Track if we've resolved the promise
+            let resolved = false;
+            
             // Set a timeout to resolve the promise in case we never get a confirmation
             const timeout = setTimeout(() => {
-                this.socket.off('skillDamage', confirmationListener);
-                this.socket.off('errorMessage', errorListener);
-                console.log('No server response for skill use, assuming failed');
-                resolve(false);
-            }, 1000); // 1 second timeout
+                if (!resolved) {
+                    this.socket.off('skillDamage', confirmationListener);
+                    this.socket.off('errorMessage', errorListener);
+                    this.socket.off('lifeUpdate', lifeUpdateListener);
+                    console.log('No server response for skill use, assuming failed');
+                    
+                    // If we've already processed damage, consider this a success despite timeout
+                    if (damageProcessed) {
+                        console.log('Damage was processed, considering skill use successful despite timeout');
+                        resolve({ success: true });
+                    } else {
+                        resolve({ success: false, errorType: 'timeout' });
+                    }
+                    resolved = true;
+                }
+            }, 2000); // 2 second timeout (increased from 1 second)
             
             // Add the listeners
             this.socket.on('skillDamage', confirmationListener);
             this.socket.on('errorMessage', errorListener);
+            this.socket.on('lifeUpdate', lifeUpdateListener);
             
             try {
                 // Send the skill use event to the server
@@ -2491,8 +2546,103 @@ export class NetworkManager {
                 clearTimeout(timeout);
                 this.socket.off('skillDamage', confirmationListener);
                 this.socket.off('errorMessage', errorListener);
-                resolve(false);
+                this.socket.off('lifeUpdate', lifeUpdateListener);
+                resolved = true;
+                resolve({ success: false, errorType: 'client_error' });
             }
         });
+    }
+
+    /**
+     * Apply any pending updates for a player
+     * @param {string} playerId - The ID of the player to apply updates for
+     * @returns {boolean} - Whether any updates were applied
+     */
+    applyPendingUpdates(playerId) {
+        // Check if we have any pending updates for this player
+        if (!this.pendingUpdates || !this.pendingUpdates.has(playerId)) {
+            return false;
+        }
+        
+        // Get the player object
+        const player = this.game.playerManager.getPlayerById(playerId);
+        if (!player) {
+            console.warn(`Cannot apply pending updates: Player ${playerId} not found`);
+            return false;
+        }
+        
+        console.log(`Applying ${this.pendingUpdates.get(playerId).length} pending updates for player ${playerId}`);
+        
+        // Process all pending updates for this player
+        const updates = this.pendingUpdates.get(playerId);
+        for (const update of updates) {
+            if (update.type === 'lifeUpdate') {
+                if (!player.userData) player.userData = {};
+                if (!player.userData.stats) player.userData.stats = {};
+                
+                player.userData.stats.life = update.data.life;
+                player.userData.stats.maxLife = update.data.maxLife;
+                
+                // Update health bar if possible
+                if (this.game.playerManager.updateHealthBar) {
+                    this.game.playerManager.updateHealthBar(player);
+                }
+            } else if (update.type === 'manaUpdate') {
+                if (!player.userData) player.userData = {};
+                if (!player.userData.stats) player.userData.stats = {};
+                
+                player.userData.stats.mana = update.data.mana;
+                player.userData.stats.maxMana = update.data.maxMana;
+            } else if (update.type === 'position') {
+                // Apply position update
+                if (update.position) {
+                    player.position.x = update.position.x;
+                    player.position.y = update.position.y;
+                    player.position.z = update.position.z;
+                }
+                
+                // Apply rotation update if available
+                if (update.rotation) {
+                    player.rotation.y = update.rotation.y;
+                }
+            }
+        }
+        
+        // Clear pending updates for this player
+        this.pendingUpdates.delete(playerId);
+        
+        return true;
+    }
+    
+    /**
+     * Store an update for a player that hasn't been created yet
+     * @param {string} playerId - The ID of the player to store the update for
+     * @param {Object} update - The update data to store
+     * @returns {boolean} - Whether the update was stored
+     */
+    storePendingUpdate(playerId, update) {
+        // Initialize the updates array if it doesn't exist
+        if (!this.pendingUpdates.has(playerId)) {
+            this.pendingUpdates.set(playerId, []);
+        }
+        
+        // Add the update to the pending updates
+        this.pendingUpdates.get(playerId).push(update);
+        
+        console.log(`Stored pending update for player ${playerId}:`, update);
+        return true;
+    }
+
+    /**
+     * Get a player by ID
+     * @param {string} playerId - The ID of the player to get
+     * @returns {Object|null} - The player object or null if not found
+     */
+    getPlayerById(playerId) {
+        if (!playerId || !this.game.playerManager || !this.game.playerManager.players) {
+            return null;
+        }
+        
+        return this.game.playerManager.players.get(playerId) || null;
     }
 }

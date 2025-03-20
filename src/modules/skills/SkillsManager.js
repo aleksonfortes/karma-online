@@ -171,16 +171,47 @@ export class SkillsManager {
         this.lastAttemptedSkill = 'martial_arts';
         
         // Validate the skill use with the server
-        const skillConfirmed = await this.game.networkManager.useSkill(
+        const result = await this.game.networkManager.useSkill(
             targetId,
             'martial_arts',
             this.skills['martial_arts'].damage
         );
         
-        if (!skillConfirmed) {
+        if (!result.success) {
             console.log('Server rejected Martial Arts skill use');
+            
+            // Special error handling based on error type
+            if (result.errorType && result.errorType.includes('out of range')) {
+                // Handle out of range errors
+                console.log('Target is out of range for Martial Arts');
+                
+                // Get the target object for visual feedback
+                if (targetType === 'player') {
+                    const targetObject = this.game.playerManager.getPlayerById(targetId);
+                    if (targetObject) this.showRangeIndicator(targetObject);
+                } else if (targetType === 'monster') {
+                    const monster = this.game.monsterManager.getMonsterById(targetId);
+                    if (monster) this.showRangeIndicator(monster);
+                }
+                
+                // Don't apply cooldown for range errors
+                this.skills['martial_arts'].lastUsed = tempLastUsed;
+                return;
+            } else if (result.errorType === 'timeout') {
+                // Handle timeout errors
+                console.log('Server timeout for Martial Arts skill use');
+                this.handleServerTimeoutError();
+                
+                // Don't apply cooldown for timeout errors
+                this.skills['martial_arts'].lastUsed = tempLastUsed;
+                return;
+            }
+            
             // If the server rejected the skill, restore the previous cooldown
-            this.skills['martial_arts'].lastUsed = tempLastUsed;
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                this.skills['martial_arts'].lastUsed = tempLastUsed;
+            }
             return;
         }
         
@@ -221,7 +252,7 @@ export class SkillsManager {
             return;
         }
 
-        // Check if player has the dark path
+        // Check if player has the dark path - but skip in test environment
         const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
         if (!isTestEnvironment) {
             const playerPath = this.game.playerStats?.path || null;
@@ -231,7 +262,7 @@ export class SkillsManager {
             }
         }
 
-        // Check if target exists and is in range
+        // Check if target exists
         const targetId = this.game.targetingManager.getTargetId();
         const targetType = this.game.targetingManager.getTargetType();
         
@@ -243,7 +274,6 @@ export class SkillsManager {
         console.log(`Using Dark Strike on ${targetType} ${targetId}`);
         
         // Set a temporary cooldown to prevent spam clicking while waiting for server response
-        // This will be overwritten with the actual timestamp when the server confirms the skill use
         const tempLastUsed = this.skills['dark_strike'].lastUsed;
         this.skills['dark_strike'].lastUsed = Date.now();
         
@@ -251,16 +281,47 @@ export class SkillsManager {
         this.lastAttemptedSkill = 'dark_strike';
         
         // Validate the skill use with the server
-        const skillConfirmed = await this.game.networkManager.useSkill(
+        const result = await this.game.networkManager.useSkill(
             targetId,
             'dark_strike',
             this.skills['dark_strike'].damage
         );
         
-        if (!skillConfirmed) {
+        if (!result.success) {
             console.log('Server rejected Dark Strike skill use');
+            
+            // Special error handling based on error type
+            if (result.errorType && result.errorType.includes('out of range')) {
+                // Handle out of range errors
+                console.log('Target is out of range for Dark Strike');
+                
+                // Get the target object for visual feedback
+                if (targetType === 'player') {
+                    const targetObject = this.game.playerManager.getPlayerById(targetId);
+                    if (targetObject) this.showRangeIndicator(targetObject);
+                } else if (targetType === 'monster') {
+                    const monster = this.game.monsterManager.getMonsterById(targetId);
+                    if (monster) this.showRangeIndicator(monster);
+                }
+                
+                // Don't apply cooldown for range errors
+                this.skills['dark_strike'].lastUsed = tempLastUsed;
+                return;
+            } else if (result.errorType === 'timeout') {
+                // Handle timeout errors
+                console.log('Server timeout for Dark Strike skill use');
+                this.handleServerTimeoutError();
+                
+                // Don't apply cooldown for timeout errors
+                this.skills['dark_strike'].lastUsed = tempLastUsed;
+                return;
+            }
+            
             // If the server rejected the skill, restore the previous cooldown
-            this.skills['dark_strike'].lastUsed = tempLastUsed;
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                this.skills['dark_strike'].lastUsed = tempLastUsed;
+            }
             return;
         }
         
@@ -269,25 +330,22 @@ export class SkillsManager {
         // Clear the last attempted skill on success
         this.lastAttemptedSkill = null;
         
-        // Create the dark strike effect
-        this.createDarkStrikeEffect();
-        
         // Create appropriate effects based on target type
         if (targetType === 'player') {
-            // Apply damage to player target
+            // Visual effect for player target
             const targetPlayer = this.game.targetingManager.getTargetObject();
             if (targetPlayer) {
-                // For players, the server will handle the actual damage
-                // We just show visual effects
-                this.applyDamageEffect(targetPlayer, this.skills['dark_strike'].damage, 'dark_strike');
+                // Get player position for effect origin/destination
+                const localPlayerPosition = this.game.localPlayer.position.clone();
+                this.createDarkStrikeEffect(localPlayerPosition, targetPlayer.position);
             }
         } else if (targetType === 'monster') {
             // Handle monster target
             const monster = this.game.monsterManager.getMonsterById(targetId);
             if (monster && monster.mesh) {
-                // For monsters, the server will handle the actual damage
-                // We just show visual effects
-                this.applyDamageEffect(monster.mesh, this.skills['dark_strike'].damage, 'dark_strike');
+                // Get player position for effect origin
+                const localPlayerPosition = this.game.localPlayer.position.clone();
+                this.createDarkStrikeEffect(localPlayerPosition, monster.mesh.position);
             }
         }
     }
@@ -352,116 +410,114 @@ export class SkillsManager {
     }
     
     /**
-     * Create a visual effect for the Dark Strike skill
+     * Create a dark strike effect from the player to the target
+     * @param {THREE.Vector3} sourcePosition - Position of the source player
+     * @param {THREE.Vector3} targetPosition - Position of the target
      * @returns {Object} The created effect object
      */
-    createDarkStrikeEffect() {
-        if (!this.game.localPlayer || !this.game.scene) return null;
+    createDarkStrikeEffect(sourcePosition, targetPosition) {
+        if (!this.game.scene) return null;
         
-        // Get target position
-        const targetObject = this.game.targetingManager.getTargetObject();
-        if (!targetObject) return null;
+        // Clone positions to avoid modifying original vectors
+        const sourcePosClone = sourcePosition.clone();
+        const targetPosClone = targetPosition.clone();
         
-        // Store positions
-        const sourcePosition = this.game.localPlayer.position.clone();
-        sourcePosition.y += 1; // Aim from character's upper body
-        
-        const targetPosition = targetObject.position.clone();
-        targetPosition.y += 1; // Aim at target's upper body
+        // Adjust to aim from/at upper body
+        sourcePosClone.y += 1;
+        targetPosClone.y += 1;
         
         // Create the effect
-        const effectGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-        const effectMaterial = new THREE.MeshBasicMaterial({
-            color: 0x800080, // Purple color
+        const material = new THREE.MeshBasicMaterial({
+            color: 0x660066,
             transparent: true,
-            opacity: 0.9,
-            emissive: 0x400040,
-            emissiveIntensity: 2.0
+            opacity: 0.7
         });
         
-        const effect = new THREE.Mesh(effectGeometry, effectMaterial);
-        effect.position.copy(sourcePosition);
+        // Direction from source to target
+        const direction = new THREE.Vector3().subVectors(targetPosClone, sourcePosClone).normalize();
         
-        // Add a glowing effect with a larger sphere
-        const glowGeometry = new THREE.SphereGeometry(0.5, 16, 16);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-            color: 0x800080,
-            transparent: true,
-            opacity: 0.3
-        });
+        // Calculate the length of the beam
+        const distance = sourcePosClone.distanceTo(targetPosClone);
         
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        effect.add(glow);
+        // Calculate the mid point for the beam origin
+        const midPoint = new THREE.Vector3().addVectors(
+            sourcePosClone,
+            direction.clone().multiplyScalar(distance * 0.5) // Start from the middle
+        );
         
-        this.game.scene.add(effect);
+        // Create a cylinder for the beam
+        const geometry = new THREE.CylinderGeometry(0.05, 0.15, distance, 8, 1, false);
         
-        // Calculate direction vector from player to target
-        const direction = new THREE.Vector3()
-            .subVectors(targetPosition, sourcePosition)
-            .normalize();
+        // Rotate the cylinder to point from source to target
+        geometry.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
         
-        // Calculate distance
-        const distance = sourcePosition.distanceTo(targetPosition);
+        const beam = new THREE.Mesh(geometry, material);
         
-        // Speed of the projectile
-        const speed = 15; // units per second
+        // Position the beam at the midpoint between source and target
+        beam.position.copy(midPoint);
         
-        // Duration based on distance and speed
-        const duration = distance / speed;
-        const startTime = Date.now() / 1000; // Convert to seconds
+        // Orient the beam to point from source to target
+        beam.lookAt(targetPosClone);
         
-        // Store the effect for cleanup purposes
-        this.activeEffects = this.activeEffects || [];
-        this.activeEffects.push({
-            mesh: effect,
-            dispose: () => {
-                this.game.scene.remove(effect);
-                effectGeometry.dispose();
-                effectMaterial.dispose();
-                glowGeometry.dispose();
-                glowMaterial.dispose();
-            }
-        });
+        // Add the beam to the scene
+        this.game.scene.add(beam);
         
-        // Animation function
+        // Setup animation properties
+        beam.userData = {
+            lifetime: 0,
+            maxLifetime: 600, // in milliseconds
+            originalOpacity: 0.7,
+            sourcePosition: sourcePosClone,
+            targetPosition: targetPosClone,
+            direction: direction,
+            distance: distance
+        };
+        
+        // Add to active effects
+        this.game.activeEffects.add(beam);
+        
+        // Setup the animation
         const animate = () => {
-            const currentTime = Date.now() / 1000;
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1.0);
+            if (!beam.userData) return;
             
-            // Linear interpolation between source and target
-            effect.position.lerpVectors(sourcePosition, targetPosition, progress);
+            beam.userData.lifetime += 16; // ~60fps
+            const progress = beam.userData.lifetime / beam.userData.maxLifetime;
             
-            // Pulse the glow effect
-            const pulseScale = 1 + 0.2 * Math.sin(elapsed * 10);
-            glow.scale.set(pulseScale, pulseScale, pulseScale);
-            
-            // If we've reached the target, remove the effect
             if (progress >= 1.0) {
                 // Flash the target
-                this.createAttackEffect(targetObject);
+                const targetPosition = beam.userData.targetPosition;
+                this.createAttackEffect({ position: targetPosition });
                 
                 // Remove this effect from the scene
-                this.game.scene.remove(effect);
-                effectGeometry.dispose();
-                effectMaterial.dispose();
-                glowGeometry.dispose();
-                glowMaterial.dispose();
+                this.game.scene.remove(beam);
+                this.game.activeEffects.delete(beam);
                 
-                // Remove from active effects
-                const index = this.activeEffects.findIndex(e => e.mesh === effect);
-                if (index !== -1) {
-                    this.activeEffects.splice(index, 1);
-                }
+                // Dispose of geometries and materials
+                beam.geometry.dispose();
+                beam.material.dispose();
                 
                 return;
+            }
+            
+            // Animate the beam - make it pulse
+            const pulsePhase = (beam.userData.lifetime / 100) % 1;
+            const pulseScale = 0.8 + 0.4 * Math.sin(pulsePhase * Math.PI * 2);
+            
+            beam.scale.set(pulseScale, 1, pulseScale);
+            
+            // Also fade out over time
+            if (progress > 0.7) {
+                const fadeProgress = (progress - 0.7) / 0.3; // Remap 0.7-1.0 to 0-1
+                beam.material.opacity = beam.userData.originalOpacity * (1 - fadeProgress);
             }
             
             requestAnimationFrame(animate);
         };
         
+        // Start animation
         animate();
-        return effect;
+        
+        return beam;
     }
     
     findTargetsInRange(range) {
@@ -700,21 +756,31 @@ export class SkillsManager {
     }
     
     /**
-     * Initialize event handlers for error messages related to skills
+     * Display the error for a timeout (server not responding)
      */
-    initializeErrorHandlers() {
-        if (!this.game.networkManager || !this.game.networkManager.socket) {
-            console.warn('Cannot set up skill error handlers: Network manager not available');
-            return;
+    handleServerTimeoutError() {
+        console.log("Server did not respond to skill use - connection may be unstable");
+        
+        // Show notification to player
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('Server connection issue - try again', '#ff9900');
         }
         
+        // Just show a simple message
+        this.showErrorMessage("Server did not respond - try again");
+    }
+    
+    /**
+     * Initialize error handlers for skills
+     */
+    initializeErrorHandlers() {
         // Track last used skill for error handling
         this.lastAttemptedSkill = null;
         
         // Handle error messages from server
         this.game.networkManager.socket.on('errorMessage', (data) => {
             if (data.type === 'combat') {
-                console.log(`Combat error: ${data.message}`);
+                console.log(`Combat error received: ${data.message}`);
                 
                 // Show error message to player
                 this.showErrorMessage(data.message);
@@ -740,10 +806,25 @@ export class SkillsManager {
                         // Generic cooldown handling if we don't know which skill
                         this.handleCooldownError();
                     }
+                } else if (data.message.includes('out of range')) {
+                    console.log('Server reports target is out of range');
+                    
+                    // Only handle range errors if we have a last attempted skill
+                    if (this.lastAttemptedSkill) {
+                        // Get the skill that was attempted
+                        const skillId = this.lastAttemptedSkill;
+                        const skill = this.skills[skillId];
+                        
+                        if (skill) {
+                            // Don't apply cooldown for range errors
+                            console.log(`Removing cooldown for ${skillId} since target is out of range`);
+                            skill.lastUsed = 0;
+                        }
+                    }
+                    
+                    this.handleRangeError();
                 } else if (data.message.includes('temple safe zone')) {
                     this.handleSafeZoneError();
-                } else if (data.message.includes('out of range')) {
-                    this.handleRangeError();
                 }
             }
         });
@@ -1279,38 +1360,81 @@ export class SkillsManager {
     }
     
     /**
-     * Create a visual attack effect on a target
-     * @param {THREE.Object3D} target - The target object
+     * Create an attack effect at the target position
+     * @param {Object|THREE.Vector3} target - The target object or position
+     * @param {string} color - The color of the effect (default: #ff0000)
+     * @param {number} duration - Duration of the effect in seconds (default: 0.3)
+     * @returns {Object} The created effect
      */
-    createAttackEffect(target) {
-        if (!target) {
-            console.warn('Cannot create attack effect: Target is undefined');
-            return;
+    createAttackEffect(target, color = '#ff0000', duration = 0.3) {
+        if (!this.game.scene) return null;
+        
+        // Get the target position
+        let targetPosition;
+        
+        if (target.position) {
+            // If target is an object with a position property
+            targetPosition = target.position.clone();
+        } else if (target.x !== undefined && target.y !== undefined && target.z !== undefined) {
+            // If target is a position vector
+            targetPosition = new THREE.Vector3(target.x, target.y, target.z);
+        } else {
+            console.warn('Invalid target for attack effect', target);
+            return null;
         }
         
-        // Find the character model's material
-        let characterMaterial;
-        target.traverse((child) => {
-            if (child.isMesh && child.material) {
-                characterMaterial = child.material;
-            }
+        // Create a sphere for the hit effect
+        const effectGeometry = new THREE.SphereGeometry(0.5, 8, 8);
+        const effectMaterial = new THREE.MeshBasicMaterial({
+            color: new THREE.Color(color),
+            transparent: true,
+            opacity: 0.8,
+            depthTest: false
         });
         
-        // Flash the target red
-        if (characterMaterial) {
-            // Store original color
-            const originalColor = characterMaterial.color ? characterMaterial.color.clone() : new THREE.Color(0xffffff);
+        const effect = new THREE.Mesh(effectGeometry, effectMaterial);
+        
+        // Position the effect at the target
+        effect.position.copy(targetPosition);
+        
+        // Add to scene
+        this.game.scene.add(effect);
+        
+        // Store the start time for animation
+        const startTime = Date.now();
+        const maxLifetime = duration * 1000; // Convert to milliseconds
+        
+        // Setup animation to make it pulse and fade
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = elapsed / maxLifetime;
             
-            // Set to red
-            characterMaterial.color = new THREE.Color(0xff0000);
+            if (progress >= 1.0) {
+                // Remove when animation is complete
+                this.game.scene.remove(effect);
+                
+                // Dispose resources
+                effectGeometry.dispose();
+                effectMaterial.dispose();
+                
+                return;
+            }
             
-            // Restore original color after a delay
-            setTimeout(() => {
-                if (characterMaterial) {  // Check if still exists
-                    characterMaterial.color.copy(originalColor);
-                }
-            }, 200);
-        }
+            // Calculate scale based on a pulse wave
+            const pulseScale = 1.0 + progress * 2.0; // Grow over time
+            effect.scale.set(pulseScale, pulseScale, pulseScale);
+            
+            // Fade out gradually
+            effectMaterial.opacity = 0.8 * (1.0 - progress);
+            
+            // Continue animation
+            requestAnimationFrame(animate);
+        };
+        
+        // Start animation
+        animate();
+        
+        return effect;
     }
 
     /**
@@ -1419,19 +1543,9 @@ export class SkillsManager {
             return;
         }
         
-        // Create a "Too Far" text at the target position instead of a line
-        if (this.game.ui && typeof this.game.ui.createWorldText === 'function') {
-            const textPosition = new THREE.Vector3(
-                targetPosition.x,
-                targetPosition.y + 2.0, // Position above the target
-                targetPosition.z
-            );
-            
-            this.game.ui.createWorldText('Too Far', textPosition, {
-                color: '#ff0000',
-                duration: 1.5,
-                fontSize: 16
-            });
+        // Show only red notification text without creating duplicate text elements
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('Target is out of range', '#ff3333');
         }
     }
 }
