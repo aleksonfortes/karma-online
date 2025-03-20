@@ -746,10 +746,47 @@ export class NetworkManager {
                 }
                 
                 // Skip if we're currently processing a damage effect for this player
+                // This prevents the health bar from updating while damage animations are playing
                 if (playerMesh.userData.processingDamageEffect) {
                     if (isSignificantChange) {
                         console.log(`Skipping life update for ${data.id} - processing damage effect`);
                     }
+                    
+                    // Instead of updating immediately, schedule an update after the damage effect completes
+                    // Store the server values for later use
+                    playerMesh.userData.serverLife = data.life;
+                    playerMesh.userData.serverMaxLife = data.maxLife;
+                    
+                    return;
+                }
+                
+                // Also skip if there was a recent damage effect (within the last 700ms)
+                // This ensures we don't override damage animations too quickly
+                const now = Date.now();
+                const lastDamageTime = playerMesh.userData.lastDamageTime || 0;
+                if (now - lastDamageTime < 700) {
+                    if (isSignificantChange) {
+                        console.log(`Delaying life update for ${data.id} - too soon after damage effect (${now - lastDamageTime}ms)`);
+                    }
+                    
+                    // Store the values for delayed update
+                    playerMesh.userData.serverLife = data.life;
+                    playerMesh.userData.serverMaxLife = data.maxLife;
+                    playerMesh.userData.pendingHealthUpdate = true;
+                    
+                    // Schedule update after delay
+                    setTimeout(() => {
+                        if (playerMesh && !playerMesh.userData.processingDamageEffect) {
+                            playerMesh.userData.pendingHealthUpdate = false;
+                            
+                            // Only update if no new damage effects have occurred
+                            if (now >= playerMesh.userData.lastDamageTime) {
+                                // Update health
+                                this.game.playerManager.updateHealthBarWithServerValues(playerMesh);
+                            }
+                        }
+                    }, 700 - (now - lastDamageTime));
+                    
                     return;
                 }
                 
@@ -1004,36 +1041,21 @@ export class NetworkManager {
                 );
             }
             
-            // Update the health bar immediately with the expected new health
+            // IMPORTANT FIX: Don't update health bar or stats here
+            // Just save expected values for reference only
             if (targetPlayer.userData.stats) {
-                // Calculate the expected new health
+                // Calculate the expected new health for reference only
                 const currentHealth = targetPlayer.userData.stats.life || 100;
                 const newHealth = Math.max(0, currentHealth - data.damage);
                 const maxHealth = targetPlayer.userData.stats.maxLife || 100;
                 
-                // Store these values for immediate visual feedback
-                targetPlayer.userData.serverLife = newHealth;
-                targetPlayer.userData.serverMaxLife = maxHealth;
+                // Store expected values, but don't modify stats or update visuals
+                // This avoids double updates with lifeUpdate events
+                targetPlayer.userData.expectedDamage = data.damage;
+                targetPlayer.userData.expectedHealth = newHealth;
                 
-                // Update the player's stats
-                targetPlayer.userData.stats.life = newHealth;
-                targetPlayer.userData.stats.maxLife = maxHealth;
-                
-                // Update the health bar
-                this.game.playerManager.updateHealthBar(targetPlayer);
-                
-                // If this is our player, update the UI
-                if (data.targetId === this.socket.id) {
-                    if (this.game.playerStats) {
-                        this.game.playerStats.currentLife = newHealth;
-                        this.game.playerStats.maxLife = maxHealth;
-                        
-                        // Update UI
-                        if (this.game.uiManager) {
-                            this.game.uiManager.updateStatusBars(this.game.playerStats);
-                        }
-                    }
-                }
+                // Log for debugging
+                console.log(`Damage effect visualization applied to ${data.targetId} for ${data.damage} damage. Actual health update will come from server.`);
             }
             
             // Clear the processing flag after a delay
@@ -1521,6 +1543,100 @@ export class NetworkManager {
                     data.level
                 );
             }
+        });
+        
+        // Handle player damaged event
+        this.socket.on('playerDamaged', (data) => {
+            // Log damage event
+            console.log(`Player ${data.targetId} damaged by ${data.sourceId} for ${data.damage} damage`);
+            
+            // Ignore if the target player doesn't exist
+            const targetPlayer = this.game.playerManager.getPlayerById(data.targetId);
+            if (!targetPlayer) {
+                console.warn(`Target player ${data.targetId} not found`);
+                return;
+            }
+            
+            // Check if target is in temple safe zone
+            if (this.game.environmentManager && 
+                this.game.environmentManager.isInTempleSafeZone && 
+                targetPlayer.position && 
+                this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
+                console.log('Target in temple safe zone - ignoring damage effect');
+                return; // Don't apply damage effects when target is in temple
+            }
+            
+            // Prevent processing multiple damage effects in quick succession
+            if (targetPlayer.userData && targetPlayer.userData.processingDamageEffect) {
+                return;
+            }
+            
+            // Mark player as processing damage effect
+            if (targetPlayer.userData) {
+                targetPlayer.userData.processingDamageEffect = true;
+                targetPlayer.userData.lastDamageTime = Date.now();
+            }
+            
+            // Get the source entity (player or monster)
+            let sourceEntity;
+            if (data.sourceType === 'monster') {
+                // Source is a monster
+                if (this.game.monsterManager) {
+                    const monster = this.game.monsterManager.getMonsterById(data.sourceId);
+                    if (monster) {
+                        sourceEntity = monster.mesh;
+                    }
+                }
+            } else {
+                // Source is a player (default)
+                if (data.sourceId === this.socket.id) {
+                    sourceEntity = this.game.localPlayer;
+                } else {
+                    sourceEntity = this.game.playerManager.players.get(data.sourceId);
+                }
+            }
+            
+            // Create visual effect between source and target
+            if (sourceEntity && targetPlayer && this.game.skillsManager) {
+                if (data.skillName === 'monster_attack') {
+                    // Monster attack effect
+                    this.game.skillsManager.createAttackEffect(targetPlayer, '#ff0000', 0.5);
+                } else {
+                    // Player skill effect
+                    this.game.skillsManager.createSkillEffect(
+                        data.skillName,
+                        sourceEntity.position,
+                        targetPlayer.position
+                    );
+                }
+                
+                // Create damage number
+                this.game.skillsManager.createDamageNumber(
+                    targetPlayer,
+                    data.damage,
+                    true,
+                    data.isCritical
+                );
+            }
+            
+            // REMOVED: Don't update the health bar immediately
+            // Let the server's health update handle this to avoid double updates
+            // We'll store the expected values but not update the visual
+            if (targetPlayer.userData.stats) {
+                // Calculate the expected new health (for reference only)
+                const currentHealth = targetPlayer.userData.stats.life || 100;
+                const newHealth = Math.max(0, currentHealth - data.damage);
+                const maxHealth = targetPlayer.userData.stats.maxLife || 100;
+                
+                // Store these values for reference but don't update visuals yet
+                targetPlayer.userData.expectedServerLife = newHealth;
+                targetPlayer.userData.expectedServerMaxLife = maxHealth;
+            }
+            
+            // Clear the processing flag after a delay
+            setTimeout(() => {
+                targetPlayer.userData.processingDamageEffect = false;
+            }, 1000);
         });
         
         return true; // Return true to indicate success
@@ -2013,6 +2129,11 @@ export class NetworkManager {
                     return;
                 }
                 
+                // Skip if there's a pending health update scheduled
+                if (playerMesh.userData.pendingHealthUpdate) {
+                    return;
+                }
+                
                 // Skip if health is locked - this indicates a recent update to the health bar
                 if (playerMesh.userData.healthLocked) {
                     return;
@@ -2023,12 +2144,15 @@ export class NetworkManager {
                     (playerMesh.userData.stats.life !== playerMesh.userData.serverLife || 
                      playerMesh.userData.stats.maxLife !== playerMesh.userData.serverMaxLife)) {
                     
-                    // Only correct if:
-                    // 1. Health has increased (implying server regeneration)
-                    // 2. Or more than 5 seconds have passed since last damage effect
+                    // Check if we should delay correction due to recent damage
                     const timeNow = Date.now();
                     const lastDamageTime = playerMesh.userData.lastDamageTime || 0;
                     const timeSinceLastDamage = timeNow - lastDamageTime;
+                    
+                    // If damage was applied recently, don't override it yet - let animation complete
+                    if (timeSinceLastDamage < 1000) {
+                        return; 
+                    }
                     
                     // Only make corrections in the following cases:
                     const shouldCorrect = 
@@ -2295,8 +2419,8 @@ export class NetworkManager {
     }
 
     /**
-     * Send a skill use event to the server with validation and wait for confirmation
-     * @param {string} targetId - The ID of the target
+     * Send a skill use request to the server
+     * @param {string} targetId - The ID of the target player or monster
      * @param {string} skillName - The name of the skill to use
      * @param {number} damage - The amount of damage to deal
      * @returns {Promise<boolean>} - Promise that resolves to true if skill was confirmed by server
@@ -2309,12 +2433,6 @@ export class NetworkManager {
         
         if (!targetId || !skillName) {
             console.warn('Invalid skill parameters');
-            return Promise.resolve(false);
-        }
-        
-        // Check if in cooldown (this is a failsafe, the SkillsManager should already do this check)
-        if (this.game.skillsManager && this.game.skillsManager.isOnCooldown(skillName)) {
-            console.warn(`Cannot use skill: ${skillName} is on cooldown`);
             return Promise.resolve(false);
         }
         
