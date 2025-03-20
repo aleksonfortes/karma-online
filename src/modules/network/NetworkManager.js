@@ -100,22 +100,56 @@ export class NetworkManager {
             this.reconnecting = false;
             this.reconnectAttempts = 0;
             
-            // If we were previously disconnected, this is a reconnection
-            if (this.wasDisconnected) {
-                console.log('Reconnected to server, handling reconnection');
-                this.handleReconnection();
-            } else {
-                // Only request state update if not reconnecting
-                this.socket.emit('requestStateUpdate');
-            }
+            // Show connection message
+            this.showConnectionStatus('Connected to server!', true);
             
-            // Start the periodic health check
-            this.startPeriodicHealthCheck();
+            // Request state synchronization when connecting
+            this.requestStateSync();
         });
-
+        
         // Handle connection error
         this.socket.on('connect_error', (error) => {
-            console.error('Failed to connect to server:', error);
+            console.warn('Connection error:', error.message);
+            this.isConnected = false;
+            
+            // Only attempt to reconnect if not already reconnecting
+            if (!this.reconnecting) {
+                this.reconnecting = true;
+                setTimeout(() => {
+                    this.attemptReconnect();
+                }, 2000); // Wait 2 seconds before attempting to reconnect
+            }
+        });
+
+        // Handle disconnection
+        this.socket.on('disconnect', (reason) => {
+            console.warn('Disconnected from server. Reason:', reason);
+            this.isConnected = false;
+            this.wasDisconnected = true;
+            
+            // Disable player controls
+            if (this.game.controls) {
+                this.game.controls.forward = false;
+                this.game.controls.backward = false;
+                this.game.controls.left = false;
+                this.game.controls.right = false;
+            }
+            
+            // Show disconnection message
+            this.showConnectionStatus('Disconnected from server. Attempting to reconnect...');
+            
+            // Attempt to reconnect after a short delay
+            if (!this.reconnecting) {
+                this.reconnecting = true;
+                setTimeout(() => {
+                    this.attemptReconnect();
+                }, 2000); // Wait 2 seconds before attempting to reconnect
+            }
+        });
+        
+        // Handle full game state synchronization from server
+        this.socket.on('game_state_sync', (data) => {
+            this.handleGameStateSync(data);
         });
 
         // Handle initial game state
@@ -397,33 +431,6 @@ export class NetworkManager {
             console.log('\n=== Player Left ===');
             console.log('Player ID:', playerId);
             this.removePlayer(playerId);
-        });
-
-        // Handle disconnect
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-            
-            // Set connection status flags
-            this.isConnected = false;
-            this.wasDisconnected = true;
-            
-            // Disable player controls
-            this.game.controls.forward = false;
-            this.game.controls.backward = false;
-            this.game.controls.left = false;
-            this.game.controls.right = false;
-            
-            // Optionally, display a message to the user
-            alert('Disconnected from server. Please check your connection.');
-            
-            // Remove all players from the scene
-            this.game.playerManager.players.forEach((playerMesh, playerId) => {
-                if (playerMesh.userData.statusGroup) {
-                    this.game.scene.remove(playerMesh.userData.statusGroup);
-                }
-                this.game.scene.remove(playerMesh);
-            });
-            this.game.playerManager.players.clear();
         });
 
         // Handle game state update
@@ -1380,30 +1387,28 @@ export class NetworkManager {
     }
 
     handleReconnection() {
-        console.log('Handling reconnection...');
+        console.log('Handling reconnection to server');
         
-        // Request player list to sync game state
+        // Track that we're reconnecting
+        this.reconnecting = true;
+        
+        // Request full game state synchronization from server
+        this.requestStateSync();
+        
+        // Request specific player data
         if (this.socket) {
-            console.log('Requesting player list after reconnection');
-            this.socket.emit('requestPlayerList');
-            
-            // Also request state update - this is needed for reconnection test
-            this.socket.emit('requestStateUpdate');
+            this.socket.emit('requestPlayerReset');
+            console.log('Requested player reset from server');
         }
         
-        // Apply any pending updates for players
-        this.applyPendingUpdates();
+        // Reset death state
+        this.playerDead = false;
         
-        // Reset reconnection state
-        this.wasDisconnected = false;
+        // Reset pending inputs
+        this.pendingInputs = [];
         
-        // In the original game, reconnection meant starting over with a new player
-        // We're keeping this for backward compatibility
-        console.log('Reconnected to server - creating new player as per original game behavior');
-        
-        if (this.game && this.game.playerManager) {
-            this.game.playerManager.createLocalPlayer();
-        }
+        // Start the periodic health check
+        this.startPeriodicHealthCheck();
     }
 
     async createLocalPlayer() {
@@ -1855,5 +1860,317 @@ export class NetworkManager {
             clearInterval(this.healthCheckInterval);
             this.healthCheckInterval = null;
         }
+    }
+
+    /**
+     * Handle the full game state synchronization from server
+     * @param {Object} data - The game state data
+     */
+    handleGameStateSync(data) {
+        if (!data || !data.timestamp) return;
+        
+        console.log('Received game state sync from server');
+        
+        // Synchronize players
+        if (data.players && Array.isArray(data.players)) {
+            data.players.forEach(playerData => {
+                // Don't sync the local player's position, only health and other stats
+                const isLocalPlayer = playerData.id === this.socket.id;
+                
+                if (isLocalPlayer) {
+                    // For local player, just update stats but not position (to avoid rubberbanding)
+                    if (this.game.playerManager && this.game.playerManager.localPlayer) {
+                        // Update health and other stats
+                        if (this.game.playerStats) {
+                            this.game.playerStats.updateHealth(playerData.life, playerData.maxLife);
+                        }
+                        
+                        // Update dead state if needed
+                        if (playerData.isDead !== this.playerDead) {
+                            this.playerDead = playerData.isDead;
+                            
+                            if (playerData.isDead) {
+                                this.handlePlayerDeath();
+                            }
+                        }
+                    }
+                } else {
+                    // For other players, update all properties
+                    const existingPlayer = this.game.playerManager?.players.get(playerData.id);
+                    
+                    if (existingPlayer) {
+                        // Update player position if they've moved significantly
+                        if (this.hasPositionChanged(existingPlayer.position, playerData.position)) {
+                            existingPlayer.position.copy(playerData.position);
+                            // Update player mesh position
+                            if (existingPlayer.mesh) {
+                                existingPlayer.mesh.position.copy(playerData.position);
+                            }
+                        }
+                        
+                        // Update health and other stats
+                        existingPlayer.life = playerData.life;
+                        existingPlayer.maxLife = playerData.maxLife;
+                        existingPlayer.isDead = playerData.isDead;
+                        
+                        // Update health bar if available
+                        if (this.game.ui && typeof this.game.ui.updatePlayerHealthBar === 'function') {
+                            this.game.ui.updatePlayerHealthBar(existingPlayer);
+                        }
+                    } else {
+                        // Store for later if player manager not ready
+                        this.pendingUpdates.set(playerData.id, playerData);
+                    }
+                }
+            });
+        }
+        
+        // Synchronize monsters
+        if (data.monsters && Array.isArray(data.monsters) && this.game.monsterManager) {
+            data.monsters.forEach(monsterData => {
+                const monster = this.game.monsterManager.getMonsterById(monsterData.id);
+                
+                if (monster) {
+                    // Update health
+                    monster.health = monsterData.health;
+                    
+                    // Update position if significant change - avoid unnecessary updates
+                    if (this.hasPositionChanged(monster.position, monsterData.position, 0.15)) {
+                        // Store the original position for reference
+                        const originalPosition = monster.position ? { 
+                            x: monster.position.x, 
+                            y: monster.position.y, 
+                            z: monster.position.z 
+                        } : null;
+                        
+                        // Update data position
+                        monster.position = monsterData.position;
+                        
+                        // Update mesh position if it exists
+                        if (monster.mesh) {
+                            // Add a flag to indicate this is a sync update
+                            monster.mesh.userData.syncUpdate = true;
+                            
+                            // Update position in mesh, keeping Y offset consistent
+                            monster.mesh.position.set(
+                                monsterData.position.x,
+                                monsterData.position.y + 2.0, // Keep the height adjustment consistent
+                                monsterData.position.z
+                            );
+                        }
+                    }
+                    
+                    // Update health bar
+                    this.game.monsterManager.updateHealthBar(monster);
+                    
+                    // Handle death state
+                    if (monsterData.isDead && monster.health > 0) {
+                        monster.health = 0;
+                        this.game.monsterManager.handleMonsterDeath(monster.id);
+                    }
+                } else {
+                    // Store for later if monster manager not ready or monster not loaded yet
+                    if (this.pendingMonsterData === null) {
+                        this.pendingMonsterData = [];
+                    }
+                    this.pendingMonsterData.push(monsterData);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Request game state synchronization from the server
+     */
+    requestStateSync() {
+        if (this.socket && this.isConnected) {
+            console.log('Requesting game state sync from server');
+            try {
+                this.socket.emit('request_sync');
+            } catch (error) {
+                console.error('Error requesting game state sync:', error);
+            }
+        } else {
+            console.warn('Cannot request sync: Socket not connected');
+        }
+    }
+    
+    /**
+     * Attempt to reconnect to the server
+     */
+    attemptReconnect() {
+        if (this.reconnectAttempts >= 5) {
+            console.warn('Maximum reconnection attempts reached');
+            return;
+        }
+        
+        this.reconnectAttempts++;
+        console.log(`Attempting to reconnect (attempt ${this.reconnectAttempts}/5)...`);
+        
+        try {
+            // Close existing socket if it exists
+            if (this.socket) {
+                this.socket.close();
+            }
+            
+            // Create a new connection
+            const SERVER_URL = getServerUrl();
+            this.socket = io(SERVER_URL, {
+                transports: ['websocket'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                autoConnect: true,
+                forceNew: true
+            });
+            
+            // Set up handlers again
+            this.setupSocketHandlers();
+        } catch (error) {
+            console.error('Error during reconnection attempt:', error);
+        }
+    }
+    
+    /**
+     * Utility to check if position has changed significantly
+     */
+    hasPositionChanged(currentPos, newPos, threshold = 0.5) {
+        if (!currentPos || !newPos) return true;
+        
+        const dx = Math.abs(currentPos.x - newPos.x);
+        const dy = Math.abs(currentPos.y - newPos.y);
+        const dz = Math.abs(currentPos.z - newPos.z);
+        
+        return dx > threshold || dy > threshold || dz > threshold;
+    }
+
+    /**
+     * Show connection status message to the user
+     * @param {string} message - The message to display
+     * @param {boolean} success - Whether this is a success message
+     */
+    showConnectionStatus(message, success = false) {
+        // Check if UI is available
+        if (this.game.ui && typeof this.game.ui.showMessage === 'function') {
+            this.game.ui.showMessage(message, success ? 'success' : 'error');
+            return;
+        }
+        
+        // If no UI system, create a simple overlay
+        let statusElement = document.getElementById('connection-status');
+        
+        // Create element if it doesn't exist
+        if (!statusElement) {
+            statusElement = document.createElement('div');
+            statusElement.id = 'connection-status';
+            statusElement.style.position = 'fixed';
+            statusElement.style.top = '10px';
+            statusElement.style.left = '50%';
+            statusElement.style.transform = 'translateX(-50%)';
+            statusElement.style.padding = '10px 20px';
+            statusElement.style.borderRadius = '5px';
+            statusElement.style.fontFamily = 'Arial, sans-serif';
+            statusElement.style.fontWeight = 'bold';
+            statusElement.style.zIndex = '1000';
+            document.body.appendChild(statusElement);
+        }
+        
+        // Update element content and style
+        statusElement.textContent = message;
+        statusElement.style.backgroundColor = success ? 'rgba(0, 128, 0, 0.8)' : 'rgba(255, 0, 0, 0.8)';
+        statusElement.style.color = '#ffffff';
+        
+        // Remove success message after a few seconds
+        if (success) {
+            setTimeout(() => {
+                if (statusElement && statusElement.parentNode) {
+                    statusElement.parentNode.removeChild(statusElement);
+                }
+            }, 3000);
+        }
+    }
+
+    /**
+     * Send a skill use event to the server with validation and wait for confirmation
+     * @param {string} targetId - The ID of the target
+     * @param {string} skillName - The name of the skill to use
+     * @param {number} damage - The amount of damage to deal
+     * @returns {Promise<boolean>} - Promise that resolves to true if skill was confirmed by server
+     */
+    useSkill(targetId, skillName, damage = 0) {
+        if (!this.isConnected || !this.socket) {
+            console.warn('Cannot use skill: Not connected to server');
+            return Promise.resolve(false);
+        }
+        
+        if (!targetId || !skillName) {
+            console.warn('Invalid skill parameters');
+            return Promise.resolve(false);
+        }
+        
+        // Check if in cooldown (this is a failsafe, the SkillsManager should already do this check)
+        if (this.game.skillsManager && this.game.skillsManager.isOnCooldown(skillName)) {
+            console.warn(`Cannot use skill: ${skillName} is on cooldown`);
+            return Promise.resolve(false);
+        }
+        
+        // Return a promise that resolves when the server confirms the skill hit
+        return new Promise((resolve) => {
+            // Create a one-time listener for skill damage confirmation
+            const confirmationListener = (data) => {
+                if (data.sourceId === this.socket.id && data.targetId === targetId) {
+                    // Remove the listener to prevent memory leaks
+                    this.socket.off('skillDamage', confirmationListener);
+                    
+                    // Server confirmed the skill hit!
+                    console.log(`Server confirmed ${skillName} skill hit on ${targetId}`);
+                    resolve(true);
+                }
+            };
+            
+            // Create a one-time listener for error messages (skill rejected)
+            const errorListener = (data) => {
+                if (data.type === 'combat') {
+                    // If we get any combat error after trying to use a skill, assume it failed
+                    console.log(`Server rejected skill: ${data.message}`);
+                    
+                    // Remove both listeners to prevent memory leaks
+                    this.socket.off('skillDamage', confirmationListener);
+                    this.socket.off('errorMessage', errorListener);
+                    
+                    // Only mark as failed if this error is for this skill (check if mentions cooldown)
+                    resolve(false);
+                }
+            };
+            
+            // Set a timeout to resolve the promise in case we never get a confirmation
+            const timeout = setTimeout(() => {
+                this.socket.off('skillDamage', confirmationListener);
+                this.socket.off('errorMessage', errorListener);
+                console.log('No server response for skill use, assuming failed');
+                resolve(false);
+            }, 1000); // 1 second timeout
+            
+            // Add the listeners
+            this.socket.on('skillDamage', confirmationListener);
+            this.socket.on('errorMessage', errorListener);
+            
+            try {
+                // Send the skill use event to the server
+                this.socket.emit('useSkill', {
+                    targetId: targetId,
+                    skillName: skillName,
+                    damage: damage
+                });
+                
+                console.log(`Sent ${skillName} skill use on target ${targetId} to server`);
+            } catch (error) {
+                console.error('Error sending skill use to server:', error);
+                clearTimeout(timeout);
+                this.socket.off('skillDamage', confirmationListener);
+                this.socket.off('errorMessage', errorListener);
+                resolve(false);
+            }
+        });
     }
 }

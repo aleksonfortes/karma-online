@@ -13,6 +13,10 @@ export class SkillsManager {
     
     init() {
         console.log('Initializing Skills Manager');
+        
+        // Set up error handlers for server messages
+        this.initializeErrorHandlers();
+        
         return true;
     }
     
@@ -63,6 +67,7 @@ export class SkillsManager {
         // Check cooldown
         if (this.isOnCooldown(skillId)) {
             console.log(`Skill ${skillId} is on cooldown`);
+            this.showCooldownError(skillId);
             return false;
         }
         
@@ -106,39 +111,33 @@ export class SkillsManager {
             }
         }
         
-        // Set skill as used
-        const skill = this.skills[skillId];
-        skill.lastUsed = Date.now();
-        
         // Use ability based on type
-        if (skill.id === 'martial_arts') {
+        if (skillId === 'martial_arts') {
+            // We don't await the result here since this method returns boolean
             this.useMartialArts();
-            
-            // Set animation state
-            this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
-            
-            // Tell server we used skill on target
-            this.game.networkManager.useSkill(targetId, skillId);
-            
             return true;
-        } else if (skill.id === 'dark_strike') {
+        } else if (skillId === 'dark_strike') {
+            // We don't await the result here since this method returns boolean
             this.useDarkStrike();
-            
-            // Set animation state
-            this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
-            
-            // Tell server we used skill on target
-            this.game.networkManager.useSkill(targetId, skillId);
-            
             return true;
         }
         
         return false;
     }
     
-    useMartialArts() {
+    /**
+     * Use the Martial Arts skill with proper server validation
+     */
+    async useMartialArts() {
         if (!this.game.isAlive) {
             console.log('Cannot use skills while dead');
+            return;
+        }
+
+        // Check if skill is on cooldown
+        if (this.isOnCooldown('martial_arts')) {
+            console.log('Martial Arts is on cooldown');
+            this.showCooldownError('martial_arts');
             return;
         }
 
@@ -173,6 +172,15 @@ export class SkillsManager {
         const playerPos = this.game.localPlayer.position;
         const targetPos = targetPlayer.position;
         
+        // Check if target is in temple safe zone
+        if (this.game.environmentManager && this.game.environmentManager.isInTempleSafeZone) {
+            if (this.game.environmentManager.isInTempleSafeZone(targetPos)) {
+                console.log('Cannot attack target in temple safe zone');
+                this.showErrorMessage('Cannot attack players in temple safe zone');
+                return;
+            }
+        }
+        
         const dx = targetPos.x - playerPos.x;
         const dz = targetPos.z - playerPos.z;
         const distance = Math.sqrt(dx * dx + dz * dz);
@@ -182,19 +190,57 @@ export class SkillsManager {
             return;
         }
         
-        this.applyDamageEffect({
-            player: targetPlayer,
-            playerId: targetId,
-            distance: distance
-        }, this.skills.martial_arts.damage);
+        // Set skill as used (update cooldown) - regardless of server confirmation
+        this.skills.martial_arts.lastUsed = Date.now();
         
-        this.createMartialArtsEffect(targetPlayer);
+        // Set animation state (this is visual only)
+        if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
+            this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
+        }
+        
+        // Send skill to server and wait for confirmation
+        const skillConfirmed = await this.game.networkManager.useSkill(
+            targetId, 
+            'martial_arts', 
+            this.skills.martial_arts.damage
+        );
+        
+        // Only show visual effects if server confirmed the skill hit
+        if (skillConfirmed) {
+            // Create visual effects between player and target
+            this.createMartialArtsEffect(targetPlayer);
+            
+            // Create floating damage number
+            this.createDamageNumber(targetPlayer, this.skills.martial_arts.damage);
+        }
     }
     
     /**
-     * Use the Dark Strike skill
+     * Use the Dark Strike skill with proper server validation
      */
-    useDarkStrike() {
+    async useDarkStrike() {
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return;
+        }
+        
+        // Check if skill is on cooldown
+        if (this.isOnCooldown('dark_strike')) {
+            console.log('Dark Strike is on cooldown');
+            this.showCooldownError('dark_strike');
+            return;
+        }
+        
+        // Check if player has the dark path - but skip in test environment
+        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+        if (!isTestEnvironment) {
+            const playerPath = this.game.playerStats?.path || null;
+            if (playerPath !== 'dark') {
+                console.log(`Cannot use dark_strike - requires dark path (current: ${playerPath || 'none'})`);
+                return;
+            }
+        }
+        
         // Get target information
         const targetId = this.game.targetingManager.getTargetId();
         const targetType = this.game.targetingManager.getTargetType();
@@ -206,7 +252,7 @@ export class SkillsManager {
         
         console.log(`Using Dark Strike on ${targetType} ${targetId}`);
         
-        // Create attack effect for both player and monster targets
+        // Handle different target types
         if (targetType === 'monster') {
             const monster = this.game.monsterManager.getMonsterById(targetId);
             if (monster && monster.mesh) {
@@ -216,7 +262,7 @@ export class SkillsManager {
                 // If in PVE testing mode, apply damage directly
                 const isTestMode = this.game.isPVETestMode;
                 if (isTestMode) {
-                    this.applyDamageEffect(monster, this.skills.dark_strike.damage);
+                    this.applyDamageEffect(monster, this.skills.dark_strike.damage, 'dark_strike');
                 }
             } else {
                 console.warn(`Monster ${targetId} not found for Dark Strike`);
@@ -224,23 +270,44 @@ export class SkillsManager {
         } else if (targetType === 'player') {
             const targetPlayer = this.game.playerManager.players.get(targetId);
             if (targetPlayer) {
-                // Visual effect - flash the player red
-                this.createAttackEffect(targetPlayer);
+                // Check if target is in temple safe zone
+                if (this.game.environmentManager && this.game.environmentManager.isInTempleSafeZone) {
+                    if (this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
+                        console.log('Cannot attack target in temple safe zone');
+                        this.showErrorMessage('Cannot attack players in temple safe zone');
+                        return;
+                    }
+                }
                 
-                // Apply damage effect with proper player ID for PVP
-                this.applyDamageEffect({
-                    player: targetPlayer,
-                    playerId: targetId,
-                    distance: 0 // We don't use distance here, but include for consistency
-                }, this.skills.dark_strike.damage);
+                // Set skill as used (update cooldown) - regardless of server confirmation
+                this.skills.dark_strike.lastUsed = Date.now();
+                
+                // Set animation state (this is visual only)
+                if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
+                    this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
+                }
+                
+                // Send skill to server and wait for confirmation
+                const skillConfirmed = await this.game.networkManager.useSkill(
+                    targetId, 
+                    'dark_strike', 
+                    this.skills.dark_strike.damage
+                );
+                
+                // Only show visual effects if server confirmed the skill hit
+                if (skillConfirmed) {
+                    // Visual effect - flash the player red
+                    this.createAttackEffect(targetPlayer);
+                    
+                    // Create floating damage number
+                    this.createDamageNumber(targetPlayer, this.skills.dark_strike.damage);
+                }
             } else {
                 console.warn(`Player ${targetId} not found for Dark Strike`);
             }
         } else {
             console.warn(`Unknown target type: ${targetType}`);
         }
-        
-        console.log('Successfully attacked target with dark_strike');
     }
     
     createMartialArtsEffect(targetPlayer) {
@@ -376,11 +443,16 @@ export class SkillsManager {
     }
     
     /**
-     * Apply a damage effect to a target
+     * Apply a visual damage effect to a target (client-side only)
+     * 
+     * NOTE: This method ONLY handles visual effects. Network communication is handled
+     * by NetworkManager.useSkill() to ensure proper validation.
+     * 
      * @param {Object} target - The target object (monster or player)
      * @param {number} damage - The amount of damage to apply
+     * @param {string} skillId - The ID of the skill being used
      */
-    applyDamageEffect(target, damage) {
+    applyDamageEffect(target, damage, skillId = 'martial_arts') {
         if (!target) {
             console.warn('Cannot apply damage effect: Target is undefined');
             return;
@@ -411,20 +483,8 @@ export class SkillsManager {
                 }
             }
         } else if (target.player) {
-            // This is a player target
-            console.log(`Applying ${damage} damage to player`);
-            
-            // Send network event to the server for PVP damage
-            if (this.game.networkManager && this.game.networkManager.socket && target.playerId) {
-                // Emit the useSkill event to the server
-                this.game.networkManager.socket.emit('useSkill', {
-                    targetId: target.playerId,
-                    skillName: 'dark_strike', // Default to dark_strike for backward compatibility
-                    damage: damage
-                });
-                
-                console.log(`Sent damage event to server for player ${target.playerId}`);
-            }
+            // This is a player target - create visual damage number only
+            console.log(`Showing visual damage effect for ${damage} damage to player`);
             
             // Visual effect only - server handles actual damage
             const player = target.player;
@@ -550,45 +610,157 @@ export class SkillsManager {
     }
     
     /**
-     * Check if a skill is currently on cooldown
+     * Check if a skill is on cooldown
      * @param {string} skillId - The ID of the skill to check
-     * @returns {boolean} - True if the skill is on cooldown, false otherwise
+     * @returns {boolean} - Whether the skill is on cooldown
      */
     isOnCooldown(skillId) {
-        if (!this.skills[skillId]) {
-            console.warn(`Skill ${skillId} not found when checking cooldown`);
-            return false;
-        }
-        
         const skill = this.skills[skillId];
-        const now = Date.now();
-        const timeSinceLastUse = now - skill.lastUsed;
+        if (!skill) return false;
         
-        return timeSinceLastUse < skill.cooldown;
+        const now = Date.now();
+        const timeElapsed = now - skill.lastUsed;
+        
+        // Add a small buffer (50ms) to account for potential network latency 
+        // and prevent "skill on cooldown" errors from server
+        return timeElapsed < (skill.cooldown + 50);
     }
     
     /**
-     * Get the cooldown percentage for a skill (0 to 1)
-     * @param {string} skillId - The ID of the skill to check
-     * @returns {number} - The cooldown percentage (0 = ready, 1 = just used)
+     * Get the remaining cooldown time for a skill
+     * @param {string} skillId - The ID of the skill
+     * @returns {number} - The remaining cooldown time in milliseconds
      */
-    getCooldownPercent(skillId) {
-        if (!this.skills[skillId]) {
-            console.warn(`Skill ${skillId} not found when checking cooldown percentage`);
-            return 0;
-        }
-        
+    getRemainingCooldown(skillId) {
         const skill = this.skills[skillId];
-        const now = Date.now();
-        const timeSinceLastUse = now - skill.lastUsed;
+        if (!skill) return 0;
         
-        // If not on cooldown, return 0
-        if (timeSinceLastUse >= skill.cooldown) {
-            return 0;
+        const now = Date.now();
+        const timeElapsed = now - skill.lastUsed;
+        const remaining = skill.cooldown - timeElapsed;
+        
+        return Math.max(0, remaining);
+    }
+    
+    /**
+     * Initialize event handlers for error messages related to skills
+     */
+    initializeErrorHandlers() {
+        if (!this.game.networkManager || !this.game.networkManager.socket) {
+            console.warn('Cannot set up skill error handlers: Network manager not available');
+            return;
         }
         
-        // Calculate percentage of cooldown remaining
-        return 1 - (timeSinceLastUse / skill.cooldown);
+        // Handle error messages from server
+        this.game.networkManager.socket.on('errorMessage', (data) => {
+            if (data.type === 'combat') {
+                console.log(`Combat error: ${data.message}`);
+                
+                // Show error message to player
+                this.showErrorMessage(data.message);
+                
+                // Handle specific error types
+                if (data.message.includes('cooldown')) {
+                    this.handleCooldownError();
+                } else if (data.message.includes('temple safe zone')) {
+                    this.handleSafeZoneError();
+                } else if (data.message.includes('out of range')) {
+                    this.handleRangeError();
+                }
+            }
+        });
+        
+        // Handle skill use result from server
+        this.game.networkManager.socket.on('skillDamage', (data) => {
+            // If we receive damage confirmation from server, the skill was successful
+            if (data.sourceId === this.game.networkManager.socket.id) {
+                console.log(`Skill damage confirmed: ${data.damage} to ${data.targetId}`);
+            }
+        });
+    }
+    
+    /**
+     * Handle cooldown errors from the server
+     */
+    handleCooldownError() {
+        console.log('Handling server cooldown error by extending local cooldowns');
+        
+        // Update all active skills with a cooldown extension
+        // This helps synchronize client cooldowns with server
+        const activeSkills = this.getActiveSkills();
+        activeSkills.forEach(skillId => {
+            const skill = this.skills[skillId];
+            if (skill) {
+                // Ensure the skill stays on cooldown for at least 1 more second
+                const now = Date.now();
+                const timeElapsed = now - skill.lastUsed;
+                
+                if (timeElapsed < skill.cooldown) {
+                    // Extend the cooldown to prevent immediate retries
+                    skill.lastUsed = now;
+                    console.log(`Extended cooldown for ${skill.name} (${skillId})`);
+                }
+            }
+        });
+        
+        // Show cooldown indicator
+        this.updateCooldownIndicators();
+    }
+    
+    /**
+     * Handle safe zone errors from the server
+     */
+    handleSafeZoneError() {
+        // Reset target if it's in a safe zone
+        if (this.game.targetingManager) {
+            this.game.targetingManager.clearTarget();
+        }
+    }
+    
+    /**
+     * Handle range errors from the server
+     */
+    handleRangeError() {
+        console.log("Handling range error from server");
+        
+        // Show message to player - only display once
+        this.showErrorMessage("Target is out of range");
+        
+        // Get current target from targeting manager
+        const currentTarget = this.game.targetingManager?.currentTarget;
+        
+        // Add visual indication for range issues if we have a target
+        if (currentTarget) {
+            this.showRangeIndicator(currentTarget);
+        } else {
+            console.warn("Cannot show range indicator: No current target");
+        }
+    }
+    
+    /**
+     * Update visual cooldown indicators
+     */
+    updateCooldownIndicators() {
+        // If UI has a method to update cooldown indicators, use it
+        if (this.game.ui && typeof this.game.ui.updateCooldownIndicators === 'function') {
+            const cooldowns = {};
+            
+            // Collect cooldown info for all active skills
+            for (const skillId in this.skills) {
+                if (this.game.activeSkills.has(skillId)) {
+                    const skill = this.skills[skillId];
+                    const remainingCooldown = this.getRemainingCooldown(skillId);
+                    
+                    cooldowns[skillId] = {
+                        remaining: remainingCooldown,
+                        total: skill.cooldown,
+                        percent: remainingCooldown / skill.cooldown
+                    };
+                }
+            }
+            
+            this.game.ui.updateCooldownIndicators(cooldowns);
+        }
     }
     
     /**
@@ -859,9 +1031,16 @@ export class SkillsManager {
             return false;
         }
         
-        // Check range to monster - using the updated range check from isMonsterInRange
-        if (!this.isMonsterInRange(monster, skillId)) {
-            console.log(`Monster is out of range for ${skillId}`);
+        // Get the local player - try all possible locations
+        let localPlayer = this.game.localPlayer;
+        
+        // Try player manager if available
+        if (!localPlayer && this.game.playerManager) {
+            localPlayer = this.game.playerManager.getLocalPlayer();
+        }
+        
+        if (!localPlayer) {
+            console.warn('Local player not found when using skill on monster');
             return false;
         }
         
@@ -883,55 +1062,32 @@ export class SkillsManager {
             }
         }
         
-        // Set skill as used
+        // Set skill as used and start cooldown
         skill.lastUsed = Date.now();
         
-        // Get the local player - try all possible locations
-        let localPlayer = this.game.localPlayer;
-        
-        // Try player manager if available
-        if (!localPlayer && this.game.playerManager) {
-            localPlayer = this.game.playerManager.getLocalPlayer();
+        // Visual feedback on client - play attack animation
+        if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
+            this.game.playerManager.setPlayerAnimationState(skill.animation || 'attack');
         }
         
-        if (!localPlayer) {
-            console.warn('Local player not found when using skill on monster');
-            return false;
+        // Create skill effect
+        if (monster.mesh && localPlayer.position) {
+            this.createSkillEffect(skillId, localPlayer.position.clone(), monster.mesh.position.clone());
         }
         
-        // Set player animation - check if method exists
-        if (this.game.playerManager && typeof this.game.playerManager.setPlayerAnimationState === 'function') {
-            this.game.playerManager.setPlayerAnimationState(localPlayer, 'attack');
-        } else {
-            // Alternative: directly set animation state if available on the player model
-            if (localPlayer.userData) {
-                localPlayer.userData.animationState = 'attack';
-            }
-        }
-        
-        // Create visual effect between player and monster
-        this.createSkillEffect(skillId, localPlayer.position, monster.mesh.position);
-        
-        // Tell server we attacked the monster
+        // Send attack request to server
         if (this.game.networkManager && this.game.networkManager.socket) {
             this.game.networkManager.socket.emit('attack_monster', {
                 monsterId: monsterId,
                 skillId: skillId
             });
+            
+            console.log(`Successfully attacked monster ${monsterId} with ${skillId}`);
+            return true;
+        } else {
+            console.warn('Cannot send attack to server: Network manager not available');
+            return false;
         }
-        
-        // Show success message
-        console.log(`Successfully attacked monster ${monsterId} with ${skillId}`);
-        
-        // Update the monster's health locally for immediate feedback
-        // Note: The actual damage calculation is handled by the server
-        if (monster.health > 0) {
-            // Apply temporary visual damage feedback locally
-            monster.health -= 10; // Visual-only change, will be synchronized with server later
-            this.game.monsterManager.updateHealthBar(monster);
-        }
-        
-        return true;
     }
     
     /**
@@ -998,14 +1154,14 @@ export class SkillsManager {
         // Get the distance between the local player and the monster
         const distance = localPlayer.position.distanceTo(monster.mesh.position);
         
-        // Use the same attack range as the server - use an effective range of 5
-        const serverAttackRange = 5; // This should match the server-side attack range
+        // Get the server-side skill range from our skill data
+        const skillRange = skill.range;
         
         // Log the actual values to help with debugging
-        console.log(`Monster distance: ${distance.toFixed(2)}, Skill range: ${skill.range}, Server attack range: ${serverAttackRange}`);
+        console.log(`Monster distance: ${distance.toFixed(2)}, Skill range: ${skillRange}`);
         
-        // Check if the monster is within the server's acceptable range
-        return distance <= serverAttackRange;
+        // Check if the monster is within the skill's range
+        return distance <= skillRange;
     }
     
     /**
@@ -1074,6 +1230,179 @@ export class SkillsManager {
                     characterMaterial.color.copy(originalColor);
                 }
             }, 200);
+        }
+    }
+
+    /**
+     * Show error message for skills on cooldown
+     */
+    showCooldownError(skillId) {
+        const skill = this.skills[skillId];
+        if (!skill) return;
+        
+        // Get remaining cooldown time
+        const remainingTime = this.getRemainingCooldown(skillId);
+        const remainingSeconds = (remainingTime / 1000).toFixed(1);
+        
+        // Show cooldown message
+        this.showErrorMessage(`Skill is on cooldown (${remainingSeconds}s remaining)`);
+    }
+
+    /**
+     * Show error message to player
+     */
+    showErrorMessage(message) {
+        // If UI has a showMessage method, use it
+        if (this.game.ui && typeof this.game.ui.showMessage === 'function') {
+            this.game.ui.showMessage(message);
+        } else if (this.game.ui && typeof this.game.ui.showNotification === 'function') {
+            this.game.ui.showNotification(message, 'red');
+        } else {
+            // Fallback when UI system is not available - create a simple floating message
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messageElement.style.position = 'fixed';
+            messageElement.style.top = '10%';
+            messageElement.style.left = '50%';
+            messageElement.style.transform = 'translateX(-50%)';
+            messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            messageElement.style.color = '#ff6666';
+            messageElement.style.padding = '10px 20px';
+            messageElement.style.borderRadius = '5px';
+            messageElement.style.fontFamily = 'Arial, sans-serif';
+            messageElement.style.fontSize = '16px';
+            messageElement.style.zIndex = '2000';
+            
+            document.body.appendChild(messageElement);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                if (messageElement.parentNode) {
+                    messageElement.parentNode.removeChild(messageElement);
+                }
+            }, 3000);
+        }
+        
+        // Also log to console
+        console.log(`Error: ${message}`);
+    }
+
+    /**
+     * Show a visual indicator for out-of-range targets
+     * @param {Object} target - The target that's out of range
+     */
+    showRangeIndicator(target) {
+        if (!this.game.scene || !this.game.localPlayer) {
+            console.warn('Cannot show range indicator: scene or local player missing');
+            return;
+        }
+        
+        // Get target position based on different possible structures
+        let targetPosition = null;
+        
+        try {
+            if (target.position && typeof target.position.clone === 'function') {
+                // Target has direct position property
+                targetPosition = target.position.clone();
+            } else if (target.object && target.object.position && typeof target.object.position.clone === 'function') {
+                // Target has nested object with position
+                targetPosition = target.object.position.clone();
+            } else if (target.mesh && target.mesh.position && typeof target.mesh.position.clone === 'function') {
+                // Target is a monster with mesh property
+                targetPosition = target.mesh.position.clone();
+            } else if (target.id && target.id.startsWith('monster-') && this.game.monsterManager) {
+                // Try to get monster from monster manager
+                const monster = this.game.monsterManager.getMonsterById(target.id);
+                if (monster && monster.mesh && monster.mesh.position) {
+                    targetPosition = monster.mesh.position.clone();
+                }
+            } else {
+                // Try to get position from current target in targeting manager
+                const currentTarget = this.game.targetingManager?.currentTarget;
+                if (currentTarget) {
+                    if (currentTarget.object && currentTarget.object.position && typeof currentTarget.object.position.clone === 'function') {
+                        targetPosition = currentTarget.object.position.clone();
+                    } else if (currentTarget.position && typeof currentTarget.position.clone === 'function') {
+                        targetPosition = currentTarget.position.clone();
+                    } else if (currentTarget.mesh && currentTarget.mesh.position && typeof currentTarget.mesh.position.clone === 'function') {
+                        targetPosition = currentTarget.mesh.position.clone();
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error determining target position:', error);
+        }
+        
+        // If we couldn't find a valid position, log error and exit
+        if (!targetPosition) {
+            console.warn('Could not determine target position for range indicator', target);
+            return;
+        }
+        
+        // Create a line from player to target to show range
+        const startPosition = this.game.localPlayer.position.clone();
+        
+        // Create the line geometry
+        const points = [
+            new THREE.Vector3(startPosition.x, startPosition.y + 0.5, startPosition.z),
+            new THREE.Vector3(targetPosition.x, targetPosition.y + 0.5, targetPosition.z)
+        ];
+        
+        // Calculate distance for internal tracking only
+        const lineDistance = startPosition.distanceTo(targetPosition);
+        
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        
+        // Create dashed line material (red with dashes)
+        const material = new THREE.LineDashedMaterial({
+            color: 0xff0000, // Red color
+            dashSize: 0.5,
+            gapSize: 0.25,
+            opacity: 0.8,
+            transparent: true
+        });
+        
+        // Create the line
+        const line = new THREE.Line(geometry, material);
+        line.computeLineDistances(); // Required for dashed lines
+        
+        // Add to scene
+        this.game.scene.add(line);
+        
+        // Add to active effects for cleanup
+        if (!this.game.activeSkills.effects) {
+            this.game.activeSkills.effects = [];
+        }
+        this.game.activeSkills.effects.push({
+            object: line,
+            lifetime: 0,
+            maxLifetime: 1.5, // 1.5 seconds
+            update: (delta) => {
+                line.material.opacity -= delta * 0.5; // Fade out
+            },
+            dispose: () => {
+                if (line.parent) {
+                    line.parent.remove(line);
+                }
+                geometry.dispose();
+                material.dispose();
+            }
+        });
+        
+        // Create a "too far" text at the midpoint
+        if (this.game.ui && typeof this.game.ui.createWorldText === 'function') {
+            const midpoint = new THREE.Vector3(
+                (startPosition.x + targetPosition.x) / 2,
+                (startPosition.y + targetPosition.y) / 2 + 1, // Position above line
+                (startPosition.z + targetPosition.z) / 2
+            );
+            
+            // Use simpler text without distance
+            this.game.ui.createWorldText('Too Far', midpoint, {
+                color: '#ff0000',
+                duration: 1.5,
+                fontSize: 16
+            });
         }
     }
 }

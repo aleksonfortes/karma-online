@@ -8,30 +8,26 @@ import GameConstants from '../../config/GameConstants.js';
 
 export class NetworkManager {
     constructor(httpServer) {
-        this.gameManager = null;
-        this.lastUpdateTime = new Map();
-        this.playerLastPositions = new Map();
-        this._lastLogs = {};
-        this.sockets = new Map();
-        this.statsUpdateInterval = null;
-        
-        // Get allowed origins from environment or use defaults
-        const corsOrigin = process.env.CORS_ORIGIN 
-            ? [process.env.CORS_ORIGIN] 
-            : ["https://localhost:5173", "https://localhost:3000", "https://play.karmaonline.io"];
-        
-        // Initialize socket server
+        if (!httpServer) {
+            throw new Error('HTTP server is required for NetworkManager');
+        }
+
         this.io = new Server(httpServer, {
             cors: {
-                origin: corsOrigin,
-                methods: ["GET", "POST"],
-                credentials: true
-            },
-            transports: ['websocket', 'polling'],
-            secure: process.env.NODE_ENV === 'production'
+                origin: '*',
+                methods: ['GET', 'POST']
+            }
         });
+
+        this.gameManager = null;
+        this.playerManager = null;
+        this.lastUpdateTime = new Map(); // For rate limiting movement
+        this.skillAttempts = new Map(); // For rate limiting skill usage
+        this.securityLogs = [];
+        this.sockets = new Map();
+        this._lastLogs = {};
         
-        // Socket handlers will be set up after the game manager is set
+        // No initialization here - will be done in setGameManager
     }
     
     /**
@@ -203,19 +199,65 @@ export class NetworkManager {
             // Handle skill use
             socket.on('useSkill', (data) => {
                 if (!data || !data.targetId || !data.skillName) {
-                    return this.logSecurityEvent(`Invalid skill data from ${socket.id}`);
+                    console.warn(`Invalid skill data from ${socket.id}: ${JSON.stringify(data)}`);
+                    return;
                 }
                 
-                // Get the player
+                // Apply rate limiting
+                if (!this.rateLimitSkillUsage(socket.id, 'pvp')) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Using skills too rapidly, please slow down'
+                    });
+                    return;
+                }
+                
+                // Get the players
                 const player = this.playerManager.getPlayer(socket.id);
-                if (!player) {
-                    return this.logSecurityEvent(`Player ${socket.id} not found for skill use`);
+                const targetPlayer = this.playerManager.getPlayer(data.targetId);
+                
+                if (!player || !targetPlayer) {
+                    console.warn(`Player or target not found: ${socket.id} -> ${data.targetId}`);
+                    return;
+                }
+
+                // Initialize skill cooldowns if not existing
+                if (!player.skillCooldowns) {
+                    player.skillCooldowns = new Map();
                 }
                 
-                // Get the target player
-                const targetPlayer = this.playerManager.getPlayer(data.targetId);
-                if (!targetPlayer) {
-                    console.warn(`Target player ${data.targetId} not found for skill ${data.skillName} by player ${socket.id}`);
+                // Check server-side cooldown
+                const now = Date.now();
+                const lastUsedTime = player.skillCooldowns.get(data.skillName) || 0;
+                const skillCooldown = this.getSkillCooldown(data.skillName);
+                
+                if (lastUsedTime > 0 && now - lastUsedTime < skillCooldown) {
+                    console.log(`Player ${socket.id} tried to use ${data.skillName} before cooldown finished`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Skill is on cooldown'
+                    });
+                    return;
+                }
+                
+                // Update skill cooldown
+                player.skillCooldowns.set(data.skillName, now);
+                
+                // Check if player is dead
+                if (player.isDead) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot use skills while dead'
+                    });
+                    return;
+                }
+                
+                // Check if target is dead
+                if (targetPlayer.isDead) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot attack a dead player'
+                    });
                     return;
                 }
                 
@@ -274,8 +316,11 @@ export class NetworkManager {
                 
                 // Calculate and apply damage
                 const previousLife = targetPlayer.life;
-                targetPlayer.life = Math.max(0, targetPlayer.life - data.damage);
-                const damageDealt = previousLife - targetPlayer.life;
+                
+                // Server calculates damage instead of trusting client-sent value
+                const damageDealt = this.calculateSkillDamage(data.skillName, player, targetPlayer);
+                
+                targetPlayer.life = Math.max(0, targetPlayer.life - damageDealt);
                 
                 console.log(`Player ${socket.id} dealt ${damageDealt} damage to ${data.targetId} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
                 
@@ -544,15 +589,77 @@ export class NetworkManager {
                     return this.logSecurityEvent(`Invalid attack_monster data from ${socket.id}`);
                 }
                 
+                // Check if monster manager exists
+                if (!this.gameManager || !this.gameManager.monsterManager) {
+                    console.warn(`Monster manager not initialized for attack from ${socket.id}`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Combat system initializing, please try again'
+                    });
+                    return;
+                }
+                
+                // Apply rate limiting
+                if (!this.rateLimitSkillUsage(socket.id, 'monster')) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Using skills too rapidly, please slow down'
+                    });
+                    return;
+                }
+                
                 const player = this.playerManager.getPlayer(socket.id);
                 if (!player) {
                     return this.logSecurityEvent(`Player not found for attack_monster from ${socket.id}`);
                 }
                 
+                // Check if player is dead
+                if (player.isDead) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot attack while dead'
+                    });
+                    return;
+                }
+                
+                // Initialize skill cooldowns if not existing
+                if (!player.skillCooldowns) {
+                    player.skillCooldowns = new Map();
+                }
+                
+                // Get the skill being used
+                const skillId = data.skillId || 'martial_arts';
+                
+                // Check server-side cooldown
+                const now = Date.now();
+                const lastUsedTime = player.skillCooldowns.get(skillId) || 0;
+                const skillCooldown = this.getSkillCooldown(skillId);
+                
+                if (lastUsedTime > 0 && now - lastUsedTime < skillCooldown) {
+                    console.log(`Player ${socket.id} tried to use ${skillId} on monster before cooldown finished`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Skill is on cooldown'
+                    });
+                    return;
+                }
+                
+                // Update skill cooldown
+                player.skillCooldowns.set(skillId, now);
+                
                 // Get the monster
                 const monster = this.gameManager.monsterManager.getMonsterById(data.monsterId);
                 if (!monster) {
                     return this.logSecurityEvent(`Monster ${data.monsterId} not found for attack_monster from ${socket.id}`);
+                }
+                
+                // Skip attack if monster is already dead
+                if (monster.health <= 0) {
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Cannot attack a dead monster'
+                    });
+                    return;
                 }
                 
                 // Check if monster is in temple area
@@ -582,40 +689,61 @@ export class NetworkManager {
                 const monsterPos = monster.position;
                 const distance = this.calculateDistance(playerPos, monsterPos);
                 
-                // Get skill info - default to basic attack if no skill specified
-                const skillId = data.skillId || 'martial_arts';
-                const attackRange = 5; // Configurable attack range
-                const rangeTolerance = 0.3; // Small buffer for network latency/position desync
+                // Get skill range
+                const attackRange = this.getSkillRange(skillId);
                 
+                // Use a dynamic tolerance based on distance:
+                // - For closer monsters (within range): more lenient
+                // - For farther monsters: more strict
+                const baseTolerance = 1.0; // Significantly increased from 0.5
+                const rangeTolerance = Math.max(baseTolerance, attackRange * 0.2); // At least 20% of the skill's range
+                
+                // Log the check for debugging purposes
+                console.log(`Range check for ${socket.id}: distance=${distance.toFixed(2)}, range=${attackRange}, tolerance=${rangeTolerance.toFixed(2)}`);
+
                 if (distance > attackRange + rangeTolerance) {
-                    return this.log(`Player ${socket.id} attack out of range (${distance.toFixed(2)})`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Target is out of range'
+                    });
+                    // Log detailed distance information for debugging
+                    this.log(`Range error: Player ${socket.id} tried to attack monster ${monster.id} but is out of range (distance: ${distance.toFixed(2)}, range: ${attackRange}, tolerance: ${rangeTolerance.toFixed(2)})`);
+                    return; // Important: return here to prevent attack processing
                 }
                 
-                // Calculate damage based on the skill
-                let damage = 25; // Base damage
-                if (skillId === 'martial_arts') {
-                    damage = 25;
-                } else if (skillId === 'dark_strike') {
-                    damage = 35;
-                }
+                // Calculate damage from the server side
+                const damage = this.calculateMonsterDamage(skillId, player, monster);
                 
                 // Apply damage to monster
-                monster.health -= damage;
+                const previousHealth = monster.health;
+                monster.health = Math.max(0, monster.health - damage);
                 
                 // Log the attack
-                this.log(`Player ${socket.id} used ${skillId} on monster ${monster.id} for ${damage} damage`);
+                this.log(`Player ${socket.id} used ${skillId} on monster ${monster.id} for ${damage} damage (health: ${monster.health}/${monster.maxHealth || 100})`);
                 
                 // Check if monster is dead
                 if (monster.health <= 0) {
                     // Handle monster death
                     this.gameManager.handleMonsterDeath(socket.id, monster.id);
+                    
+                    // Award XP and potentially items
+                    this.rewardPlayerForMonsterKill(player, monster);
                 } else {
-                    // Broadcast monster health update
+                    // Broadcast monster health update to all clients
                     this.io.emit('monster_update', {
                         monsterId: monster.id,
-                        health: monster.health
+                        health: monster.health,
+                        maxHealth: monster.maxHealth || 100
                     });
                 }
+                
+                // Broadcast damage effect to all nearby clients
+                this.io.emit('monsterDamageEffect', {
+                    monsterId: monster.id,
+                    playerId: socket.id,
+                    damage: damage,
+                    skillId: skillId
+                });
             });
             
             // Handle player respawn request
@@ -681,7 +809,16 @@ export class NetworkManager {
                 
                 console.log(`Broadcast player ${socket.id} respawn to all clients`);
             });
+
+            // Handle client requesting state synchronization
+            socket.on('request_sync', () => {
+                // Send current state only to the requesting client
+                this.synchronizeClientState(socket.id);
+            });
         });
+
+        // Start state synchronization
+        this.startStateSynchronization();
     }
     
     /**
@@ -892,6 +1029,271 @@ export class NetworkManager {
                                 Math.abs(position.z) <= crossHorizontalHalfLength;
 
         return isOnBase || isOnVertical || isOnHorizontal;
+    }
+
+    /**
+     * Get the cooldown time for a specific skill in milliseconds
+     */
+    getSkillCooldown(skillName) {
+        switch(skillName) {
+            case 'martial_arts':
+                return 1000; // 1 second cooldown
+            case 'dark_strike':
+                return 1500; // 1.5 second cooldown
+            default:
+                return 1000; // Default cooldown
+        }
+    }
+
+    /**
+     * Calculate skill damage based on skill type and player stats
+     */
+    calculateSkillDamage(skillName, attacker, target) {
+        // Base damage for each skill
+        let baseDamage = 0;
+        switch(skillName) {
+            case 'martial_arts':
+                baseDamage = 25;
+                break;
+            case 'dark_strike':
+                baseDamage = 30;
+                break;
+            default:
+                baseDamage = 20;
+        }
+        
+        // Add randomness to damage (±20%)
+        const varianceFactor = 0.8 + (Math.random() * 0.4); // 0.8 to 1.2
+        
+        // Apply attacker's stats and target's defense (if implemented in the future)
+        let finalDamage = Math.floor(baseDamage * varianceFactor);
+        
+        // Cap damage at remaining health to prevent overkill
+        if (target.life < finalDamage) {
+            finalDamage = target.life;
+        }
+        
+        return finalDamage;
+    }
+
+    /**
+     * Get the range for a specific skill
+     */
+    getSkillRange(skillId) {
+        switch(skillId) {
+            case 'martial_arts':
+                return 3; // 3 units range
+            case 'dark_strike':
+                return 3; // 3 units range (matching client)
+            default:
+                return 2; // Default range
+        }
+    }
+
+    /**
+     * Calculate damage against a monster
+     */
+    calculateMonsterDamage(skillId, player, monster) {
+        // Base damage for each skill
+        let baseDamage = 0;
+        switch(skillId) {
+            case 'martial_arts':
+                baseDamage = 25;
+                break;
+            case 'dark_strike':
+                baseDamage = 35;
+                break;
+            default:
+                baseDamage = 20;
+        }
+        
+        // Add randomness to damage (±20%)
+        const varianceFactor = 0.8 + (Math.random() * 0.4); // 0.8 to 1.2
+        
+        // Apply player path bonuses if applicable
+        if (player.path === 'light' && skillId === 'martial_arts') {
+            baseDamage *= 1.2; // 20% bonus for light path using martial arts
+        } else if (player.path === 'dark' && skillId === 'dark_strike') {
+            baseDamage *= 1.2; // 20% bonus for dark path using dark strike
+        }
+        
+        // Calculate final damage
+        let finalDamage = Math.floor(baseDamage * varianceFactor);
+        
+        // Cap damage at remaining health to prevent overkill
+        if (monster.health < finalDamage) {
+            finalDamage = monster.health;
+        }
+        
+        return finalDamage;
+    }
+
+    /**
+     * Award XP and potentially items when a player kills a monster
+     */
+    rewardPlayerForMonsterKill(player, monster) {
+        // This method can be expanded later with more sophisticated reward logic
+        // For now, just log the kill
+        console.log(`Player ${player.id} killed monster ${monster.id}`);
+    }
+
+    /**
+     * Rate limiting for skill usage
+     * @param {string} socketId - The player's socket ID
+     * @param {string} skillType - Type of skill (e.g., 'pvp', 'monster')
+     * @returns {boolean} - Whether the action passes rate limiting
+     */
+    rateLimitSkillUsage(socketId, skillType = 'generic') {
+        const now = Date.now();
+        const key = `${socketId}:${skillType}`;
+        
+        // Initialize attempts tracker if not exists
+        if (!this.skillAttempts.has(key)) {
+            this.skillAttempts.set(key, {
+                count: 0,
+                firstAttempt: now,
+                lastAttempt: 0
+            });
+        }
+        
+        const attempts = this.skillAttempts.get(key);
+        
+        // If it's been more than 5 seconds since first attempt, reset counter
+        if (now - attempts.firstAttempt > 5000) {
+            attempts.count = 0;
+            attempts.firstAttempt = now;
+        }
+        
+        // Check for spam - max 10 attempts in 5 second window
+        if (attempts.count >= 10) {
+            // This is likely a spam attack
+            this.logSecurityEvent(`Rate limit exceeded for skill usage by player ${socketId}`, socketId);
+            return false;
+        }
+        
+        // Check if using skills too rapidly - minimum 150ms between skill uses
+        if (now - attempts.lastAttempt < 150) {
+            return false;
+        }
+        
+        // Update attempts info
+        attempts.count++;
+        attempts.lastAttempt = now;
+        this.skillAttempts.set(key, attempts);
+        
+        return true;
+    }
+
+    /**
+     * Periodically synchronize game state with all clients
+     */
+    startStateSynchronization() {
+        // Clear any existing interval
+        if (this.syncInterval) {
+            clearInterval(this.syncInterval);
+        }
+        
+        // Add a small delay before starting synchronization to ensure all managers are initialized
+        setTimeout(() => {
+            // Synchronize every 10 seconds
+            this.syncInterval = setInterval(() => {
+                this.synchronizeGameState();
+            }, 10000);
+            
+            console.log('Started game state synchronization');
+        }, 5000); // 5 second delay before starting sync
+    }
+    
+    /**
+     * Send authoritative game state to all clients
+     */
+    synchronizeGameState() {
+        if (!this.playerManager || !this.gameManager) {
+            console.warn('Cannot synchronize game state: managers not initialized');
+            return;
+        }
+        
+        // Collect all players data in a format clients can process
+        const playersData = [];
+        this.playerManager.players.forEach(player => {
+            playersData.push({
+                id: player.id,
+                position: player.position,
+                life: player.life,
+                maxLife: player.maxLife,
+                isDead: player.isDead,
+                timestamp: Date.now()
+            });
+        });
+        
+        // Collect all monsters data
+        const monstersData = [];
+        if (this.gameManager.monsterManager) {
+            try {
+                // Check if the getMonsters function exists
+                if (typeof this.gameManager.monsterManager.getMonsters === 'function') {
+                    const monsters = this.gameManager.monsterManager.getMonsters();
+                    if (Array.isArray(monsters)) {
+                        monsters.forEach(monster => {
+                            if (monster && monster.id) {
+                                monstersData.push({
+                                    id: monster.id,
+                                    position: monster.position || { x: 0, y: 0, z: 0 },
+                                    health: monster.health || 0,
+                                    maxHealth: monster.maxHealth || 100,
+                                    isDead: monster.health <= 0,
+                                    timestamp: Date.now()
+                                });
+                            }
+                        });
+                    }
+                } else if (this.gameManager.monsterManager.monsters instanceof Map) {
+                    // If getMonsters() doesn't exist but we have a monsters Map
+                    this.gameManager.monsterManager.monsters.forEach(monster => {
+                        if (monster && monster.id) {
+                            monstersData.push({
+                                id: monster.id,
+                                position: monster.position || { x: 0, y: 0, z: 0 },
+                                health: monster.health || 0,
+                                maxHealth: monster.maxHealth || 100,
+                                isDead: monster.health <= 0,
+                                timestamp: Date.now()
+                            });
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Error collecting monster data for synchronization:', error);
+            }
+        }
+        
+        // Send synchronization data to all clients
+        this.io.emit('game_state_sync', {
+            players: playersData,
+            monsters: monstersData,
+            timestamp: Date.now()
+        });
+    }
+    
+    /**
+     * Send current game state to a specific client
+     */
+    synchronizeClientState(socketId) {
+        if (!this.playerManager || !this.gameManager) {
+            console.warn(`Cannot synchronize state for client ${socketId}: managers not initialized`);
+            return;
+        }
+        
+        const socket = this.io.sockets.sockets.get(socketId);
+        if (!socket) {
+            console.warn(`Cannot find socket for client ${socketId}`);
+            return;
+        }
+        
+        // Send the same data as the global sync but only to this client
+        this.synchronizeGameState();
+        
+        console.log(`Synchronized game state for client ${socketId}`);
     }
 }
 

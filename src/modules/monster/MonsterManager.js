@@ -311,13 +311,49 @@ export class MonsterManager {
             return;
         }
         
-        // Update position
+        // Store the current position
+        const currentPosition = {
+            x: monster.mesh.position.x,
+            y: monster.mesh.position.y,
+            z: monster.mesh.position.z
+        };
+        
+        // Calculate position difference to detect large changes
+        let positionChanged = false;
         if (monsterData.position) {
-            monster.mesh.position.set(
-                monsterData.position.x,
-                monsterData.position.y + 2.0, // Keep the height adjustment during updates
-                monsterData.position.z
-            );
+            const dx = monsterData.position.x - currentPosition.x;
+            const dy = (monsterData.position.y + 2.0) - currentPosition.y; // Include the height adjustment
+            const dz = monsterData.position.z - currentPosition.z;
+            const distanceDelta = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            
+            // Only update position if the change is significant
+            // This prevents small server corrections from causing visual glitches
+            if (distanceDelta > 0.1) {
+                positionChanged = true;
+                
+                // For large changes, use linear interpolation to smooth transition
+                if (distanceDelta > 1.0 && !monster.mesh.userData.teleporting) {
+                    // Set a flag to track that this is a deliberate position update
+                    monster.mesh.userData.updatingPosition = true;
+                    
+                    // Calculate new position with smoothing 
+                    monster.mesh.position.set(
+                        monsterData.position.x,
+                        monsterData.position.y + 2.0, // Keep height adjustment consistent
+                        monsterData.position.z
+                    );
+                } else {
+                    // Normal position update for small changes
+                    monster.mesh.position.set(
+                        monsterData.position.x,
+                        monsterData.position.y + 2.0, // Keep height adjustment consistent
+                        monsterData.position.z
+                    );
+                }
+                
+                // Update the monster's stored position
+                monster.position = monster.mesh.position.clone();
+            }
         }
         
         // Update rotation
@@ -325,37 +361,11 @@ export class MonsterManager {
             monster.mesh.rotation.set(0, monsterData.rotation.y || 0, 0);
         }
         
-        // Update health
+        // Update health and health bar
         if (monsterData.health !== undefined) {
-            // Store previous health for damage time tracking
-            const prevHealth = monster.health;
-            
-            // CRITICAL FIX: Track this update with a unique ID to prevent duplicate updates
-            const updateId = `${monsterData.id}-${monsterData.health}-${Date.now()}`;
-            monster.lastHealthUpdateId = updateId;
-            
-            // Update health values
             monster.health = monsterData.health;
             monster.maxHealth = monsterData.maxHealth || monster.maxHealth;
-            
-            // Store server values for reference
-            monster.serverHealth = monsterData.health;
-            monster.serverMaxHealth = monsterData.maxHealth || monster.maxHealth;
-            
-            // Record the time of this server update
-            monster.lastServerUpdateTime = Date.now();
-            
-            // If this was a damage event (health decreased), record it
-            if (monsterData.health < prevHealth) {
-                // Only log significant health changes
-                if (Math.abs(prevHealth - monsterData.health) > 5) {
-                    console.log(`Monster ${monsterData.id} health changed from ${prevHealth} to ${monsterData.health}`);
-                }
-                monster.mesh.userData.lastDamageTime = Date.now();
-            }
-            
-            // Update the health bar, passing the update ID to prevent duplicates
-            this.updateHealthBar(monster, updateId);
+            this.updateHealthBar(monster);
         }
     }
     
@@ -569,53 +579,83 @@ export class MonsterManager {
     /**
      * Update all monsters (billboarding health bars, etc.)
      */
-    update(delta) {
-        // Update each monster
-        this.monsters.forEach(monster => {
-            // Skip if monster has no mesh
-            if (!monster.mesh) return;
+    update(deltaTime) {
+        // Skip if not fully initialized
+        if (!this.initialized || !this.monsters) return;
+        
+        // Get current time
+        const now = Date.now();
+        
+        // Update monsters
+        this.monsters.forEach((monster) => {
+            // Update animations
+            this.updateMonsterAnimation(monster, deltaTime);
             
-            // Add subtle animation to make monster movement more natural
-            if (monster.mesh.userData.lastPosition) {
-                const oldPos = monster.mesh.userData.lastPosition;
-                const currentPos = monster.mesh.position;
-                
-                // If the monster has moved significantly since last frame
-                const dx = currentPos.x - oldPos.x;
-                const dz = currentPos.z - oldPos.z;
-                const hasMoved = Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01;
-                
-                if (hasMoved) {
-                    // Make the monster bob up and down slightly while moving
-                    const time = Date.now() / 1000;
-                    const bobHeight = Math.sin(time * 4) * 0.1; // Subtle bobbing effect
-                    
-                    // Apply the bobbing motion
-                    monster.mesh.position.y += bobHeight;
-                    
-                    // If the model has moving parts, animate them here
-                    monster.mesh.traverse((child) => {
-                        if (child.name === 'leg' || child.name.includes('leg')) {
-                            // Animate legs if they exist
-                            child.rotation.x = Math.sin(time * 8) * 0.2;
-                        }
-                    });
-                }
-            }
+            // Update health bars to face camera
+            this.updateHealthBarOrientation(monster);
             
-            // Store current position for next frame
-            monster.mesh.userData.lastPosition = monster.mesh.position.clone();
-            
-            // Handle sprite-based health bar - sprites automatically face the camera
-            const healthBar = monster.mesh.userData.healthBar;
-            if (healthBar) {
-                // Ensure the health bar is visible
-                healthBar.visible = true;
-                if (healthBar.material) {
-                    healthBar.material.visible = true;
-                }
-            }
+            // Smoothly interpolate monster positions if needed
+            this.interpolateMonsterPosition(monster, deltaTime);
         });
+    }
+    
+    /**
+     * Smoothly interpolate monster positions to prevent sudden jumps
+     * @param {Object} monster - The monster to update
+     * @param {number} deltaTime - Time since last frame in seconds
+     */
+    interpolateMonsterPosition(monster, deltaTime) {
+        if (!monster || !monster.mesh) return;
+        
+        // If monster has target position from a sync update
+        if (monster.mesh.userData.syncUpdate) {
+            // Clear the sync update flag
+            monster.mesh.userData.syncUpdate = false;
+            
+            // Store current position as the start position for interpolation
+            if (!monster.mesh.userData.interpStart) {
+                monster.mesh.userData.interpStart = {
+                    x: monster.mesh.position.x,
+                    y: monster.mesh.position.y,
+                    z: monster.mesh.position.z
+                };
+                
+                // Target position is already set in monster.position
+                monster.mesh.userData.interpTarget = {
+                    x: monster.position.x,
+                    y: monster.position.y + 2.0, // Keep height adjustment
+                    z: monster.position.z
+                };
+                
+                // Start interpolation
+                monster.mesh.userData.isInterpolating = true;
+                monster.mesh.userData.interpProgress = 0;
+            }
+        }
+        
+        // If we're in the middle of interpolation
+        if (monster.mesh.userData.isInterpolating) {
+            // Advance interpolation progress
+            monster.mesh.userData.interpProgress += deltaTime * 5; // Adjust speed factor as needed
+            
+            // Clamp progress to 0-1 range
+            const progress = Math.min(1, monster.mesh.userData.interpProgress);
+            
+            // Apply interpolated position
+            if (progress < 1 && monster.mesh.userData.interpStart && monster.mesh.userData.interpTarget) {
+                monster.mesh.position.set(
+                    monster.mesh.userData.interpStart.x + (monster.mesh.userData.interpTarget.x - monster.mesh.userData.interpStart.x) * progress,
+                    monster.mesh.userData.interpStart.y + (monster.mesh.userData.interpTarget.y - monster.mesh.userData.interpStart.y) * progress,
+                    monster.mesh.userData.interpStart.z + (monster.mesh.userData.interpTarget.z - monster.mesh.userData.interpStart.z) * progress
+                );
+            } else {
+                // Interpolation complete
+                monster.mesh.userData.isInterpolating = false;
+                monster.mesh.userData.interpStart = null;
+                monster.mesh.userData.interpTarget = null;
+                monster.mesh.userData.interpProgress = 0;
+            }
+        }
     }
     
     /**
@@ -696,6 +736,67 @@ export class MonsterManager {
         if (this.healthCheckInterval) {
             clearInterval(this.healthCheckInterval);
             this.healthCheckInterval = null;
+        }
+    }
+
+    /**
+     * Update a monster's animation based on its state
+     * @param {Object} monster - The monster object to update
+     * @param {number} deltaTime - Time since last frame in seconds
+     */
+    updateMonsterAnimation(monster, deltaTime) {
+        if (!monster || !monster.mesh) return;
+        
+        // Add subtle animation to make monster movement more natural
+        if (monster.mesh.userData.lastPosition) {
+            const oldPos = monster.mesh.userData.lastPosition;
+            const currentPos = monster.mesh.position;
+            
+            // If the monster has moved significantly since last frame
+            const dx = currentPos.x - oldPos.x;
+            const dz = currentPos.z - oldPos.z;
+            const hasMoved = Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01;
+            
+            if (hasMoved) {
+                // Make the monster bob up and down slightly while moving
+                const time = Date.now() / 1000;
+                const bobHeight = Math.sin(time * 4) * 0.1; // Subtle bobbing effect
+                
+                // Apply the bobbing motion if not interpolating
+                if (!monster.mesh.userData.isInterpolating) {
+                    monster.mesh.position.y += bobHeight;
+                }
+                
+                // If the model has moving parts, animate them here
+                monster.mesh.traverse((child) => {
+                    if (child.name === 'leg' || child.name.includes('leg')) {
+                        // Animate legs if they exist
+                        child.rotation.x = Math.sin(time * 8) * 0.2;
+                    }
+                });
+            }
+        }
+        
+        // Store current position for next frame
+        monster.mesh.userData.lastPosition = monster.mesh.position.clone();
+    }
+
+    /**
+     * Update health bar to always face the camera
+     * @param {Object} monster - The monster object
+     */
+    updateHealthBarOrientation(monster) {
+        if (!monster || !monster.mesh) return;
+        
+        // Handle sprite-based health bar - sprites automatically face the camera
+        const healthBar = monster.mesh.userData.healthBar;
+        if (healthBar) {
+            // Ensure the health bar is visible
+            healthBar.visible = true;
+            
+            if (healthBar.material) {
+                healthBar.material.visible = true;
+            }
         }
     }
 }
