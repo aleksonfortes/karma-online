@@ -543,6 +543,21 @@ export class Game {
                 }
             }
             
+            // 5. Check monster collisions
+            if (!collision && this.monsterManager) {
+                const monsterCollision = this.monsterManager.checkMonsterCollisions(
+                    this.localPlayer.position,
+                    previousPosition
+                );
+                if (monsterCollision) {
+                    collision = true;
+                    // Ensure height is correct after monster collision resolution
+                    if (this.terrainManager) {
+                        this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                    }
+                }
+            }
+            
             // If there was a collision, reset position
             if (collision) {
                 this.localPlayer.position.copy(previousPosition);
