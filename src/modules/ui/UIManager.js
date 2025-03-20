@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import GameConstants from '../../../server/src/config/GameConstants.js';
 
 export class UIManager {
     constructor(game) {
@@ -1878,7 +1879,32 @@ export class UIManager {
         
         // If level up occurred, show a level up notification
         if (levelUp && newLevel) {
+            // Main level up notification
             this.showNotification(`Level up! You are now level ${newLevel}`, 'yellow', 3000);
+            
+            // Add stat improvement notifications
+            setTimeout(() => {
+                this.showNotification(`+${GameConstants.LEVEL_REWARDS.LIFE_PER_LEVEL} Max Life`, '#77ff77', 2500);
+            }, 1000);
+            
+            setTimeout(() => {
+                this.showNotification(`+${GameConstants.LEVEL_REWARDS.MANA_PER_LEVEL} Max Mana`, '#7777ff', 2500);
+            }, 1500);
+            
+            setTimeout(() => {
+                const damageBonus = Math.round(GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL * 100);
+                this.showNotification(`+${damageBonus}% Damage`, '#ff7777', 2500);
+            }, 2000);
+            
+            setTimeout(() => {
+                const reduction = Math.round(GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL * 100);
+                this.showNotification(`+${reduction}% Damage Reduction`, '#aaddff', 2500);
+            }, 2500);
+            
+            // Play level up sound if available
+            if (this.game.soundManager && this.game.soundManager.playSound) {
+                this.game.soundManager.playSound('level_up');
+            }
         }
     }
 

@@ -915,6 +915,8 @@ export class NetworkManager {
                     life: life,
                     maxLife: maxLife,
                     isDead: isDead,
+                    mana: typeof player.mana === 'number' ? player.mana : 100,
+                    maxMana: typeof player.maxMana === 'number' ? player.maxMana : 100,
                     experience: player.experience || 0,
                     level: player.level || 1,
                     // Add a unique update ID to prevent race conditions
@@ -1110,8 +1112,31 @@ export class NetworkManager {
         // Add randomness to damage (±20%)
         const varianceFactor = 0.8 + (Math.random() * 0.4); // 0.8 to 1.2
         
-        // Apply attacker's stats and target's defense (if implemented in the future)
-        let finalDamage = Math.floor(baseDamage * varianceFactor);
+        // Apply level-based damage bonus
+        const attackerLevel = attacker.level || 1;
+        const damageBonus = 1 + (attackerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL;
+        
+        // Apply attacker's path bonuses if applicable
+        let pathBonus = 1.0;
+        if (attacker.path === 'light' && skillName === 'martial_arts') {
+            pathBonus = 1.2; // 20% bonus for light path using martial arts
+        } else if (attacker.path === 'dark' && skillName === 'dark_strike') {
+            pathBonus = 1.2; // 20% bonus for dark path using dark strike
+        }
+        
+        // Apply damage calculation
+        let finalDamage = Math.floor(baseDamage * varianceFactor * damageBonus * pathBonus);
+        
+        // Apply target's level-based damage reduction
+        const targetLevel = target.level || 1;
+        const maxDamageReduction = 0.3; // Cap at 30% damage reduction
+        const damageReduction = Math.min(
+            maxDamageReduction, 
+            (targetLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL
+        );
+        
+        // Apply damage reduction to the final damage
+        finalDamage = Math.floor(finalDamage * (1 - damageReduction));
         
         // Cap damage at remaining health to prevent overkill
         if (target.life < finalDamage) {
@@ -1155,15 +1180,20 @@ export class NetworkManager {
         // Add randomness to damage (±20%)
         const varianceFactor = 0.8 + (Math.random() * 0.4); // 0.8 to 1.2
         
+        // Apply player's level-based damage bonus
+        const playerLevel = player.level || 1;
+        const damageBonus = 1 + (playerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL;
+        
         // Apply player path bonuses if applicable
+        let pathBonus = 1.0;
         if (player.path === 'light' && skillId === 'martial_arts') {
-            baseDamage *= 1.2; // 20% bonus for light path using martial arts
+            pathBonus *= 1.2; // 20% bonus for light path using martial arts
         } else if (player.path === 'dark' && skillId === 'dark_strike') {
-            baseDamage *= 1.2; // 20% bonus for dark path using dark strike
+            pathBonus *= 1.2; // 20% bonus for dark path using dark strike
         }
         
         // Calculate final damage
-        let finalDamage = Math.floor(baseDamage * varianceFactor);
+        let finalDamage = Math.floor(baseDamage * varianceFactor * damageBonus * pathBonus);
         
         // Cap damage at remaining health to prevent overkill
         if (monster.health < finalDamage) {
