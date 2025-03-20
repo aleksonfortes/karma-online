@@ -820,6 +820,17 @@ export class NetworkManager {
                 if (data.life <= 0) {
                     playerMesh.userData.isDead = true;
                     
+                    // Make other player invisible when dead
+                    if (data.id !== this.socket.id) {
+                        playerMesh.visible = false;
+                        
+                        // IMPORTANT: Immediately move dead player to temple position
+                        // This ensures they don't appear at death location before respawning
+                        playerMesh.position.set(0, 0, 0); // Temple is at origin
+                        
+                        console.log(`Made dead player ${data.id} invisible in lifeUpdate and moved to temple`);
+                    }
+                    
                     // If this player is the current target, clear the target display immediately
                     if (this.game.targetingManager && 
                         this.game.targetingManager.currentTarget && 
@@ -851,6 +862,9 @@ export class NetworkManager {
                     // If player was previously marked as dead but now has health, remove dead flag
                     if (playerMesh.userData.isDead) {
                         playerMesh.userData.isDead = false;
+                        
+                        // NOTE: Do NOT make player visible here
+                        // This will be handled by the playerRespawned event instead
                     }
                     
                     // Always update the target display if this player is our current target
@@ -1136,6 +1150,33 @@ export class NetworkManager {
                 }
             }
         });
+
+        // Handle player killed event (when another player was killed)
+        this.socket.on('playerKilled', (data) => {
+            console.log('Received player killed event:', data);
+            
+            // Get the player that was killed
+            const killedPlayer = this.game.playerManager.players.get(data.id);
+            if (killedPlayer) {
+                // Mark player as dead
+                if (!killedPlayer.userData) killedPlayer.userData = {};
+                killedPlayer.userData.isDead = true;
+                
+                // Make killed player invisible
+                killedPlayer.visible = false;
+                
+                // IMPORTANT: Immediately move killed player to temple position
+                // This ensures they don't appear at death location before respawning
+                killedPlayer.position.set(0, 0, 0); // Temple is at origin
+                
+                console.log(`Made killed player ${data.id} invisible and moved to temple`);
+                
+                // Show kill notification if we're the killer
+                if (data.killerId === this.socket.id && this.game.uiManager) {
+                    this.game.uiManager.showNotification(`You killed another player!`, '#00ff00');
+                }
+            }
+        });
         
         // Handle respawn confirmation
         this.socket.on('respawnConfirmed', (data) => {
@@ -1297,6 +1338,14 @@ export class NetworkManager {
                 // Update health bar
                 this.game.playerManager.updateHealthBar(playerMesh);
             }
+            
+            // Mark player as alive
+            if (!playerMesh.userData) playerMesh.userData = {};
+            playerMesh.userData.isDead = false;
+            
+            // Make player visible again
+            playerMesh.visible = true;
+            console.log(`Made respawned player ${data.id} visible again`);
         });
 
         // Set up monster data handler
@@ -2429,15 +2478,46 @@ export class NetworkManager {
      * @returns {Promise} - A promise that resolves when the server confirms the skill
      */
     useSkill(targetId, skillName, damage = 0) {
-        if (!this.connected || !this.socket) {
-            console.warn('Cannot use skill: Not connected to server');
-            return Promise.resolve({ success: false, errorType: 'not_connected' });
+        // Check if we have network connection
+        if (!this.socket) {
+            console.warn('Cannot use skill: No network connection');
+            // Show error message to player
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('Cannot use skills: Network connection lost', '#ff0000');
+            }
+            return false;
         }
         
-        if (!targetId || !skillName) {
-            console.warn('Invalid skill parameters');
-            return Promise.resolve({ success: false, errorType: 'invalid_params' });
+        // Skip if player is dead
+        if (this.playerDead) {
+            console.warn('Cannot use skill: Player is dead');
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('Cannot use skills while dead', '#ff0000');
+            }
+            return false;
         }
+        
+        // Check if target is dead
+        const targetPlayer = this.game.playerManager.players.get(targetId);
+        if (targetPlayer && targetPlayer.userData && targetPlayer.userData.isDead) {
+            console.warn('Cannot use skill: Target player is dead');
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('Cannot attack a dead player', '#ff0000');
+            }
+            return false;
+        }
+        
+        // Extra check: Don't allow attacking invisible players (they might be in respawn state)
+        if (targetPlayer && !targetPlayer.visible) {
+            console.warn('Cannot use skill: Target player is invisible/respawning');
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('Cannot attack a player who is respawning', '#ff0000');
+            }
+            return false;
+        }
+        
+        // Create a unique request ID to track this skill use
+        const requestId = `${this.socket.id}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         
         // Debugging info
         console.log(`Attempting to use ${skillName} on target ${targetId} with damage ${damage}`);
