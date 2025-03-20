@@ -86,35 +86,35 @@ export class MonsterManager {
      * Initialize monsters in the game world
      */
     initializeMonsters() {
-        // Define spawn positions away from temple, closer to water edges
+        // Define spawn positions away from temple, at safe distances from water edges
         const spawnPositions = [
-            // North quadrant (closer to water)
-            { x: 0, y: 0, z: 60 },
-            { x: 20, y: 0, z: 60 },
-            { x: -20, y: 0, z: 60 },
-            { x: 40, y: 0, z: 50 },
-            { x: -40, y: 0, z: 50 },
+            // North quadrant (safe from water)
+            { x: 0, y: 0, z: 55 },    // Was 60, now 55
+            { x: 20, y: 0, z: 50 },   // Was 60, now 50
+            { x: -20, y: 0, z: 50 },  // Was 60, now 50
+            { x: 35, y: 0, z: 45 },   // Was 40/50, now 35/45
+            { x: -35, y: 0, z: 45 },  // Was -40/50, now -35/45
             
-            // East quadrant (closer to water)
-            { x: 60, y: 0, z: 0 },
-            { x: 60, y: 0, z: 20 },
-            { x: 60, y: 0, z: -20 },
-            { x: 50, y: 0, z: 40 },
-            { x: 50, y: 0, z: -40 },
+            // East quadrant (safe from water)
+            { x: 55, y: 0, z: 0 },    // Was 60, now 55
+            { x: 50, y: 0, z: 20 },   // Was 60, now 50
+            { x: 50, y: 0, z: -20 },  // Was 60, now 50
+            { x: 45, y: 0, z: 35 },   // Was 50/40, now 45/35
+            { x: 45, y: 0, z: -35 },  // Was 50/-40, now 45/-35
             
-            // South quadrant (closer to water)
-            { x: 0, y: 0, z: -60 },
-            { x: 20, y: 0, z: -60 },
-            { x: -20, y: 0, z: -60 },
-            { x: 40, y: 0, z: -50 },
-            { x: -40, y: 0, z: -50 },
+            // South quadrant (safe from water)
+            { x: 0, y: 0, z: -55 },   // Was -60, now -55
+            { x: 20, y: 0, z: -50 },  // Was -60, now -50
+            { x: -20, y: 0, z: -50 }, // Was -60, now -50
+            { x: 35, y: 0, z: -45 },  // Was 40/-50, now 35/-45
+            { x: -35, y: 0, z: -45 }, // Was -40/-50, now -35/-45
             
-            // West quadrant (closer to water)
-            { x: -60, y: 0, z: 0 },
-            { x: -60, y: 0, z: 20 },
-            { x: -60, y: 0, z: -20 },
-            { x: -50, y: 0, z: 40 },
-            { x: -50, y: 0, z: -40 }
+            // West quadrant (safe from water)
+            { x: -55, y: 0, z: 0 },   // Was -60, now -55
+            { x: -50, y: 0, z: 20 },  // Was -60, now -50
+            { x: -50, y: 0, z: -20 }, // Was -60, now -50
+            { x: -45, y: 0, z: 35 },  // Was -50/40, now -45/35
+            { x: -45, y: 0, z: -35 }  // Was -50/-40, now -45/-35
         ];
         
         // Spawn monsters at each position
@@ -122,7 +122,7 @@ export class MonsterManager {
             this.spawnMonsterAtPosition('BASIC', position);
         });
         
-        console.log(`Spawned ${spawnPositions.length} monsters around the map, closer to water edges`);
+        console.log(`Spawned ${spawnPositions.length} monsters around the map, safely away from water edges`);
     }
     
     /**
@@ -270,33 +270,33 @@ export class MonsterManager {
         
         // Define water edge positions for respawning
         const waterEdgePositions = [
-            // North water edge
-            { x: 0, y: 0, z: 70 },
-            { x: 20, y: 0, z: 65 },
-            { x: -20, y: 0, z: 65 },
-            { x: 40, y: 0, z: 60 },
-            { x: -40, y: 0, z: 60 },
+            // North water edge (moved slightly inward from water)
+            { x: 0, y: 0, z: 60 },    // Was 70, now 60
+            { x: 20, y: 0, z: 55 },   // Was 65, now 55
+            { x: -20, y: 0, z: 55 },  // Was 65, now 55
+            { x: 40, y: 0, z: 50 },   // Was 60, now 50
+            { x: -40, y: 0, z: 50 },  // Was 60, now 50
             
-            // East water edge
-            { x: 70, y: 0, z: 0 },
-            { x: 65, y: 0, z: 20 },
-            { x: 65, y: 0, z: -20 },
-            { x: 60, y: 0, z: 40 },
-            { x: 60, y: 0, z: -40 },
+            // East water edge (moved slightly inward from water)
+            { x: 60, y: 0, z: 0 },    // Was 70, now 60
+            { x: 55, y: 0, z: 20 },   // Was 65, now 55
+            { x: 55, y: 0, z: -20 },  // Was 65, now 55
+            { x: 50, y: 0, z: 40 },   // Was 60, now 50
+            { x: 50, y: 0, z: -40 },  // Was 60, now 50
             
-            // South water edge
-            { x: 0, y: 0, z: -70 },
-            { x: 20, y: 0, z: -65 },
-            { x: -20, y: 0, z: -65 },
-            { x: 40, y: 0, z: -60 },
-            { x: -40, y: 0, z: -60 },
+            // South water edge (moved slightly inward from water)
+            { x: 0, y: 0, z: -60 },   // Was -70, now -60
+            { x: 20, y: 0, z: -55 },  // Was -65, now -55
+            { x: -20, y: 0, z: -55 }, // Was -65, now -55
+            { x: 40, y: 0, z: -50 },  // Was -60, now -50
+            { x: -40, y: 0, z: -50 }, // Was -60, now -50
             
-            // West water edge
-            { x: -70, y: 0, z: 0 },
-            { x: -65, y: 0, z: 20 },
-            { x: -65, y: 0, z: -20 },
-            { x: -60, y: 0, z: 40 },
-            { x: -60, y: 0, z: -40 }
+            // West water edge (moved slightly inward from water)
+            { x: -60, y: 0, z: 0 },   // Was -70, now -60
+            { x: -55, y: 0, z: 20 },  // Was -65, now -55
+            { x: -55, y: 0, z: -20 }, // Was -65, now -55
+            { x: -50, y: 0, z: 40 },  // Was -60, now -50
+            { x: -50, y: 0, z: -40 }  // Was -60, now -50
         ];
         
         // Schedule respawn with a random position from the water edge positions
@@ -319,16 +319,36 @@ export class MonsterManager {
             const newPosition = waterEdgePositions[randomIndex];
             
             // Create randomness around the chosen position to avoid monsters stacking
+            // Reduced random offset to avoid pushing monsters into water
             const randomOffset = {
-                x: (Math.random() * 20) - 10, // ±10 units (increased from 5)
-                z: (Math.random() * 20) - 10  // ±10 units (increased from 5)
+                x: (Math.random() * 10) - 5, // ±5 units (reduced from ±10)
+                z: (Math.random() * 10) - 5  // ±5 units (reduced from ±10)
             };
             
-            const finalPosition = {
+            // Calculate the final position
+            let finalPosition = {
                 x: newPosition.x + randomOffset.x,
                 y: 0,
                 z: newPosition.z + randomOffset.z
             };
+            
+            // Extra check to ensure the position is not too close to water
+            // If the position is too close to the map edge, move it inward
+            const MAP_EDGE = 65; // Water starts around 70-75
+            const SAFE_MARGIN = 5; // Keep at least 5 units away from edge
+            
+            // Check each coordinate and adjust if needed
+            if (Math.abs(finalPosition.x) > MAP_EDGE - SAFE_MARGIN) {
+                // If too close to east/west edge, move inward
+                const direction = finalPosition.x > 0 ? -1 : 1; // Move inward
+                finalPosition.x = (MAP_EDGE - SAFE_MARGIN) * (finalPosition.x > 0 ? 1 : -1);
+            }
+            
+            if (Math.abs(finalPosition.z) > MAP_EDGE - SAFE_MARGIN) {
+                // If too close to north/south edge, move inward
+                const direction = finalPosition.z > 0 ? -1 : 1; // Move inward
+                finalPosition.z = (MAP_EDGE - SAFE_MARGIN) * (finalPosition.z > 0 ? 1 : -1);
+            }
             
             // Ensure the position is valid (not in temple)
             if (this.isInTemple(finalPosition)) {
@@ -394,9 +414,27 @@ export class MonsterManager {
      * @returns {Array} Array of monster data
      */
     getAllMonsters() {
-        // Only return alive monsters to the client
+        // Filter out any monsters that are:
+        // 1. Explicitly marked as dead
+        // 2. Have health <= 0
         return Array.from(this.monsters.values())
-            .filter(monster => monster.isAlive);
+            .filter(monster => {
+                // First check explicit alive flag
+                if (monster.isAlive === false) {
+                    return false;
+                }
+                
+                // Then check health - any monster with 0 or negative health is dead
+                if (monster.health !== undefined && monster.health <= 0) {
+                    // Correct inconsistent state - monster with 0 health should be marked dead
+                    monster.isAlive = false;
+                    console.log(`Corrected inconsistent state for monster ${monster.id}: had 0 health but was marked alive`);
+                    return false;
+                }
+                
+                // Monster is alive
+                return true;
+            });
     }
     
     /**

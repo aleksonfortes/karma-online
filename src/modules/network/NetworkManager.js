@@ -12,56 +12,117 @@ const NETWORK_CONSTANTS = {
 export class NetworkManager {
     constructor(game) {
         this.game = game;
-        this.isConnected = false;
-        this.reconnecting = false;
-        this.reconnectAttempts = 0;
+        this.socket = null;
+        this.connected = false;
         this.wasDisconnected = false;
+        this.reconnectAttempts = 0;
+        this.lastStateUpdate = 0;
         
-        // Use the server URL from the centralized configuration
-        const SERVER_URL = getServerUrl();
-            
-        console.log('Connecting to server at:', SERVER_URL);
-        this.socket = io(SERVER_URL, {
-            transports: ['websocket'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            autoConnect: true,
-            forceNew: true // Each tab is a new player
-        });
+        // Connection state tracking
+        this.connectionState = {
+            isReconnecting: false,
+            reconnectAttempts: 0,
+            maxReconnectAttempts: 5,
+            reconnectDelay: 2000,
+            maxReconnectDelay: 30000
+        };
         
-        // Set up handlers
-        this.setupSocketHandlers();
-        
-        // Player state
-        this.playerDead = false;
-        
-        // Movement tracking for optimizing network updates
-        this.lastPositionUpdate = { x: 0, y: 0, z: 0 };
-        this.lastRotationUpdate = { y: 0 };
-        this.positionUpdateThreshold = 0.1;
-        this.rotationUpdateThreshold = 0.1;
-        this._lastPathChoiceSent = null;
-        
-        // Health check interval for ensuring consistent health values
-        this.healthCheckInterval = null;
-        
-        // Store last server positions for reconciliation
-        this.lastServerPositions = new Map();
-        this.pendingInputs = [];
-        this.pendingUpdates = new Map(); // Store updates for players that don't exist yet
-        this.lastHealthLog = {};
-        
-        // Storage for monster data received before monster manager is initialized
+        // Fix for monster manager waiting
         this.pendingMonsterData = null;
+        this.monsterManagerCheckInterval = null;
+        
+        // Connect to the server after initializing all fields
+        this.connect();
+    }
+    
+    /**
+     * Connect to the server using socket.io
+     */
+    connect() {
+        try {
+            // Use the server URL from the centralized configuration
+            const SERVER_URL = getServerUrl();
+            
+            console.log('Connecting to server at:', SERVER_URL);
+            this.socket = io(SERVER_URL, {
+                transports: ['websocket'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                autoConnect: true,
+                forceNew: true // Each tab is a new player
+            });
+            
+            // Set up handlers after socket is created
+            this.setupSocketHandlers();
+        } catch (error) {
+            console.error('Error connecting to server:', error);
+            // Retry connection after a delay
+            setTimeout(() => this.attemptReconnect(), 2000);
+        }
+    }
+    
+    /**
+     * Wait for the MonsterManager to be initialized before processing monster data
+     * Periodically checks if the monster manager is ready and processes pending monster data
+     */
+    waitForMonsterManager() {
+        // Clear any existing interval
+        if (this.monsterManagerCheckInterval) {
+            clearInterval(this.monsterManagerCheckInterval);
+        }
+        
+        // Set up a check interval if not already set
+        this.monsterManagerCheckInterval = setInterval(() => {
+            if (this.game.monsterManager && this.game.monsterManager.initialized) {
+                console.log('Monster manager now initialized, processing pending monster data');
+                
+                // Process the pending monster data
+                if (this.pendingMonsterData) {
+                    this.game.monsterManager.processServerMonsters(this.pendingMonsterData);
+                    this.pendingMonsterData = null;
+                }
+                
+                // Clear the interval
+                clearInterval(this.monsterManagerCheckInterval);
+                this.monsterManagerCheckInterval = null;
+            }
+        }, 100);
+        
+        // Safety timeout to prevent infinite checking - clear after 10 seconds
+        setTimeout(() => {
+            if (this.monsterManagerCheckInterval) {
+                console.warn('Monster manager still not initialized after 10 seconds, clearing check interval');
+                clearInterval(this.monsterManagerCheckInterval);
+                this.monsterManagerCheckInterval = null;
+            }
+        }, 10000);
     }
 
     async init() {
         return new Promise((resolve) => {
+            // Make sure we have a socket connection
+            if (!this.socket) {
+                try {
+                    // Try to connect
+                    this.connect();
+                } catch (error) {
+                    console.error('Failed to create socket connection:', error);
+                    resolve(false);
+                    return;
+                }
+            }
+            
             if (this.socket) {
+                // If already connected, resolve immediately
+                if (this.connected) {
+                    resolve(true);
+                    return;
+                }
+                
                 // Listen for connection
                 this.socket.once('connect', () => {
-                    this.isConnected = true;
+                    this.connected = true;
                     resolve(true);
                 });
                 
@@ -73,7 +134,7 @@ export class NetworkManager {
                 
                 // Set a timeout
                 setTimeout(() => {
-                    if (!this.isConnected) {
+                    if (!this.connected) {
                         console.warn('Connection timeout');
                         resolve(false);
                     }
@@ -87,17 +148,17 @@ export class NetworkManager {
     setupSocketHandlers() {
         if (!this.socket) {
             console.warn('Cannot setup handlers: No socket connection');
-            return;
+            return false; // Return false to indicate failure
         }
 
         // Handle successful connection
         this.socket.on('connect', () => {
             console.log('Connected to server with ID:', this.socket.id);
-            this.isConnected = true;
-            this.wasDisconnected = false;
+            this.connected = true;
             
             // Reset reconnection state
-            this.reconnecting = false;
+            this.connectionState.isReconnecting = false;
+            this.connectionState.reconnectAttempts = 0;
             this.reconnectAttempts = 0;
             
             // Show connection message
@@ -110,11 +171,11 @@ export class NetworkManager {
         // Handle connection error
         this.socket.on('connect_error', (error) => {
             console.warn('Connection error:', error.message);
-            this.isConnected = false;
+            this.connected = false;
             
             // Only attempt to reconnect if not already reconnecting
-            if (!this.reconnecting) {
-                this.reconnecting = true;
+            if (!this.connectionState.isReconnecting) {
+                this.connectionState.isReconnecting = true;
                 setTimeout(() => {
                     this.attemptReconnect();
                 }, 2000); // Wait 2 seconds before attempting to reconnect
@@ -124,8 +185,7 @@ export class NetworkManager {
         // Handle disconnection
         this.socket.on('disconnect', (reason) => {
             console.warn('Disconnected from server. Reason:', reason);
-            this.isConnected = false;
-            this.wasDisconnected = true;
+            this.connected = false;
             
             // Disable player controls
             if (this.game.controls) {
@@ -139,8 +199,8 @@ export class NetworkManager {
             this.showConnectionStatus('Disconnected from server. Attempting to reconnect...');
             
             // Attempt to reconnect after a short delay
-            if (!this.reconnecting) {
-                this.reconnecting = true;
+            if (!this.connectionState.isReconnecting) {
+                this.connectionState.isReconnecting = true;
                 setTimeout(() => {
                     this.attemptReconnect();
                 }, 2000); // Wait 2 seconds before attempting to reconnect
@@ -1462,6 +1522,8 @@ export class NetworkManager {
                 );
             }
         });
+        
+        return true; // Return true to indicate success
     }
 
     handlePathSelectionResult(result) {
@@ -1519,7 +1581,7 @@ export class NetworkManager {
         console.log('Handling reconnection to server');
         
         // Track that we're reconnecting
-        this.reconnecting = true;
+        this.connectionState.isReconnecting = true;
         
         // Request full game state synchronization from server
         this.requestStateSync();
@@ -1601,7 +1663,7 @@ export class NetworkManager {
     }
 
     sendPlayerState() {
-        if (!this.isConnected || !this.socket || !this.game?.localPlayer) return;
+        if (!this.connected || !this.socket || !this.game?.localPlayer) return;
         
         // Send current player state to server
         this.socket.emit('playerMovement', {
@@ -1621,7 +1683,20 @@ export class NetworkManager {
         });
     }
 
-    update() {
+    update(delta, isOfflineMode = false) {
+        // In offline mode, skip network operations but update local state
+        if (isOfflineMode) {
+            // Still update any local state needed even in offline mode
+            if (this.game?.localPlayer) {
+                // Update local player position if needed
+                const now = Date.now();
+                if (!this.lastStateUpdate || now - this.lastStateUpdate >= 100) { 
+                    this.lastStateUpdate = now;
+                }
+            }
+            return;
+        }
+        
         // Skip if not connected or no local player
         if (!this.socket?.connected || !this.game?.localPlayer) return;
         
@@ -2112,7 +2187,7 @@ export class NetworkManager {
      * Request game state synchronization from the server
      */
     requestStateSync() {
-        if (this.socket && this.isConnected) {
+        if (this.socket && this.connected) {
             console.log('Requesting game state sync from server');
             try {
                 this.socket.emit('request_sync');
@@ -2128,13 +2203,13 @@ export class NetworkManager {
      * Attempt to reconnect to the server
      */
     attemptReconnect() {
-        if (this.reconnectAttempts >= 5) {
+        if (this.connectionState.reconnectAttempts >= this.connectionState.maxReconnectAttempts) {
             console.warn('Maximum reconnection attempts reached');
             return;
         }
         
-        this.reconnectAttempts++;
-        console.log(`Attempting to reconnect (attempt ${this.reconnectAttempts}/5)...`);
+        this.connectionState.reconnectAttempts++;
+        console.log(`Attempting to reconnect (attempt ${this.connectionState.reconnectAttempts}/${this.connectionState.maxReconnectAttempts})...`);
         
         try {
             // Close existing socket if it exists
@@ -2148,7 +2223,7 @@ export class NetworkManager {
                 transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 5,
-                reconnectionDelay: 1000,
+                reconnectionDelay: this.connectionState.reconnectDelay,
                 autoConnect: true,
                 forceNew: true
             });
@@ -2227,7 +2302,7 @@ export class NetworkManager {
      * @returns {Promise<boolean>} - Promise that resolves to true if skill was confirmed by server
      */
     useSkill(targetId, skillName, damage = 0) {
-        if (!this.isConnected || !this.socket) {
+        if (!this.connected || !this.socket) {
             console.warn('Cannot use skill: Not connected to server');
             return Promise.resolve(false);
         }

@@ -382,12 +382,7 @@ export class NetworkManager {
             
             // Handle player death notification
             socket.on('playerDeath', (data) => {
-                // Validate data
-                if (!data) {
-                    return;
-                }
-                
-                // Handle player death on server
+                console.log(`Player ${socket.id} reported their own death`);
                 this.playerManager.handlePlayerDeath(socket.id);
             });
             
@@ -814,6 +809,45 @@ export class NetworkManager {
             socket.on('request_sync', () => {
                 // Send current state only to the requesting client
                 this.synchronizeClientState(socket.id);
+            });
+
+            // Handle client-side monster state updates
+            socket.on('client_monster_state', (data) => {
+                if (!data || !data.monsterId || !data.clientState) {
+                    console.warn('Received invalid client_monster_state data:', data);
+                    return;
+                }
+                
+                const { monsterId, clientState } = data;
+                const monster = this.gameManager.monsterManager.getMonsterById(monsterId);
+                
+                // If monster doesn't exist or is already marked as dead, nothing to do
+                if (!monster) {
+                    console.log(`Client reported state for non-existent monster ${monsterId}`);
+                    return;
+                }
+                
+                // If client reports monster is dead with 0 health
+                if (clientState.isAlive === false && clientState.health === 0) {
+                    // Check if our server thinks it's alive
+                    if (monster.isAlive === true) {
+                        console.log(`Client reported monster ${monsterId} as dead but server thinks it's alive - syncing state`);
+                        
+                        // Trust the client in this case - mark as dead
+                        monster.isAlive = false;
+                        monster.health = 0;
+                        
+                        // Notify all clients about monster death
+                        this.io.emit('monster_death', {
+                            monsterId: monsterId,
+                            killerId: null, // No known killer
+                            position: monster.position
+                        });
+                    } else {
+                        // Both agree monster is dead, log for monitoring
+                        console.log(`Both client and server agree monster ${monsterId} is dead`);
+                    }
+                }
             });
         });
 

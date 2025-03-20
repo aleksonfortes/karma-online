@@ -19,6 +19,7 @@ export class UIManager {
     init() {
         // This method is called during game initialization
         // We'll create our UI elements when requested, not immediately
+        return Promise.resolve(); // Return promise for async compatibility
     }
     
     createUI() {
@@ -1094,80 +1095,72 @@ export class UIManager {
     }
     
     showErrorScreen(message) {
-        // Create error screen if it doesn't exist
-        if (!this.errorScreen) {
-            this.errorScreen = document.createElement('div');
-            this.errorScreen.style.position = 'fixed';
-            this.errorScreen.style.top = '0';
-            this.errorScreen.style.left = '0';
-            this.errorScreen.style.width = '100%';
-            this.errorScreen.style.height = '100%';
-            this.errorScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            this.errorScreen.style.display = 'flex';
-            this.errorScreen.style.flexDirection = 'column';
-            this.errorScreen.style.alignItems = 'center';
-            this.errorScreen.style.justifyContent = 'center';
-            this.errorScreen.style.color = '#ffffff';
-            this.errorScreen.style.fontFamily = 'Arial, sans-serif';
-            this.errorScreen.style.zIndex = '9999';
-            
-            // Error icon (X)
-            const icon = document.createElement('div');
-            icon.style.width = '80px';
-            icon.style.height = '80px';
-            icon.style.backgroundColor = '#ff0000';
-            icon.style.borderRadius = '50%';
-            icon.style.display = 'flex';
-            icon.style.alignItems = 'center';
-            icon.style.justifyContent = 'center';
-            icon.style.marginBottom = '30px';
-            
-            // X inside circle
-            const x = document.createElement('div');
-            x.textContent = '✕';
-            x.style.color = 'white';
-            x.style.fontSize = '50px';
-            icon.appendChild(x);
-            
-            // Error heading
-            const heading = document.createElement('div');
-            heading.textContent = 'Error';
-            heading.style.fontSize = '32px';
-            heading.style.fontWeight = 'bold';
-            heading.style.marginBottom = '20px';
-            heading.style.color = '#ff0000';
-            
-            // Error message
-            const text = document.createElement('div');
-            text.style.fontSize = '18px';
-            text.style.maxWidth = '600px';
-            text.style.textAlign = 'center';
-            text.style.marginBottom = '30px';
-            
-            // Retry button
-            const button = document.createElement('button');
-            button.textContent = 'Retry';
-            button.style.padding = '10px 30px';
-            button.style.fontSize = '18px';
-            button.style.backgroundColor = '#ff0000';
-            button.style.color = 'white';
-            button.style.border = 'none';
-            button.style.borderRadius = '5px';
-            button.style.cursor = 'pointer';
-            button.addEventListener('click', () => {
-                window.location.reload();
-            });
-            
-            this.errorScreen.appendChild(icon);
-            this.errorScreen.appendChild(heading);
-            this.errorScreen.appendChild(text);
-            this.errorScreen.appendChild(button);
-            document.body.appendChild(this.errorScreen);
+        // Remove any existing error screens
+        if (this.errorScreen) {
+            document.body.removeChild(this.errorScreen);
+            this.errorScreen = null;
         }
         
-        // Update the error message
-        this.errorScreen.children[2].textContent = message;
-        this.errorScreen.style.display = 'flex';
+        // Create the error container
+        const errorScreen = document.createElement('div');
+        errorScreen.style.position = 'fixed';
+        errorScreen.style.top = '0';
+        errorScreen.style.left = '0';
+        errorScreen.style.width = '100%';
+        errorScreen.style.height = '100%';
+        errorScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+        errorScreen.style.color = 'white';
+        errorScreen.style.display = 'flex';
+        errorScreen.style.flexDirection = 'column';
+        errorScreen.style.justifyContent = 'center';
+        errorScreen.style.alignItems = 'center';
+        errorScreen.style.zIndex = '10000'; // Higher than anything else
+        
+        // Add error message
+        const errorMessage = document.createElement('div');
+        errorMessage.style.fontSize = '24px';
+        errorMessage.style.maxWidth = '80%';
+        errorMessage.style.textAlign = 'center';
+        errorMessage.style.marginBottom = '20px';
+        errorMessage.textContent = message || 'An error occurred';
+        errorScreen.appendChild(errorMessage);
+        
+        // Add error details container
+        const errorDetails = document.createElement('div');
+        errorDetails.style.fontSize = '16px';
+        errorDetails.style.maxWidth = '80%';
+        errorDetails.style.textAlign = 'center';
+        errorDetails.style.marginBottom = '20px';
+        errorDetails.style.padding = '15px';
+        errorDetails.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+        errorDetails.style.borderRadius = '5px';
+        errorDetails.innerHTML = 'Potential solutions:<br>' +
+            '1. Check if the server is running<br>' +
+            '2. Check your internet connection<br>' +
+            '3. Clear your browser cache<br>' +
+            '4. Try again in a few minutes';
+        errorScreen.appendChild(errorDetails);
+        
+        // Add retry button
+        const retryButton = document.createElement('button');
+        retryButton.textContent = 'Retry';
+        retryButton.style.padding = '10px 20px';
+        retryButton.style.fontSize = '18px';
+        retryButton.style.backgroundColor = '#4CAF50';
+        retryButton.style.color = 'white';
+        retryButton.style.border = 'none';
+        retryButton.style.borderRadius = '5px';
+        retryButton.style.cursor = 'pointer';
+        retryButton.onclick = () => {
+            window.location.reload();
+        };
+        errorScreen.appendChild(retryButton);
+        
+        document.body.appendChild(errorScreen);
+        this.errorScreen = errorScreen;
+        
+        // Log the error to console
+        console.error('Game error:', message);
     }
     
     showNotification(message, color = 'white', duration = 5000) {
@@ -1810,5 +1803,54 @@ export class UIManager {
         if (levelUp && newLevel) {
             this.showNotification(`Level up! You are now level ${newLevel}`, 3000, 'yellow');
         }
+    }
+
+    /**
+     * Update the loading screen message
+     * @param {string} message - The new message to display
+     */
+    updateLoadingScreen(message) {
+        if (this.loadingScreen && this.loadingScreen.messageElement) {
+            this.loadingScreen.messageElement.textContent = message;
+        } else {
+            // If the loading screen doesn't exist yet, create it
+            this.showLoadingScreen(message);
+        }
+    }
+    
+    /**
+     * Show a notification that the game is running in offline mode
+     */
+    showOfflineNotification() {
+        this.showNotification(
+            'Unable to connect to server. Running in offline mode with limited functionality.',
+            '#ff9900',
+            10000
+        );
+        
+        // Also create a persistent offline indicator
+        const offlineIndicator = document.createElement('div');
+        offlineIndicator.className = 'offline-indicator';
+        offlineIndicator.style.position = 'fixed';
+        offlineIndicator.style.top = '10px';
+        offlineIndicator.style.right = '10px';
+        offlineIndicator.style.backgroundColor = '#ff9900';
+        offlineIndicator.style.color = 'white';
+        offlineIndicator.style.padding = '5px 10px';
+        offlineIndicator.style.borderRadius = '4px';
+        offlineIndicator.style.fontSize = '12px';
+        offlineIndicator.style.fontWeight = 'bold';
+        offlineIndicator.style.zIndex = '9999';
+        offlineIndicator.textContent = 'OFFLINE MODE';
+        document.body.appendChild(offlineIndicator);
+        
+        // Pulse the indicator to draw attention
+        let opacity = 1;
+        const pulse = () => {
+            opacity = opacity === 1 ? 0.5 : 1;
+            offlineIndicator.style.opacity = opacity;
+            setTimeout(pulse, 1000);
+        };
+        pulse();
     }
 } 

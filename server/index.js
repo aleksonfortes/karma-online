@@ -10,6 +10,15 @@ const __dirname = dirname(__filename);
 const app = express();
 const server = createServer(app);
 
+// Set CORS headers to allow cross-origin requests
+app.use((req, res, next) => {
+    // Allow requests from any origin during development
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    next();
+});
+
 // Check if dist directory exists and serve static files
 app.use(express.static(join(__dirname, '../dist')));
 
