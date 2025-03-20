@@ -447,6 +447,109 @@ export class MonsterManager {
     }
     
     /**
+     * Check if a monster would collide with other monsters at the given position
+     * @param {string} currentMonsterId - The ID of the monster being checked (to exclude from collision check)
+     * @param {Object} position - The position to check for collisions
+     * @returns {boolean} - True if there would be a collision, false otherwise
+     */
+    checkMonsterCollision(currentMonsterId, position) {
+        for (const [monsterId, monster] of this.monsters.entries()) {
+            // Skip checking collision with self or dead monsters
+            if (monsterId === currentMonsterId || !monster.isAlive) {
+                continue;
+            }
+            
+            // Calculate distance between monsters
+            const dx = position.x - monster.position.x;
+            const dz = position.z - monster.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Get collision radius from monster config
+            const monsterConfig = GameConstants.MONSTER[monster.type];
+            const collisionRadius = monsterConfig.COLLISION_RADIUS;
+            
+            // Combined collision radius (using the monster's own radius plus the other monster's radius)
+            const combinedRadius = collisionRadius * 2;
+            
+            // Check if monsters would collide
+            if (distance < combinedRadius) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Resolve collision by pushing monster away from the collision point
+     * @param {string} monsterId - The ID of the monster to resolve collision for
+     * @param {Object} newPosition - The attempted new position
+     * @param {Object} currentPosition - The current position
+     * @returns {Object} - The resolved position after collision handling
+     */
+    resolveMonsterCollision(monsterId, newPosition, currentPosition) {
+        // Find which monster(s) we're colliding with
+        let closestCollidingMonster = null;
+        let closestDistance = Infinity;
+        
+        for (const [otherId, monster] of this.monsters.entries()) {
+            // Skip checking collision with self or dead monsters
+            if (otherId === monsterId || !monster.isAlive) {
+                continue;
+            }
+            
+            // Calculate distance between monsters
+            const dx = newPosition.x - monster.position.x;
+            const dz = newPosition.z - monster.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Get collision radius from monster config
+            const monsterConfig = GameConstants.MONSTER[monster.type];
+            const collisionRadius = monsterConfig.COLLISION_RADIUS;
+            
+            // Combined collision radius
+            const combinedRadius = collisionRadius * 2;
+            
+            // Check if this is the closest collision
+            if (distance < combinedRadius && distance < closestDistance) {
+                closestCollidingMonster = monster;
+                closestDistance = distance;
+            }
+        }
+        
+        // If no collision found, return the new position
+        if (!closestCollidingMonster) {
+            return newPosition;
+        }
+        
+        // Get collision radius for calculation
+        const monsterConfig = GameConstants.MONSTER[this.monsters.get(monsterId).type];
+        const collisionRadius = monsterConfig.COLLISION_RADIUS;
+        
+        // Combined collision radius
+        const combinedRadius = collisionRadius * 2;
+        
+        // Calculate push vector 
+        const dx = newPosition.x - closestCollidingMonster.position.x;
+        const dz = newPosition.z - closestCollidingMonster.position.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
+        // Normalize direction vector
+        const normalizedDx = dx / distance;
+        const normalizedDz = dz / distance;
+        
+        // Calculate the resolved position by placing the monster at the edge of the combined collision radius
+        const resolvedX = closestCollidingMonster.position.x + normalizedDx * (combinedRadius + 0.1); // Add small buffer
+        const resolvedZ = closestCollidingMonster.position.z + normalizedDz * (combinedRadius + 0.1);
+        
+        return {
+            x: resolvedX,
+            y: newPosition.y,
+            z: resolvedZ
+        };
+    }
+    
+    /**
      * Update monsters (movement, behavior, etc.)
      * @param {Object} playerManager - The player manager for targeting players
      */
@@ -610,11 +713,22 @@ export class MonsterManager {
                     
                     // Check if new position would enter temple, if so, don't move
                     const newPosition = { x: newX, y: monster.position.y, z: newZ };
+                    
+                    // First check temple collision
                     if (!this.isInTemple(newPosition)) {
-                        // Only move if new position is not inside the temple
-                        monster.position.x = newX;
-                        monster.position.z = newZ;
+                        // Then check collision with other monsters
+                        if (!this.checkMonsterCollision(monster.id, newPosition)) {
+                            // Only move if no collisions
+                            monster.position.x = newX;
+                            monster.position.z = newZ;
+                        } else {
+                            // Resolve collision and apply the resolved position
+                            const resolvedPosition = this.resolveMonsterCollision(monster.id, newPosition, monster.position);
+                            monster.position.x = resolvedPosition.x;
+                            monster.position.z = resolvedPosition.z;
+                        }
                     } else {
+                        // Temple collision handling (existing code)
                         // If new position would be in temple, try circling around the temple
                         // Calculate perpendicular components to create a circling effect
                         const perpX = -normalizedDz;
@@ -671,15 +785,24 @@ export class MonsterManager {
                     const newX = monster.position.x + normalizedDx * moveStep;
                     const newZ = monster.position.z + normalizedDz * moveStep;
                     
-                    // Check if new position would enter temple, if so, don't move to that exact position but try to go around
-                    const newPosition = { x: newX, z: newZ };
+                    // Check for both temple and monster collisions
+                    const newPosition = { x: newX, y: monster.position.y, z: newZ };
                     if (!this.isInTemple(newPosition)) {
-                        // Only move if new position is not inside the temple
-                        monster.position.x = newX;
-                        monster.position.z = newZ;
+                        // Check for monster collisions
+                        if (!this.checkMonsterCollision(monster.id, newPosition)) {
+                            // Only move if no collisions
+                            monster.position.x = newX;
+                            monster.position.z = newZ;
+                        } else {
+                            // Resolve collision and apply the resolved position
+                            const resolvedPosition = this.resolveMonsterCollision(monster.id, newPosition, monster.position);
+                            monster.position.x = resolvedPosition.x;
+                            monster.position.z = resolvedPosition.z;
+                        }
                     } else {
-                        // Try to go around the temple by adding a perpendicular component
-                        // This creates a slight tangential movement to avoid getting stuck
+                        // Temple collision handling (existing code)
+                        // If new position would be in temple, try circling around the temple
+                        // Calculate perpendicular components to create a circling effect
                         const perpX = -normalizedDz;
                         const perpZ = normalizedDx;
                         
@@ -691,7 +814,7 @@ export class MonsterManager {
                             monster.position.x = alternativeX;
                             monster.position.z = alternativeZ;
                         } else {
-                            // If that also doesn't work, try the opposite perpendicular direction
+                            // If that doesn't work, try the opposite direction
                             const alternativeX2 = monster.position.x - perpX * moveStep;
                             const alternativeZ2 = monster.position.z - perpZ * moveStep;
                             
@@ -699,7 +822,7 @@ export class MonsterManager {
                                 monster.position.x = alternativeX2;
                                 monster.position.z = alternativeZ2;
                             }
-                            // If nothing works, monster stays in place for this update
+                            // If all options fail, monster stays in place
                         }
                     }
                 }
@@ -721,14 +844,26 @@ export class MonsterManager {
                 const newX = monster.position.x + Math.sin(monster.wanderAngle) * moveStep;
                 const newZ = monster.position.z + Math.cos(monster.wanderAngle) * moveStep;
                 
-                // Check if new position would enter temple, if so, don't move and pick a new direction
+                // Check for both temple and monster collisions
                 const newPosition = { x: newX, y: monster.position.y, z: newZ };
                 if (!this.isInTemple(newPosition)) {
-                    // Only move if new position is not inside the temple
-                    monster.position.x = newX;
-                    monster.position.z = newZ;
+                    // Check for monster collisions
+                    if (!this.checkMonsterCollision(monster.id, newPosition)) {
+                        // Only move if no collisions
+                        monster.position.x = newX;
+                        monster.position.z = newZ;
+                    } else {
+                        // Resolve collision and apply the resolved position 
+                        const resolvedPosition = this.resolveMonsterCollision(monster.id, newPosition, monster.position);
+                        monster.position.x = resolvedPosition.x;
+                        monster.position.z = resolvedPosition.z;
+                        
+                        // Pick a new direction since we hit something
+                        monster.wanderAngle = (monster.wanderAngle + Math.PI/2 + (Math.random() * Math.PI)) % (2 * Math.PI);
+                        monster.wanderTimer = monster.wanderInterval; // Force direction change next update
+                    }
                 } else {
-                    // Pick a new random direction if we're about to enter the temple
+                    // Temple collision handling (existing code)
                     monster.wanderAngle = (monster.wanderAngle + Math.PI) % (2 * Math.PI); // Turn 180 degrees
                     monster.wanderTimer = monster.wanderInterval; // Force direction change next update
                 }

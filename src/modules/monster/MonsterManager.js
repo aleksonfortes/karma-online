@@ -248,137 +248,129 @@ export class MonsterManager {
      * @param {Object} monsterData - Monster data from server
      */
     createMonster(monsterData) {
-        console.log(`Creating monster: ${monsterData.type} with ID ${monsterData.id}`);
-        
-        // CRITICAL FIX: Force consistent health/isAlive state
-        // Check if health is zero or explicitly marked as dead
-        const isExplicitlyDead = monsterData.isAlive === false;
-        const hasZeroHealth = monsterData.health !== undefined && monsterData.health <= 0;
-        
-        // If either condition indicates death, both should be set to dead state
-        if (hasZeroHealth || isExplicitlyDead) {
-            monsterData.isAlive = false;
-            monsterData.health = 0;
-        }
-        
-        // Final determination of alive status
-        const shouldBeAlive = monsterData.isAlive !== false && monsterData.health > 0;
-        
-        // Log important monster creation details for debugging
-        console.log(`Monster ${monsterData.id} creation details - isExplicitlyDead: ${isExplicitlyDead}, hasZeroHealth: ${hasZeroHealth}, shouldBeAlive: ${shouldBeAlive}, final health: ${monsterData.health}`);
-        
-        // Default to 'BASIC' type if the specified type doesn't exist
-        let monsterType = monsterData.type || 'BASIC';
-        
-        // Get the model for this monster type
-        let modelTemplate = this.monsterModels[monsterType];
-        
-        // Try case-insensitive match if not found
-        if (!modelTemplate) {
-            // Try lowercase version
-            modelTemplate = this.monsterModels[monsterType.toLowerCase()];
-        }
-        
-        // Fall back to BASIC if still not found
-        if (!modelTemplate) {
-            console.warn(`No model found for monster type: ${monsterType}, using BASIC type`);
-            modelTemplate = this.monsterModels['BASIC'];
-        }
-        
-        // If still no model, use FALLBACK
-        if (!modelTemplate) {
-            console.warn(`No BASIC model found, using FALLBACK model`);
-            modelTemplate = this.monsterModels['FALLBACK'];
-        }
-        
-        // If all else fails, create a simple box model on the fly
-        if (!modelTemplate) {
-            console.warn(`Creating emergency fallback model for monster ${monsterData.id}`);
-            const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
-            const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
-            modelTemplate = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
-        }
-        
-        // Clone the model to create a new instance
-        const monsterModel = modelTemplate.clone();
-        
-        // Set position, rotation and scale
-        monsterModel.position.set(
-            monsterData.position.x,
-            monsterData.position.y + 2.0, // Raise the model to prevent it from sinking into the ground
-            monsterData.position.z
-        );
-        
-        // Adjust rotation for cerberus model
-        monsterModel.rotation.set(0, monsterData.rotation.y || 0, 0);
-        
-        // Adjust scale for cerberus model - make it much larger
-        const modelScale = 3.0 * (monsterData.scale || 1); // Increased to 3.0 for a much larger appearance
-        monsterModel.scale.set(modelScale, modelScale, modelScale);
-        
-        // Add shadow casting/receiving
-        monsterModel.traverse((child) => {
-            if (child.isMesh) {
-                child.castShadow = true;
-                child.receiveShadow = true;
-                
-                // Improve material quality for cerberus model
-                if (child.material) {
-                    child.material = child.material.clone(); // Clone to avoid affecting other instances
-                    child.material.metalness = 0.6;
-                    child.material.roughness = 0.4;
-                }
+        try {
+            if (!monsterData || !monsterData.id) {
+                console.error('Invalid monster data:', monsterData);
+                return null;
             }
-        });
-        
-        // Create a health bar for the monster
-        const healthBar = this.createHealthBar(monsterData);
-        monsterModel.add(healthBar);
-        
-        // Store a reference to the health bar for updates
-        monsterModel.userData.healthBar = healthBar;
-        monsterModel.userData.healthBarCanvas = healthBar.userData.canvas;
-        monsterModel.userData.healthBarContext = healthBar.userData.context;
-        
-        // CRITICAL FIX: Add all the monster data and flags to userData
-        monsterModel.userData.monsterId = monsterData.id;
-        monsterModel.userData.isAlive = shouldBeAlive;
-        monsterModel.userData.isDead = !shouldBeAlive;
-        monsterModel.userData.health = monsterData.health;
-        monsterModel.userData.maxHealth = monsterData.maxHealth || 100;
-        monsterModel.userData.type = monsterType;
-        
-        // Add to scene
-        this.game.scene.add(monsterModel);
-        
-        // CRITICAL FIX: Use consistent health even when monster is created (fix for the 0 health but 100 showing issue)
-        // Create the actual monster representation
-        const monster = {
-            id: monsterData.id,
-            type: monsterType,
-            mesh: monsterModel,
-            position: monsterModel.position.clone(),
-            health: shouldBeAlive ? (monsterData.health || 100) : 0,
-            maxHealth: monsterData.maxHealth || 100,
-            isAlive: shouldBeAlive,
-            lastUpdateTime: Date.now()
-        };
-        
-        // Store in monsters Map
-        this.monsters.set(monsterData.id, monster);
-        
-        // Initialize the health bar
-        this.updateHealthBar(monster);
-        
-        // If monster is created in a dead state, apply visual death effects
-        if (!shouldBeAlive) {
-            console.log(`Monster ${monsterData.id} created in dead state - applying death visuals`);
-            this.applyDeathVisuals(monster);
+            
+            // Generate a unique ID for each monster
+            const id = monsterData.id;
+            
+            if (this.monsters.has(id)) {
+                console.warn(`Monster ${id} already exists. Updating instead of creating.`);
+                this.updateMonster(monsterData);
+                return this.monsters.get(id);
+            }
+            
+            // Set up monster model and configuration
+            const monsterType = monsterData.type || 'BASIC';
+            let monsterModel = null;
+            
+            // Choose model based on type, with fallback
+            if (this.monsterModels[monsterType]) {
+                monsterModel = this.monsterModels[monsterType];
+            } else if (this.monsterModels[monsterType.toLowerCase()]) {
+                monsterModel = this.monsterModels[monsterType.toLowerCase()];
+            } else {
+                console.warn(`Model for type "${monsterType}" not found, using FALLBACK`);
+                monsterModel = this.monsterModels['FALLBACK'];
+            }
+            
+            // Clone the model to avoid reference issues
+            let monsterMesh;
+            
+            try {
+                monsterMesh = monsterModel.clone();
+                // For GLTF models, we need to clone differently
+                if (monsterMesh.isObject3D && !monsterMesh.isMesh) {
+                    monsterMesh = monsterModel.clone(true);
+                }
+            } catch (error) {
+                console.error('Error cloning monster model:', error);
+                // Use fallback geometry
+                const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
+                const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
+                monsterMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+            }
+            
+            // Set up monster position
+            monsterMesh.position.set(
+                monsterData.position.x, 
+                monsterData.position.y + 2.0, // Raise monster 2 units from ground
+                monsterData.position.z
+            );
+            
+            // Set rotation if provided
+            if (monsterData.rotation) {
+                monsterMesh.rotation.y = monsterData.rotation.y || 0;
+            }
+            
+            // Adjust scale for cerberus model - using original larger scale
+            const modelScale = 3.0 * (monsterData.scale || 1); // Original scale factor
+            monsterMesh.scale.set(modelScale, modelScale, modelScale);
+            
+            // Add shadow casting/receiving
+            monsterMesh.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+                    
+                    // Improve material quality for cerberus model
+                    if (child.material) {
+                        child.material = child.material.clone(); // Clone to avoid affecting other instances
+                        child.material.metalness = 0.6;
+                        child.material.roughness = 0.4;
+                    }
+                }
+            });
+            
+            // Set up health bar
+            const healthBar = this.createHealthBar();
+            
+            // Position health bar above the monster
+            const healthBarHeight = 4.0; // Units above the monster
+            healthBar.position.set(
+                monsterMesh.position.x,
+                monsterMesh.position.y + healthBarHeight,
+                monsterMesh.position.z
+            );
+            
+            // Store original height for billboarding
+            healthBar.userData.height = healthBarHeight;
+            
+            // Add mesh and health bar to the scene
+            this.game.scene.add(monsterMesh);
+            this.game.scene.add(healthBar);
+            
+            // Store collision radius from the server data or use a default
+            const collisionRadius = monsterData.collisionRadius || 1.0;
+            
+            // Create monster object
+            const monster = {
+                id,
+                type: monsterType,
+                mesh: monsterMesh,
+                healthBar: healthBar,
+                position: { ...monsterData.position }, // Store original position for reference
+                health: monsterData.health || 100,
+                maxHealth: monsterData.maxHealth || 100,
+                isAlive: monsterData.isAlive !== false, // Default to alive if not specified
+                collisionRadius: collisionRadius,
+                lastUpdateTime: Date.now()
+            };
+            
+            // Add to monsters map
+            this.monsters.set(id, monster);
+            
+            // Update health bar with initial health
+            this.updateHealthBar(monster);
+            
+            return monster;
+        } catch (error) {
+            console.error('Error creating monster:', error);
+            return null;
         }
-        
-        console.log(`Monster created with health: ${monster.health}/${monster.maxHealth}, health bar initialized, isAlive=${monster.isAlive}`);
-        
-        return monster;
     }
     
     /**
@@ -487,59 +479,74 @@ export class MonsterManager {
     }
     
     /**
-     * Update the visual health bar for a monster
+     * Update a monster's health bar to reflect current health
+     * @param {Object} monster - The monster object
      */
-    updateHealthBar(monster, updateId) {
-        if (!monster || !monster.mesh) return;
-        
-        const healthBarSprite = monster.mesh.userData.healthBar;
-        if (!healthBarSprite) return;
-        
-        const canvas = healthBarSprite.userData.canvas;
-        const context = healthBarSprite.userData.context;
-        
-        if (!canvas || !context) {
-            console.warn('Missing canvas or context for monster health bar');
+    updateHealthBar(monster) {
+        if (!monster || !monster.healthBar || monster.health === undefined) {
             return;
         }
         
-        // Calculate health percentage 
-        const healthPercent = Math.max(0, Math.min(1, monster.health / monster.maxHealth));
+        // Get the canvas and context stored in userData
+        const canvas = monster.healthBar.userData.canvas;
+        const context = monster.healthBar.userData.context;
         
-        // Only update for significant changes to prevent flickering
-        if (monster.mesh.userData.lastHealthPercent !== undefined) {
-            const diff = Math.abs(monster.mesh.userData.lastHealthPercent - healthPercent);
-            
-            // Only update if the change exceeds our threshold (skip for explicitly tracked updates)
-            if (diff <= 0.05 && !updateId) {
-                // Skip update for minor changes
-                return;
-            }
+        if (!canvas || !context) {
+            return;
         }
         
-        // Store current health percentage for future comparison
-        monster.mesh.userData.lastHealthPercent = healthPercent;
-        
-        // Clear the canvas
+        // Clear canvas
         context.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Draw the background (dark backing) - same as player health bar
+        // Calculate health percentage
+        const healthPercentage = Math.max(0, Math.min(1, monster.health / monster.maxHealth));
+        
+        // Draw background - using dark gray like original
         context.fillStyle = '#222222';
         context.fillRect(0, 0, canvas.width, canvas.height);
         
-        // Use red for health bar to match player health bar
-        context.fillStyle = '#ff0000';
-        
-        // Calculate health width for linear decrease
-        const healthWidth = Math.floor(canvas.width * healthPercent);
-        
-        // Draw health bar from left to right
-        context.fillRect(0, 0, healthWidth, canvas.height);
-        
-        // Update the texture
-        if (healthBarSprite.material && healthBarSprite.material.map) {
-            healthBarSprite.material.map.needsUpdate = true;
+        // Draw health bar - using red like original
+        if (healthPercentage > 0) {
+            context.fillStyle = '#ff0000';
+            context.fillRect(0, 0, canvas.width * healthPercentage, canvas.height);
         }
+        
+        // Update texture
+        monster.healthBar.material.map.needsUpdate = true;
+        
+        // Hide health bar if monster is dead
+        monster.healthBar.visible = monster.isAlive !== false && monster.health > 0;
+    }
+    
+    /**
+     * Update health bar orientation to face the camera
+     * @param {Object} monster - The monster object
+     */
+    updateHealthBarOrientation(monster) {
+        if (!monster || !monster.healthBar || !monster.mesh) {
+            return;
+        }
+        
+        // Skip if monster is dead
+        if (monster.isAlive === false || monster.health <= 0) {
+            monster.healthBar.visible = false;
+            return;
+        }
+        
+        // Update health bar position to be above the monster
+        const healthBarHeight = monster.healthBar.userData.height || 4.0;
+        monster.healthBar.position.set(
+            monster.mesh.position.x,
+            monster.mesh.position.y + healthBarHeight,
+            monster.mesh.position.z
+        );
+        
+        // Get camera
+        const camera = this.game.camera;
+        if (!camera) return;
+        
+        // Make health bar face camera (billboarding)
+        monster.healthBar.quaternion.copy(camera.quaternion);
     }
     
     /**
@@ -1125,25 +1132,6 @@ export class MonsterManager {
     }
 
     /**
-     * Update health bar to always face the camera
-     * @param {Object} monster - The monster object
-     */
-    updateHealthBarOrientation(monster) {
-        if (!monster || !monster.mesh) return;
-        
-        // Handle sprite-based health bar - sprites automatically face the camera
-        const healthBar = monster.mesh.userData.healthBar;
-        if (healthBar) {
-            // Ensure the health bar is visible
-            healthBar.visible = true;
-            
-            if (healthBar.material) {
-                healthBar.material.visible = true;
-            }
-        }
-    }
-
-    /**
      * Apply visual death effects to a monster without triggering full death handling
      */
     applyDeathVisuals(monster) {
@@ -1223,6 +1211,75 @@ export class MonsterManager {
         if (targetMesh.userData) {
             targetMesh.userData.deathVisualsApplied = true;
         }
+    }
+
+    /**
+     * Check player collision with monsters and resolve
+     * @param {Object} playerPosition - Player position to check
+     * @param {Object} previousPosition - Previous player position for resolution
+     * @returns {boolean} - Whether there was a collision
+     */
+    checkMonsterCollisions(playerPosition, previousPosition) {
+        // Skip if not fully initialized
+        if (!this.initialized || !this.monsters || this.monsters.size === 0) {
+            return false;
+        }
+        
+        let collision = false;
+        
+        // Check collision with each monster
+        this.monsters.forEach((monster) => {
+            // Skip collision checks with dead monsters
+            if (monster.isAlive === false || monster.health <= 0) {
+                return;
+            }
+            
+            // Skip if the monster doesn't have a mesh or position
+            if (!monster.mesh || !monster.position) {
+                return;
+            }
+            
+            // Calculate distance from player to monster
+            const dx = playerPosition.x - monster.position.x;
+            const dz = playerPosition.z - monster.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Use proper collision radius from the monster's config or default to 1.0
+            const collisionRadius = monster.collisionRadius || 1.0;
+            
+            // Player has their own collision radius of about 0.5 units
+            const playerRadius = 0.5;
+            
+            // Combined collision radius
+            const combinedRadius = collisionRadius + playerRadius; 
+            
+            // Check if distance is less than combined radius
+            if (distance < combinedRadius) {
+                collision = true;
+                
+                // If we have a previous position, push the player away from monster
+                if (previousPosition) {
+                    // Calculate push vector
+                    const angle = Math.atan2(dx, dz);
+                    
+                    // Push player to the edge of the combined collision radius
+                    playerPosition.x = monster.position.x + Math.sin(angle) * (combinedRadius + 0.1); // Add a small buffer
+                    playerPosition.z = monster.position.z + Math.cos(angle) * (combinedRadius + 0.1);
+                }
+            }
+        });
+        
+        return collision;
+    }
+
+    /**
+     * Add debug visualization for monster collision radius
+     * @param {THREE.Object3D} monsterMesh - The monster's mesh
+     * @param {number} radius - The collision radius
+     */
+    addCollisionDebugVisuals(monsterMesh, radius) {
+        // Disabled - no debug visuals as per user request
+        return;
     }
 }
 
