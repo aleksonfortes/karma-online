@@ -151,67 +151,57 @@ export class SkillsManager {
             }
         }
 
-        if (!this.game.targetingManager || !this.game.targetingManager.currentTarget) {
-            console.log('No target selected for Martial Arts');
+        // Check if target exists and is in range
+        const targetId = this.game.targetingManager.getTargetId();
+        const targetType = this.game.targetingManager.getTargetType();
+        
+        if (!targetId) {
+            console.log('No target selected');
             return;
         }
         
-        if (this.game.targetingManager.currentTarget.type !== 'player') {
-            console.log('Martial Arts can only be used on players');
-            return;
-        }
+        console.log(`Using Martial Arts on ${targetType} ${targetId}`);
         
-        const targetId = this.game.targetingManager.currentTarget.id;
-        const targetPlayer = this.game.targetingManager.currentTarget.object;
+        // Set a temporary cooldown to prevent spam clicking while waiting for server response
+        // This will be overwritten with the actual timestamp when the server confirms the skill use
+        const tempLastUsed = this.skills['martial_arts'].lastUsed;
+        this.skills['martial_arts'].lastUsed = Date.now();
         
-        if (!targetPlayer) {
-            console.log('Target player object not found');
-            return;
-        }
+        // Track this skill as the last attempted skill for error handling
+        this.lastAttemptedSkill = 'martial_arts';
         
-        const playerPos = this.game.localPlayer.position;
-        const targetPos = targetPlayer.position;
-        
-        // Check if target is in temple safe zone
-        if (this.game.environmentManager && this.game.environmentManager.isInTempleSafeZone) {
-            if (this.game.environmentManager.isInTempleSafeZone(targetPos)) {
-                console.log('Cannot attack target in temple safe zone');
-                this.showErrorMessage('Cannot attack players in temple safe zone');
-                return;
-            }
-        }
-        
-        const dx = targetPos.x - playerPos.x;
-        const dz = targetPos.z - playerPos.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        
-        if (distance > this.skills.martial_arts.range) {
-            console.log(`Target is too far away (${distance.toFixed(2)} units). Need to be within ${this.skills.martial_arts.range} units.`);
-            return;
-        }
-        
-        // Set skill as used (update cooldown) - regardless of server confirmation
-        this.skills.martial_arts.lastUsed = Date.now();
-        
-        // Set animation state (this is visual only)
-        if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
-            this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
-        }
-        
-        // Send skill to server and wait for confirmation
+        // Validate the skill use with the server
         const skillConfirmed = await this.game.networkManager.useSkill(
-            targetId, 
-            'martial_arts', 
-            this.skills.martial_arts.damage
+            targetId,
+            'martial_arts',
+            this.skills['martial_arts'].damage
         );
         
-        // Only show visual effects if server confirmed the skill hit
-        if (skillConfirmed) {
-            // Create visual effects between player and target
-            this.createMartialArtsEffect(targetPlayer);
-            
-            // Create floating damage number
-            this.createDamageNumber(targetPlayer, this.skills.martial_arts.damage);
+        if (!skillConfirmed) {
+            console.log('Server rejected Martial Arts skill use');
+            // If the server rejected the skill, restore the previous cooldown
+            this.skills['martial_arts'].lastUsed = tempLastUsed;
+            return;
+        }
+        
+        console.log('Server confirmed Martial Arts skill use');
+        
+        // Clear the last attempted skill on success
+        this.lastAttemptedSkill = null;
+        
+        // Create appropriate effects based on target type
+        if (targetType === 'player') {
+            // Visual effect for player target
+            const targetPlayer = this.game.targetingManager.getTargetObject();
+            if (targetPlayer) {
+                this.createMartialArtsEffect(targetPlayer);
+            }
+        } else if (targetType === 'monster') {
+            // Handle monster target
+            const monster = this.game.monsterManager.getMonsterById(targetId);
+            if (monster && monster.mesh) {
+                this.createMartialArtsEffect(monster.mesh);
+            }
         }
     }
     
@@ -223,15 +213,15 @@ export class SkillsManager {
             console.log('Cannot use skills while dead');
             return;
         }
-        
+
         // Check if skill is on cooldown
         if (this.isOnCooldown('dark_strike')) {
             console.log('Dark Strike is on cooldown');
             this.showCooldownError('dark_strike');
             return;
         }
-        
-        // Check if player has the dark path - but skip in test environment
+
+        // Check if player has the dark path
         const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
         if (!isTestEnvironment) {
             const playerPath = this.game.playerStats?.path || null;
@@ -240,73 +230,65 @@ export class SkillsManager {
                 return;
             }
         }
-        
-        // Get target information
+
+        // Check if target exists and is in range
         const targetId = this.game.targetingManager.getTargetId();
         const targetType = this.game.targetingManager.getTargetType();
         
         if (!targetId) {
-            console.log('No target selected for Dark Strike');
+            console.log('No target selected');
             return;
         }
         
         console.log(`Using Dark Strike on ${targetType} ${targetId}`);
         
-        // Handle different target types
-        if (targetType === 'monster') {
+        // Set a temporary cooldown to prevent spam clicking while waiting for server response
+        // This will be overwritten with the actual timestamp when the server confirms the skill use
+        const tempLastUsed = this.skills['dark_strike'].lastUsed;
+        this.skills['dark_strike'].lastUsed = Date.now();
+        
+        // Track this skill as the last attempted skill for error handling
+        this.lastAttemptedSkill = 'dark_strike';
+        
+        // Validate the skill use with the server
+        const skillConfirmed = await this.game.networkManager.useSkill(
+            targetId,
+            'dark_strike',
+            this.skills['dark_strike'].damage
+        );
+        
+        if (!skillConfirmed) {
+            console.log('Server rejected Dark Strike skill use');
+            // If the server rejected the skill, restore the previous cooldown
+            this.skills['dark_strike'].lastUsed = tempLastUsed;
+            return;
+        }
+        
+        console.log('Server confirmed Dark Strike skill use');
+        
+        // Clear the last attempted skill on success
+        this.lastAttemptedSkill = null;
+        
+        // Create the dark strike effect
+        this.createDarkStrikeEffect();
+        
+        // Create appropriate effects based on target type
+        if (targetType === 'player') {
+            // Apply damage to player target
+            const targetPlayer = this.game.targetingManager.getTargetObject();
+            if (targetPlayer) {
+                // For players, the server will handle the actual damage
+                // We just show visual effects
+                this.applyDamageEffect(targetPlayer, this.skills['dark_strike'].damage, 'dark_strike');
+            }
+        } else if (targetType === 'monster') {
+            // Handle monster target
             const monster = this.game.monsterManager.getMonsterById(targetId);
             if (monster && monster.mesh) {
-                // Visual effect - flash the monster red
-                this.createAttackEffect(monster.mesh);
-                
-                // If in PVE testing mode, apply damage directly
-                const isTestMode = this.game.isPVETestMode;
-                if (isTestMode) {
-                    this.applyDamageEffect(monster, this.skills.dark_strike.damage, 'dark_strike');
-                }
-            } else {
-                console.warn(`Monster ${targetId} not found for Dark Strike`);
+                // For monsters, the server will handle the actual damage
+                // We just show visual effects
+                this.applyDamageEffect(monster.mesh, this.skills['dark_strike'].damage, 'dark_strike');
             }
-        } else if (targetType === 'player') {
-            const targetPlayer = this.game.playerManager.players.get(targetId);
-            if (targetPlayer) {
-                // Check if target is in temple safe zone
-                if (this.game.environmentManager && this.game.environmentManager.isInTempleSafeZone) {
-                    if (this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
-                        console.log('Cannot attack target in temple safe zone');
-                        this.showErrorMessage('Cannot attack players in temple safe zone');
-                        return;
-                    }
-                }
-                
-                // Set skill as used (update cooldown) - regardless of server confirmation
-                this.skills.dark_strike.lastUsed = Date.now();
-                
-                // Set animation state (this is visual only)
-                if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
-                    this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
-                }
-                
-                // Send skill to server and wait for confirmation
-                const skillConfirmed = await this.game.networkManager.useSkill(
-                    targetId, 
-                    'dark_strike', 
-                    this.skills.dark_strike.damage
-                );
-                
-                // Only show visual effects if server confirmed the skill hit
-                if (skillConfirmed) {
-                    // Visual effect - flash the player red
-                    this.createAttackEffect(targetPlayer);
-                    
-                    // Create floating damage number
-                    this.createDamageNumber(targetPlayer, this.skills.dark_strike.damage);
-                }
-            } else {
-                console.warn(`Player ${targetId} not found for Dark Strike`);
-            }
-        } else {
-            console.warn(`Unknown target type: ${targetType}`);
         }
     }
     
@@ -369,36 +351,109 @@ export class SkillsManager {
         animate();
     }
     
+    /**
+     * Create a visual effect for the Dark Strike skill
+     * @returns {Object} The created effect object
+     */
     createDarkStrikeEffect() {
-        if (!this.game.localPlayer || !this.game.scene) return;
+        if (!this.game.localPlayer || !this.game.scene) return null;
         
-        const effectGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        // Get target position
+        const targetObject = this.game.targetingManager.getTargetObject();
+        if (!targetObject) return null;
+        
+        // Store positions
+        const sourcePosition = this.game.localPlayer.position.clone();
+        sourcePosition.y += 1; // Aim from character's upper body
+        
+        const targetPosition = targetObject.position.clone();
+        targetPosition.y += 1; // Aim at target's upper body
+        
+        // Create the effect
+        const effectGeometry = new THREE.SphereGeometry(0.3, 16, 16);
         const effectMaterial = new THREE.MeshBasicMaterial({
-            color: 0x800080, 
+            color: 0x800080, // Purple color
             transparent: true,
-            opacity: 0.7
+            opacity: 0.9,
+            emissive: 0x400040,
+            emissiveIntensity: 2.0
         });
         
         const effect = new THREE.Mesh(effectGeometry, effectMaterial);
+        effect.position.copy(sourcePosition);
         
-        const playerPos = this.game.localPlayer.position.clone();
-        const forwardVec = new THREE.Vector3(0, 0, -1).applyQuaternion(this.game.localPlayer.quaternion);
-        effect.position.copy(playerPos);
-        effect.position.y += 1; 
-        effect.position.add(forwardVec.multiplyScalar(1));
+        // Add a glowing effect with a larger sphere
+        const glowGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0x800080,
+            transparent: true,
+            opacity: 0.3
+        });
+        
+        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+        effect.add(glow);
         
         this.game.scene.add(effect);
         
-        let scale = 1;
-        const animate = () => {
-            scale -= 0.1;
-            effect.scale.set(scale, scale, scale);
-            effect.material.opacity = scale;
-            
-            if (scale <= 0) {
+        // Calculate direction vector from player to target
+        const direction = new THREE.Vector3()
+            .subVectors(targetPosition, sourcePosition)
+            .normalize();
+        
+        // Calculate distance
+        const distance = sourcePosition.distanceTo(targetPosition);
+        
+        // Speed of the projectile
+        const speed = 15; // units per second
+        
+        // Duration based on distance and speed
+        const duration = distance / speed;
+        const startTime = Date.now() / 1000; // Convert to seconds
+        
+        // Store the effect for cleanup purposes
+        this.activeEffects = this.activeEffects || [];
+        this.activeEffects.push({
+            mesh: effect,
+            dispose: () => {
                 this.game.scene.remove(effect);
                 effectGeometry.dispose();
                 effectMaterial.dispose();
+                glowGeometry.dispose();
+                glowMaterial.dispose();
+            }
+        });
+        
+        // Animation function
+        const animate = () => {
+            const currentTime = Date.now() / 1000;
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1.0);
+            
+            // Linear interpolation between source and target
+            effect.position.lerpVectors(sourcePosition, targetPosition, progress);
+            
+            // Pulse the glow effect
+            const pulseScale = 1 + 0.2 * Math.sin(elapsed * 10);
+            glow.scale.set(pulseScale, pulseScale, pulseScale);
+            
+            // If we've reached the target, remove the effect
+            if (progress >= 1.0) {
+                // Flash the target
+                this.createAttackEffect(targetObject);
+                
+                // Remove this effect from the scene
+                this.game.scene.remove(effect);
+                effectGeometry.dispose();
+                effectMaterial.dispose();
+                glowGeometry.dispose();
+                glowMaterial.dispose();
+                
+                // Remove from active effects
+                const index = this.activeEffects.findIndex(e => e.mesh === effect);
+                if (index !== -1) {
+                    this.activeEffects.splice(index, 1);
+                }
+                
                 return;
             }
             
@@ -406,6 +461,7 @@ export class SkillsManager {
         };
         
         animate();
+        return effect;
     }
     
     findTargetsInRange(range) {
@@ -621,9 +677,10 @@ export class SkillsManager {
         const now = Date.now();
         const timeElapsed = now - skill.lastUsed;
         
-        // Add a small buffer (50ms) to account for potential network latency 
-        // and prevent "skill on cooldown" errors from server
-        return timeElapsed < (skill.cooldown + 50);
+        // Added a larger buffer (100ms instead of 50ms) to account for potential 
+        // network latency and any client-server clock discrepancies
+        // This helps prevent "skill on cooldown" errors from server
+        return timeElapsed < (skill.cooldown + 100);
     }
     
     /**
@@ -651,6 +708,9 @@ export class SkillsManager {
             return;
         }
         
+        // Track last used skill for error handling
+        this.lastAttemptedSkill = null;
+        
         // Handle error messages from server
         this.game.networkManager.socket.on('errorMessage', (data) => {
             if (data.type === 'combat') {
@@ -661,7 +721,25 @@ export class SkillsManager {
                 
                 // Handle specific error types
                 if (data.message.includes('cooldown')) {
-                    this.handleCooldownError();
+                    // Only handle cooldown errors if we have a last attempted skill
+                    if (this.lastAttemptedSkill) {
+                        // Get the skill that was attempted
+                        const skillId = this.lastAttemptedSkill;
+                        const skill = this.skills[skillId];
+                        
+                        if (skill) {
+                            // Reset the skill's lastUsed timestamp to enforce server cooldown
+                            // This creates a 1.5 second local cooldown from now to prevent spam
+                            skill.lastUsed = Date.now();
+                            console.log(`Server cooldown error: Reset cooldown for ${skillId}`);
+                        }
+                        
+                        // Clear the last attempted skill
+                        this.lastAttemptedSkill = null;
+                    } else {
+                        // Generic cooldown handling if we don't know which skill
+                        this.handleCooldownError();
+                    }
                 } else if (data.message.includes('temple safe zone')) {
                     this.handleSafeZoneError();
                 } else if (data.message.includes('out of range')) {
@@ -675,6 +753,8 @@ export class SkillsManager {
             // If we receive damage confirmation from server, the skill was successful
             if (data.sourceId === this.game.networkManager.socket.id) {
                 console.log(`Skill damage confirmed: ${data.damage} to ${data.targetId}`);
+                // Clear the last attempted skill after successful use
+                this.lastAttemptedSkill = null;
             }
         });
     }
@@ -1186,7 +1266,7 @@ export class SkillsManager {
                 id: 'dark_strike',
                 name: 'Dark Strike',
                 description: 'Unleashes dark energy to damage your target.',
-                cooldown: 2000, // 2 second cooldown
+                cooldown: 1500, // Changed from 2000ms to 1500ms to match server cooldown
                 range: 3,
                 damage: 35,
                 mana: 15,
