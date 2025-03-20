@@ -133,6 +133,9 @@ export class MonsterManager {
         // Track existing monsters to find ones that should be removed
         const existingMonsterIds = new Set(this.monsters.keys());
         
+        // Track IDs of monsters we know are dead to prevent resurrection
+        const knownDeadMonsterIds = new Set();
+        
         // Process each monster from the server data
         monsterData.forEach(monster => {
             // CRITICAL FIX: Handle inconsistent dead/alive states in the data
@@ -151,6 +154,11 @@ export class MonsterManager {
             // Define death status one single time to avoid inconsistency
             const isDead = monster.isAlive === false || hasZeroHealth;
             
+            // Add confirmed dead monsters to our known dead set
+            if (isDead) {
+                knownDeadMonsterIds.add(monster.id);
+            }
+            
             // Remove from existingMonsterIds set to mark as still valid
             existingMonsterIds.delete(monster.id);
             
@@ -159,8 +167,9 @@ export class MonsterManager {
                 
                 // CRITICAL FIX: Monster is already dead in our client
                 if (existingMonster.isAlive === false) {
-                    // If we think it's dead but server says it's alive and has health, respawn it
-                    if (monster.isAlive === true && monster.health > 0) {
+                    // If we think it's dead but server says it's alive and has health, only respawn if
+                    // we don't have this in our confirmed dead monsters set (prevents resurrection bug)
+                    if (monster.isAlive === true && monster.health > 0 && !knownDeadMonsterIds.has(monster.id)) {
                         console.log(`Monster ${monster.id} was locally dead but server says it's alive (health=${monster.health}) - respawning`);
                         this.removeMonster(monster.id);
                         const newMonster = this.createMonster(monster);
@@ -177,12 +186,25 @@ export class MonsterManager {
                         // Just ensure health is set to 0
                         existingMonster.health = 0;
                         existingMonster.isAlive = false;
+                        
+                        // CRITICAL FIX: Notify server we're maintaining this monster as dead
+                        // to prevent repeated resurrections
+                        if (this.game.networkManager && this.game.networkManager.socket) {
+                            this.game.networkManager.socket.emit('client_monster_state', {
+                                monsterId: monster.id,
+                                clientState: {
+                                    isAlive: false,
+                                    health: 0,
+                                    deathTime: Date.now()
+                                }
+                            });
+                        }
                     }
                 } 
                 // CRITICAL FIX: Monster is alive in our client
                 else if (existingMonster.isAlive === true) {
-                    if (isDead) {
-                        // Server says it's dead, so kill it
+                    if (isDead || knownDeadMonsterIds.has(monster.id)) {
+                        // Server says it's dead, or we know it's dead, so kill it
                         console.log(`Monster ${monster.id} was alive in client but server says it's dead - killing it`);
                         this.handleMonsterDeath(monster.id);
                     } else {
@@ -191,6 +213,12 @@ export class MonsterManager {
                     }
                 }
             } else {
+                // Skip creating monsters that we know are dead
+                if (knownDeadMonsterIds.has(monster.id)) {
+                    console.log(`Skipping creation of monster ${monster.id} because it's known to be dead`);
+                    return;
+                }
+                
                 // Create new monster
                 console.log(`Creating new monster ${monster.id} from server data, isDead=${isDead}`);
                 const newMonster = this.createMonster(monster);
@@ -663,6 +691,10 @@ export class MonsterManager {
                 monster.mesh.userData.deathTime = Date.now();
             }
             
+            // ENHANCED FIX: Completely disable monster mesh
+            monster.mesh.visible = false;        // Hide it completely
+            monster.mesh.userData.enabled = false; // Mark as disabled
+            
             // CRITICAL FIX: Disable collision detection by moving the monster's collision
             // detection point far below the world
             if (this.game.physics && this.game.physics.excludeObject) {
@@ -672,18 +704,19 @@ export class MonsterManager {
             // Alternatively, move it out of the world
             monster.mesh.position.y = -1000; // Move far below the scene so it can't collide
             
-            // Keep the visual mesh at the right position
-            // Create a visual-only representation that stays where the monster died
-            const visualPosition = monster.position.clone();
-            visualPosition.y += 2.0; // Keep the visual height adjustment
-            
-            // Move the mesh back for visual purposes only
-            monster.mesh.visible = false;
+            // CRITICAL BUGFIX: Make sure monster has a valid position before cloning
+            const visualPosition = monster.position && typeof monster.position.clone === 'function' 
+                ? monster.position.clone()
+                : monster.mesh.position.clone();
+                
+            visualPosition.y += 0.5; // Lower height adjustment for better visual effect
             
             // Create a copy of the monster mesh for visual purposes only
             if (!monster.visualMesh) {
+                // Create a simplified visual mesh for dead monster
                 monster.visualMesh = monster.mesh.clone();
                 monster.visualMesh.position.copy(visualPosition);
+                monster.visualMesh.rotation.x = Math.PI / 2; // Rotate to lay flat
                 this.game.scene.add(monster.visualMesh);
                 
                 // Apply visual death effects to the visual mesh
@@ -710,6 +743,20 @@ export class MonsterManager {
                     deathTime: Date.now()
                 }
             });
+            
+            // Send a second time after a short delay to ensure delivery
+            setTimeout(() => {
+                if (this.game.networkManager && this.game.networkManager.socket) {
+                    this.game.networkManager.socket.emit('client_monster_state', {
+                        monsterId: monsterId,
+                        clientState: {
+                            isAlive: false,
+                            health: 0,
+                            deathTime: Date.now()
+                        }
+                    });
+                }
+            }, 500);
         }
         
         // Schedule removal after fade animation - only on server confirmation
@@ -750,6 +797,14 @@ export class MonsterManager {
             if (monster.mesh) {
                 // Hide immediately to prevent any visual glitches
                 monster.mesh.visible = false;
+                
+                // Cache position for potential use in cleanup - safely
+                let lastPosition = null;
+                if (monster.position && typeof monster.position.clone === 'function') {
+                    lastPosition = monster.position.clone();
+                } else if (monster.mesh.position) {
+                    lastPosition = monster.mesh.position.clone();
+                }
                 
                 // Remove from scene
                 this.game.scene.remove(monster.mesh);

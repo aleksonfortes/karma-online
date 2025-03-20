@@ -25,7 +25,11 @@ export class Game {
         this.localPlayer = null;
         this.isRunning = true;
         this.isAlive = true;
+        this.isInitialized = false;
+        this.isOfflineMode = false;
+        this.isPaused = false;
         this.SERVER_URL = getServerUrl();
+        this.currentTime = 0;
         
         // Controls
         this.controls = {
@@ -93,6 +97,9 @@ export class Game {
             // Start the game loop
             this.startGameLoop();
             
+            // Mark game as fully initialized
+            this.isInitialized = true;
+            
             console.log('Game initialization complete');
         } catch (error) {
             console.error('Failed to initialize game:', error);
@@ -116,10 +123,38 @@ export class Game {
             await this.uiManager.init();
             this.uiManager.showLoadingScreen('Connecting to server...');
             
-            // Initialize network first - required for game to work
-            const networkInitialized = await this.networkManager.init();
+            // Initialize network with retry logic
+            let networkInitialized = false;
+            let retryCount = 0;
+            const MAX_RETRIES = 3;
+            
+            while (!networkInitialized && retryCount < MAX_RETRIES) {
+                try {
+                    this.uiManager.updateLoadingScreen(`Connecting to server (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    networkInitialized = await this.networkManager.init();
+                    
+                    if (!networkInitialized) {
+                        retryCount++;
+                        if (retryCount < MAX_RETRIES) {
+                            // Wait before retrying
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
+                } catch (err) {
+                    console.error('Network connection error:', err);
+                    retryCount++;
+                    if (retryCount < MAX_RETRIES) {
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                }
+            }
+            
             if (!networkInitialized) {
-                throw new Error('Failed to connect to server');
+                // If we can't connect, still try to create the game in offline mode
+                console.warn('Failed to connect to server. Starting in offline mode...');
+                this.isOfflineMode = true;
+                this.uiManager.showOfflineNotification();
             }
             
             // Initialize player - this already loads the character model
@@ -153,6 +188,7 @@ export class Game {
         } catch (error) {
             console.error('Failed to initialize managers:', error);
             this.handleInitializationError(error);
+            throw error; // Rethrow to stop initialization
         }
     }
 
@@ -373,13 +409,27 @@ export class Game {
     }
 
     update(delta) {
+        // Skip updates during initialization or when paused
+        if (!this.isInitialized || this.isPaused) {
+            return;
+        }
+        
+        // Update time-based events
+        this.currentTime += delta;
+        
         // Update player movement if we have a local player
         if (this.localPlayer && this.isAlive) {
             this.updatePlayerMovement(delta);
         }
         
-        // Update all managers
-        this.networkManager?.update(delta);
+        // Update all managers (safely with optional chaining)
+        if (!this.isOfflineMode && this.networkManager) {
+            this.networkManager.update(delta);
+        } else if (this.networkManager) {
+            // In offline mode, still call some network functions
+            this.networkManager.update(delta, true); // true = offline mode
+        }
+        
         this.playerManager?.update(delta);
         this.skillsManager?.update(delta);
         this.karmaManager?.update(delta);
