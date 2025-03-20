@@ -129,23 +129,23 @@ export class KarmaManager {
     }
     
     updateKarmaPath() {
-        // Update karma path based on current level
+        // Don't automatically update the path based on karma level anymore
+        // Only change path when explicitly chosen by player through choosePath()
+        
+        // The path shouldn't change automatically based on karma
+        // Keep the karma visual effects but don't modify the actual path
+        
+        // Only update effects
         const karma = this.game.playerStats.currentKarma;
         const maxKarma = this.game.playerStats.maxKarma;
-        const previousPath = this.game.playerStats.path;
         
-        if (karma > maxKarma * 0.7) {
-            this.game.playerStats.path = "dark";
-        } else if (karma < maxKarma * 0.3) {
-            this.game.playerStats.path = "light";
-        } else {
-            this.game.playerStats.path = null;
-        }
-        
-        // If path changed, trigger effects
-        if (previousPath !== this.game.playerStats.path) {
+        // Show threshold effect if extreme karma is reached, but don't change path
+        if ((karma > maxKarma * 0.7 && this.lastLoggedKarma <= maxKarma * 0.7) ||
+            (karma < maxKarma * 0.3 && this.lastLoggedKarma >= maxKarma * 0.3)) {
             this.onKarmaThresholdCrossed();
         }
+        
+        this.lastLoggedKarma = karma;
     }
     
     updateKarmaEffects() {
