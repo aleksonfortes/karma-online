@@ -5,6 +5,11 @@
   "description": "A multiplayer web game",
   "main": "src/index.js",
   "type": "module",
+  "exports": {
+    "./tests": {
+      "require": "./tests"
+    }
+  },
   "scripts": {
     "dev": "concurrently \"npm run dev:landing\" \"npm run dev:client\" \"npm run dev:server\"",
     "dev:landing": "vite landing-page",
@@ -24,10 +29,13 @@
     "test:network": "jest src/modules/network",
     "test:environment": "jest src/modules/environment",
     "test:CI": "jest --ci --coverage",
-    "test:integration": "jest tests/integration",
-    "test:integration:client-server": "jest tests/integration/client-server",
-    "test:integration:watch": "jest tests/integration --watch",
-    "test:integration:coverage": "jest tests/integration --coverage --collectCoverageFrom='server/src/modules/network/**/*.js'"
+    "test:integration": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration",
+    "test:integration:client-server": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration/client-server",
+    "test:integration:watch": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration --watch",
+    "test:integration:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration --coverage --collectCoverageFrom='server/src/modules/network/**/*.js'",
+    "test:game-flows": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration/game-flows",
+    "test:game-flows:watch": "NODE_OPTIONS=--experimental-vm-modules jest --config=jest.integration.config.js tests/integration/game-flows --watch",
+    "init:integration-tests": "node init-integration-tests.js"
   },
   "dependencies": {
     "concurrently": "^7.6.0",
