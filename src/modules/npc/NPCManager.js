@@ -757,4 +757,53 @@ export class NPCManager {
             'dark_npc': null
         };
     }
+
+    /**
+     * Check if the player is near any NPC
+     * @returns {boolean} True if player is near an NPC, false otherwise
+     */
+    isNearNPC() {
+        if (!this.game.localPlayer || !this.game.localPlayer.position) {
+            return false;
+        }
+        
+        const playerPos = this.game.localPlayer.position;
+        
+        // Check NPCs from EnvironmentManager
+        if (this.game.environmentManager) {
+            // Check dark NPC
+            if (this.game.environmentManager.darkNPC) {
+                const darkNpcPos = this.game.environmentManager.darkNPC.position;
+                const distance = this.calculateDistance(playerPos, darkNpcPos);
+                const darkConfig = GameConstants.NPC.DARK;
+                
+                if (distance < darkConfig.COLLISION_RADIUS + 3) {
+                    return true;
+                }
+            }
+            
+            // Check light NPC
+            if (this.game.environmentManager.lightNPC) {
+                const lightNpcPos = this.game.environmentManager.lightNPC.position;
+                const distance = this.calculateDistance(playerPos, lightNpcPos);
+                const lightConfig = GameConstants.NPC.LIGHT;
+                
+                if (distance < lightConfig.COLLISION_RADIUS + 3) {
+                    return true;
+                }
+            }
+        }
+        
+        // Also check locally stored NPCs
+        for (const [npcId, npc] of this.npcs.entries()) {
+            if (npc && npc.mesh && npc.mesh.position) {
+                const distance = this.calculateDistance(playerPos, npc.mesh.position);
+                if (distance < 5) { // Standard interaction distance
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
 }

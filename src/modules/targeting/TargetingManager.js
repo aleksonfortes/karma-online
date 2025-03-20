@@ -366,6 +366,8 @@ export class TargetingManager {
             this.playerUpdateTimeout = null;
         }
         
+        const hadTarget = this.currentTarget !== null;
+        
         // Remove the current target
         this.currentTarget = null;
         
@@ -375,6 +377,12 @@ export class TargetingManager {
         } else if (this.game.uiManager && this.game.uiManager.updateTargetDisplay) {
             // Fallback if clearTargetDisplay doesn't exist
             this.game.uiManager.updateTargetDisplay('', 0, 0, '', 0);
+        }
+        
+        // Show notification only if we previously had a target and it was explicitly cleared
+        // This prevents showing the notification during initialization or redundant clears
+        if (hadTarget && this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('No target selected', 'white');
         }
     }
     
