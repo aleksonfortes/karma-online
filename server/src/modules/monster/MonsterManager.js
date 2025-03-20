@@ -300,9 +300,9 @@ export class MonsterManager {
         ];
         
         // Schedule respawn with a random position from the water edge positions
-        const respawnTime = GameConstants.MONSTER[monster.type].RESPAWN_TIME || 10000; // Default 10 seconds
+        const respawnTime = 60000; // NEW: Fixed 60 seconds (1 minute) respawn time
         
-        console.log(`Monster ${monsterId} will respawn in ${respawnTime / 1000} seconds`);
+        console.log(`Monster ${monsterId} will be removed and a new one created in ${respawnTime / 1000} seconds`);
         
         // Clear any existing respawn timer
         if (this.respawnTimers.has(monsterId)) {
@@ -311,14 +311,17 @@ export class MonsterManager {
         
         // Set a new respawn timer
         const timerId = setTimeout(() => {
+            // IMPROVED APPROACH: Remove the old monster completely
+            this.monsters.delete(monsterId);
+            
             // Choose a random position from water edge positions
             const randomIndex = Math.floor(Math.random() * waterEdgePositions.length);
             const newPosition = waterEdgePositions[randomIndex];
             
             // Create randomness around the chosen position to avoid monsters stacking
             const randomOffset = {
-                x: (Math.random() * 10) - 5, // ±5 units
-                z: (Math.random() * 10) - 5  // ±5 units
+                x: (Math.random() * 20) - 10, // ±10 units (increased from 5)
+                z: (Math.random() * 20) - 10  // ±10 units (increased from 5)
             };
             
             const finalPosition = {
@@ -335,30 +338,41 @@ export class MonsterManager {
                 finalPosition.z = randomPos.z;
             }
             
-            // Reset monster state
-            monster.isAlive = true;
-            monster.health = GameConstants.MONSTER[monster.type].MAX_HEALTH;
-            monster.position = finalPosition;
-            monster.spawnPosition = finalPosition; // Set new spawn position for return-to-spawn behavior
-            monster.targetPlayerId = null;
-            monster.isReturningToSpawn = false;
-            monster.isAttacking = false;
-            monster.lastAttackTime = 0;
-            monster.lastMoveTime = Date.now();
-            monster.wanderAngle = Math.random() * Math.PI * 2;
-            monster.wanderTimer = 0;
-            monster.wanderInterval = 2000 + Math.random() * 3000;
+            // Create an entirely new monster with a new ID
+            const newMonsterId = `monster-${this.generateUUID()}`;
             
-            console.log(`Monster ${monsterId} respawned at new position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)} (Original: x=${originalPosition.x.toFixed(2)}, z=${originalPosition.z.toFixed(2)})`);
+            // Create new monster with same type but at new position
+            const newMonster = {
+                id: newMonsterId,
+                type: monster.type,
+                isAlive: true,
+                health: GameConstants.MONSTER[monster.type].MAX_HEALTH,
+                position: finalPosition,
+                spawnPosition: finalPosition, // Set new spawn position for return-to-spawn behavior
+                rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 },
+                targetPlayerId: null,
+                isReturningToSpawn: false,
+                isAttacking: false,
+                lastAttackTime: 0,
+                lastMoveTime: Date.now(),
+                wanderAngle: Math.random() * Math.PI * 2,
+                wanderTimer: 0,
+                wanderInterval: 2000 + Math.random() * 3000
+            };
             
-            // Notify all clients about the monster respawn
+            // Add the new monster to our collection
+            this.monsters.set(newMonsterId, newMonster);
+            
+            console.log(`New monster ${newMonsterId} created at position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)} (Original monster ${monsterId} was removed)`);
+            
+            // Notify all clients about the new monster
             if (this.gameManager && this.gameManager.io) {
                 this.gameManager.io.emit('monster_respawn', {
                     monster: {
-                        id: monsterId,
-                        type: monster.type,
+                        id: newMonsterId, // Note this is a new ID
+                        type: newMonster.type,
                         position: finalPosition,
-                        health: monster.health,
+                        health: newMonster.health,
                         maxHealth: GameConstants.MONSTER[monster.type].MAX_HEALTH,
                         isAlive: true
                     }
@@ -799,6 +813,16 @@ export class MonsterManager {
         
         this.respawnTimers.clear();
         this.monsters.clear();
+    }
+    
+    /**
+     * Generate a new UUID for monster IDs
+     * Using uuid v4 for random IDs
+     * @private
+     * @returns {string} A randomly generated UUID
+     */
+    generateUUID() {
+        return uuidv4();
     }
 }
 

@@ -1231,7 +1231,23 @@ export class NetworkManager {
         this.socket.on('monster_update', (updateData) => {
             if (this.game.monsterManager) {
                 if (this.game.monsterManager.initialized) {
-                    this.game.monsterManager.processMonsterUpdate(updateData);
+                    console.log('Received monster update:', updateData);
+                    
+                    // Add special handling for monster death updates
+                    if (updateData.isAlive === false) {
+                        console.log(`Monster ${updateData.monsterId} marked as not alive - handling as death`);
+                        this.game.monsterManager.handleMonsterDeath(updateData.monsterId);
+                        
+                        // If this was the targeted monster, clear target
+                        if (this.game.targetingManager && 
+                            this.game.targetingManager.currentTarget && 
+                            this.game.targetingManager.currentTarget.id === updateData.monsterId) {
+                            this.game.targetingManager.clearTarget();
+                        }
+                    } else {
+                        // Normal update for living monsters
+                        this.game.monsterManager.processMonsterUpdate(updateData);
+                    }
                 } else {
                     console.log('Monster manager not fully initialized yet, ignoring monster update');
                     // Updates can be safely ignored as they'll be included in the next full monster_data
@@ -1239,9 +1255,122 @@ export class NetworkManager {
             }
         });
         
+        // Handle monster death event
+        this.socket.on('monster_death', (data) => {
+            console.log('Received monster death event:', data);
+            if (this.game.monsterManager && this.game.monsterManager.initialized) {
+                const monsterId = data.monsterId;
+                if (monsterId) {
+                    // Mark monster as dead in client state
+                    this.game.monsterManager.handleMonsterDeath(monsterId);
+                    
+                    // If this was the targeted monster, clear target
+                    if (this.game.targetingManager && 
+                        this.game.targetingManager.currentTarget && 
+                        this.game.targetingManager.currentTarget.id === monsterId) {
+                        this.game.targetingManager.clearTarget();
+                    }
+                }
+            }
+        });
+        
+        // Handle monster respawn event
+        this.socket.on('monster_respawn', (data) => {
+            console.log('Monster respawn:', data);
+            
+            if (!this.game.monsterManager) {
+                console.warn('Monster manager not initialized yet for respawn');
+                return;
+            }
+            
+            if (!data.monster || !data.monster.id) {
+                console.warn('Invalid monster respawn data received:', data);
+                return;
+            }
+            
+            // Enhanced logging for respawn events
+            console.log(`Processing respawn for monster ${data.monster.id} at position:`, data.monster.position);
+            
+            // IMPROVED APPROACH: Create monster as completely new
+            // First, check if this is a brand new monster or old one
+            const existingMonster = this.game.monsterManager.getMonsterById(data.monster.id);
+            if (existingMonster) {
+                // This is an existing monster ID - remove it first to ensure clean state
+                console.log(`Removing existing monster ${data.monster.id} before respawning`);
+                this.game.monsterManager.removeMonster(data.monster.id);
+            }
+            
+            // Important: Force the isAlive property to be true for the new monster
+            const monsterData = {
+                ...data.monster,
+                isAlive: true,
+                health: data.monster.health || 100,
+                maxHealth: data.monster.maxHealth || 100
+            };
+            
+            // Create a new monster with the provided data
+            console.log(`Creating respawned monster with ID ${monsterData.id}`);
+            const newMonster = this.game.monsterManager.createMonster(monsterData);
+            
+            // Show notification if this monster is near the player
+            if (this.game.localPlayer) {
+                const playerPos = this.game.localPlayer.position;
+                const monsterPos = monsterData.position;
+                
+                // Calculate distance to player
+                const dx = playerPos.x - monsterPos.x;
+                const dz = playerPos.z - monsterPos.z;
+                const distanceToPlayer = Math.sqrt(dx * dx + dz * dz);
+                
+                // Only show notification for monsters that spawn near the player
+                if (distanceToPlayer < 50) {
+                    this.game.uiManager.showNotification(
+                        `A monster has appeared nearby!`, 
+                        '#FF9900'
+                    );
+                    
+                    // Play sound for nearby monster spawn
+                    if (this.game.soundManager) {
+                        this.game.soundManager.playSound('monster_spawn');
+                    }
+                }
+            }
+        });
+        
         // Handle monster damage to player
         this.socket.on('monsterDamage', (data) => {
             console.log('Received monster damage event:', data);
+            
+            // CRITICAL FIX #1: Add more robust check for dead monsters
+            if (this.game.monsterManager && data.monsterId) {
+                const monster = this.game.monsterManager.getMonsterById(data.monsterId);
+                
+                // Check all possible death conditions
+                if (!monster) {
+                    console.log(`Ignoring damage from non-existent monster ${data.monsterId}`);
+                    return; // Monster doesn't exist, ignore damage
+                }
+                
+                if (monster.isAlive === false || monster.health <= 0) {
+                    console.log(`Ignoring damage from dead monster ${data.monsterId} (isAlive=${monster.isAlive}, health=${monster.health})`);
+                    
+                    // CRITICAL FIX: Force server sync to ensure the server knows the monster is dead
+                    this.socket.emit('client_monster_state', {
+                        monsterId: data.monsterId,
+                        clientState: {
+                            isAlive: false,
+                            health: 0
+                        }
+                    });
+                    
+                    // Re-apply death handling just to be safe
+                    this.game.monsterManager.handleMonsterDeath(data.monsterId);
+                    return; // Don't apply damage from dead monsters
+                }
+                
+                // Extra logging for debugging
+                console.log(`Monster ${data.monsterId} damage accepted, current monster state: isAlive=${monster.isAlive}, health=${monster.health}`);
+            }
             
             // Check if player is in temple safe zone - no damage in temple
             if (this.game.environmentManager && 

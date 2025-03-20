@@ -17,8 +17,14 @@
 - [ ] Validate you cannot use any skill when you dont have a skill
 - [ ] Validate you use the correct skills when choosing the dark side
 - [ ] Validate you use the correct skills when choosing the light side
-- [ ] Validate 
-- [ ] Validate 
+- [ ] Validate you cannot attack a monster from a distance bigger than range
+- [ ] Validate you are followed by monsters when close to them
+- [ ] Validate monsters go back to their spot when leaving their spot
+- [ ] Validate monsters go back to their spot but attacks nearby players when returning
+- [ ] Validate a monster has a target bar that shows the correct information
+- [ ] Validate a monster have the target bar/status bar going down when receives hit
+- [ ] Validate a monster dies and disappear when life gets to zero 
+- [ ] Validate a monster respawn again after dying
 
 ## Multiplayer
 - [ ] Validate 

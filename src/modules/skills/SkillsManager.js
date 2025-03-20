@@ -1339,66 +1339,15 @@ export class SkillsManager {
             return;
         }
         
-        // Create a line from player to target to show range
-        const startPosition = this.game.localPlayer.position.clone();
-        
-        // Create the line geometry
-        const points = [
-            new THREE.Vector3(startPosition.x, startPosition.y + 0.5, startPosition.z),
-            new THREE.Vector3(targetPosition.x, targetPosition.y + 0.5, targetPosition.z)
-        ];
-        
-        // Calculate distance for internal tracking only
-        const lineDistance = startPosition.distanceTo(targetPosition);
-        
-        const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        
-        // Create dashed line material (red with dashes)
-        const material = new THREE.LineDashedMaterial({
-            color: 0xff0000, // Red color
-            dashSize: 0.5,
-            gapSize: 0.25,
-            opacity: 0.8,
-            transparent: true
-        });
-        
-        // Create the line
-        const line = new THREE.Line(geometry, material);
-        line.computeLineDistances(); // Required for dashed lines
-        
-        // Add to scene
-        this.game.scene.add(line);
-        
-        // Add to active effects for cleanup
-        if (!this.game.activeSkills.effects) {
-            this.game.activeSkills.effects = [];
-        }
-        this.game.activeSkills.effects.push({
-            object: line,
-            lifetime: 0,
-            maxLifetime: 1.5, // 1.5 seconds
-            update: (delta) => {
-                line.material.opacity -= delta * 0.5; // Fade out
-            },
-            dispose: () => {
-                if (line.parent) {
-                    line.parent.remove(line);
-                }
-                geometry.dispose();
-                material.dispose();
-            }
-        });
-        
-        // Create a "too far" text at the midpoint
+        // Create a "Too Far" text at the target position instead of a line
         if (this.game.ui && typeof this.game.ui.createWorldText === 'function') {
-            const midpoint = new THREE.Vector3(
-                (startPosition.x + targetPosition.x) / 2,
-                (startPosition.y + targetPosition.y) / 2 + 1, // Position above line
-                (startPosition.z + targetPosition.z) / 2
+            const textPosition = new THREE.Vector3(
+                targetPosition.x,
+                targetPosition.y + 2.0, // Position above the target
+                targetPosition.z
             );
             
-            // Use simpler text without distance
-            this.game.ui.createWorldText('Too Far', midpoint, {
+            this.game.ui.createWorldText('Too Far', textPosition, {
                 color: '#ff0000',
                 duration: 1.5,
                 fontSize: 16

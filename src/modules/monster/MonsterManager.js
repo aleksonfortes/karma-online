@@ -135,20 +135,76 @@ export class MonsterManager {
         
         // Process each monster from the server data
         monsterData.forEach(monster => {
+            // CRITICAL FIX: Handle inconsistent dead/alive states in the data
+            // Explicitly check for BOTH health and isAlive status
+            const hasZeroHealth = monster.health !== undefined && monster.health <= 0;
+            const isExplicitlyDead = monster.isAlive === false;
+            
+            // Resolve conflicts - if either condition indicates death, monster should be dead
+            // This fixes the conflict where health=0 but isAlive=true
+            if (hasZeroHealth) {
+                // Override any inconsistent alive status
+                monster.isAlive = false;
+                console.log(`Fixing inconsistent monster state for ${monster.id}: Had 0 health but was marked alive, correcting to dead`);
+            }
+            
+            // Define death status one single time to avoid inconsistency
+            const isDead = monster.isAlive === false || hasZeroHealth;
+            
             // Remove from existingMonsterIds set to mark as still valid
             existingMonsterIds.delete(monster.id);
             
             if (this.monsters.has(monster.id)) {
-                // Update existing monster
-                this.updateMonster(monster);
+                const existingMonster = this.monsters.get(monster.id);
+                
+                // CRITICAL FIX: Monster is already dead in our client
+                if (existingMonster.isAlive === false) {
+                    // If we think it's dead but server says it's alive and has health, respawn it
+                    if (monster.isAlive === true && monster.health > 0) {
+                        console.log(`Monster ${monster.id} was locally dead but server says it's alive (health=${monster.health}) - respawning`);
+                        this.removeMonster(monster.id);
+                        const newMonster = this.createMonster(monster);
+                        
+                        // Mark creation time to prevent initial health bar flickering
+                        if (newMonster && newMonster.mesh) {
+                            newMonster.mesh.userData.creationTime = startTime;
+                            newMonster.mesh.userData.lastDamageTime = startTime;
+                        }
+                    } else if (isDead) {
+                        // Both client and server agree monster is dead - just maintain death state
+                        console.log(`Monster ${monster.id} is confirmed dead by both client and server`);
+                        
+                        // Just ensure health is set to 0
+                        existingMonster.health = 0;
+                        existingMonster.isAlive = false;
+                    }
+                } 
+                // CRITICAL FIX: Monster is alive in our client
+                else if (existingMonster.isAlive === true) {
+                    if (isDead) {
+                        // Server says it's dead, so kill it
+                        console.log(`Monster ${monster.id} was alive in client but server says it's dead - killing it`);
+                        this.handleMonsterDeath(monster.id);
+                    } else {
+                        // Both agree it's alive - normal update
+                        this.updateMonster(monster);
+                    }
+                }
             } else {
                 // Create new monster
+                console.log(`Creating new monster ${monster.id} from server data, isDead=${isDead}`);
                 const newMonster = this.createMonster(monster);
                 
                 // Mark creation time to prevent initial health bar flickering
                 if (newMonster && newMonster.mesh) {
                     newMonster.mesh.userData.creationTime = startTime;
                     newMonster.mesh.userData.lastDamageTime = startTime;
+                }
+                
+                // If the new monster should be dead, handle it immediately
+                if (isDead) {
+                    console.log(`Newly created monster ${monster.id} should be dead - handling death`);
+                    this.handleMonsterDeath(monster.id);
                 }
             }
         });
@@ -165,6 +221,23 @@ export class MonsterManager {
      */
     createMonster(monsterData) {
         console.log(`Creating monster: ${monsterData.type} with ID ${monsterData.id}`);
+        
+        // CRITICAL FIX: Force consistent health/isAlive state
+        // Check if health is zero or explicitly marked as dead
+        const isExplicitlyDead = monsterData.isAlive === false;
+        const hasZeroHealth = monsterData.health !== undefined && monsterData.health <= 0;
+        
+        // If either condition indicates death, both should be set to dead state
+        if (hasZeroHealth || isExplicitlyDead) {
+            monsterData.isAlive = false;
+            monsterData.health = 0;
+        }
+        
+        // Final determination of alive status
+        const shouldBeAlive = monsterData.isAlive !== false && monsterData.health > 0;
+        
+        // Log important monster creation details for debugging
+        console.log(`Monster ${monsterData.id} creation details - isExplicitlyDead: ${isExplicitlyDead}, hasZeroHealth: ${hasZeroHealth}, shouldBeAlive: ${shouldBeAlive}, final health: ${monsterData.health}`);
         
         // Default to 'BASIC' type if the specified type doesn't exist
         let monsterType = monsterData.type || 'BASIC';
@@ -239,18 +312,28 @@ export class MonsterManager {
         monsterModel.userData.healthBarCanvas = healthBar.userData.canvas;
         monsterModel.userData.healthBarContext = healthBar.userData.context;
         
+        // CRITICAL FIX: Add all the monster data and flags to userData
+        monsterModel.userData.monsterId = monsterData.id;
+        monsterModel.userData.isAlive = shouldBeAlive;
+        monsterModel.userData.isDead = !shouldBeAlive;
+        monsterModel.userData.health = monsterData.health;
+        monsterModel.userData.maxHealth = monsterData.maxHealth || 100;
+        monsterModel.userData.type = monsterType;
+        
         // Add to scene
         this.game.scene.add(monsterModel);
         
-        // Store monster reference with health info
+        // CRITICAL FIX: Use consistent health even when monster is created (fix for the 0 health but 100 showing issue)
+        // Create the actual monster representation
         const monster = {
             id: monsterData.id,
-            type: monsterData.type,
+            type: monsterType,
             mesh: monsterModel,
-            health: monsterData.health || 100,
+            position: monsterModel.position.clone(),
+            health: shouldBeAlive ? (monsterData.health || 100) : 0,
             maxHealth: monsterData.maxHealth || 100,
-            position: monsterModel.position,
-            collisionRadius: monsterData.collisionRadius || 1
+            isAlive: shouldBeAlive,
+            lastUpdateTime: Date.now()
         };
         
         // Store in monsters Map
@@ -259,7 +342,13 @@ export class MonsterManager {
         // Initialize the health bar
         this.updateHealthBar(monster);
         
-        console.log(`Monster created with health: ${monster.health}/${monster.maxHealth}, health bar initialized`);
+        // If monster is created in a dead state, apply visual death effects
+        if (!shouldBeAlive) {
+            console.log(`Monster ${monsterData.id} created in dead state - applying death visuals`);
+            this.applyDeathVisuals(monster);
+        }
+        
+        console.log(`Monster created with health: ${monster.health}/${monster.maxHealth}, health bar initialized, isAlive=${monster.isAlive}`);
         
         return monster;
     }
@@ -439,6 +528,31 @@ export class MonsterManager {
             return;
         }
         
+        // CRITICAL: Handle death state first and foremost
+        // If monster is marked as not alive or health is 0, handle death immediately
+        if (updateData.isAlive === false || (updateData.health !== undefined && updateData.health <= 0)) {
+            console.log(`Monster ${monsterId} received death update (isAlive: ${updateData.isAlive}, health: ${updateData.health})`);
+            monster.isAlive = false;
+            this.handleMonsterDeath(monsterId);
+            return; // Skip further processing for dead monsters
+        }
+        
+        // If monster is already marked as dead in our client, don't update it
+        if (monster.isAlive === false) {
+            console.log(`Ignoring update for dead monster ${monsterId}`);
+            return;
+        }
+        
+        // Update isAlive status if provided
+        if (updateData.isAlive !== undefined) {
+            monster.isAlive = updateData.isAlive;
+        }
+        
+        // Skip updates for dead monsters
+        if (monster.isAlive === false) {
+            return;
+        }
+        
         // Update health if provided - always use server values for authoritative state
         if (updateData.health !== undefined) {
             // Store previous health for logging
@@ -465,7 +579,6 @@ export class MonsterManager {
             // Record the time of this server health update
             monster.lastServerUpdateTime = Date.now();
             
-            // Normal case - just apply the update directly
             // Apply the health change immediately
             monster.health = updateData.health;
             monster.maxHealth = updateData.maxHealth || monster.maxHealth;
@@ -476,6 +589,14 @@ export class MonsterManager {
                 
                 // If this is a damage event (health decreased), record it
                 monster.mesh.userData.lastDamageTime = Date.now();
+            }
+            
+            // Check if monster died from this update
+            if (monster.health <= 0 && prevHealth > 0) {
+                console.log(`Monster ${monsterId} died from health update (${prevHealth} -> ${monster.health})`);
+                monster.isAlive = false;
+                this.handleMonsterDeath(monsterId);
+                return;
             }
             
             // Update the health bar, passing the update ID
@@ -499,12 +620,6 @@ export class MonsterManager {
                 }
             }
         }
-        
-        // Handle monster death - server authoritative
-        if (updateData.health <= 0 || updateData.isAlive === false) {
-            // Keep the monster in the collection but visually indicate it's dead
-            this.handleMonsterDeath(monsterId);
-        }
     }
     
     /**
@@ -514,42 +629,101 @@ export class MonsterManager {
         const monster = this.monsters.get(monsterId);
         if (!monster) return;
         
+        // If the monster is already marked as dead, skip reprocessing
+        if (monster.isAlive === false) {
+            console.log(`Monster ${monsterId} already marked as dead, skipping duplicate death handling`);
+            return;
+        }
+        
         console.log(`Handling monster death: ${monsterId}`);
+        
+        // IMPORTANT: Mark monster as dead to prevent any updates
+        monster.isAlive = false;
         
         // Set health to zero - server is authoritative
         monster.health = 0;
         monster.serverHealth = 0;
         
+        // CRITICAL FIX: Completely disable the monster's ability to attack or move
+        if (monster.mesh) {
+            // Remove any collision capabilities
+            if (monster.mesh.userData) {
+                monster.mesh.userData.isAlive = false;
+                monster.mesh.userData.isDead = true;  
+                monster.mesh.userData.canAttack = false;
+                monster.mesh.userData.canMove = false;
+                monster.mesh.userData.isInterpolating = false;
+                monster.mesh.userData.interpStart = null;
+                monster.mesh.userData.interpTarget = null;
+                monster.mesh.userData.interpProgress = 0;
+                monster.mesh.userData.isMoving = false;
+                monster.mesh.userData.isAttacking = false;
+                
+                // Add a timestamp for when the monster died
+                monster.mesh.userData.deathTime = Date.now();
+            }
+            
+            // CRITICAL FIX: Disable collision detection by moving the monster's collision
+            // detection point far below the world
+            if (this.game.physics && this.game.physics.excludeObject) {
+                this.game.physics.excludeObject(monster.mesh);
+            }
+            
+            // Alternatively, move it out of the world
+            monster.mesh.position.y = -1000; // Move far below the scene so it can't collide
+            
+            // Keep the visual mesh at the right position
+            // Create a visual-only representation that stays where the monster died
+            const visualPosition = monster.position.clone();
+            visualPosition.y += 2.0; // Keep the visual height adjustment
+            
+            // Move the mesh back for visual purposes only
+            monster.mesh.visible = false;
+            
+            // Create a copy of the monster mesh for visual purposes only
+            if (!monster.visualMesh) {
+                monster.visualMesh = monster.mesh.clone();
+                monster.visualMesh.position.copy(visualPosition);
+                this.game.scene.add(monster.visualMesh);
+                
+                // Apply visual death effects to the visual mesh
+                this.applyDeathVisuals({ mesh: monster.visualMesh });
+            }
+        }
+        
+        // Apply visual death effects to the original mesh (just in case)
+        this.applyDeathVisuals(monster);
+        
         // Update health bar to show zero health
         this.updateHealthBar(monster);
         
-        // Visual indication of death - make the monster semi-transparent
-        monster.mesh.traverse(child => {
-            if (child.isMesh && child.material) {
-                // Create a clone of the material to avoid affecting other instances
-                if (Array.isArray(child.material)) {
-                    child.material = child.material.map(m => m.clone());
-                    child.material.forEach(m => {
-                        m.transparent = true;
-                        m.opacity = 0.5;
-                    });
-                } else {
-                    child.material = child.material.clone();
-                    child.material.transparent = true;
-                    child.material.opacity = 0.5;
-                }
-            }
-        });
+        // Log monster death for debugging
+        console.log(`Monster ${monsterId} marked as dead, isAlive=${monster.isAlive}`);
         
-        // Make health bar fade out too
-        const healthBar = monster.mesh.userData.healthBar;
-        if (healthBar && healthBar.material) {
-            healthBar.material.opacity = 0.5;
+        // CRITICAL FIX: Tell the server we know this monster is dead
+        if (this.game.networkManager && this.game.networkManager.socket) {
+            this.game.networkManager.socket.emit('client_monster_state', {
+                monsterId: monsterId,
+                clientState: {
+                    isAlive: false,
+                    health: 0,
+                    deathTime: Date.now()
+                }
+            });
         }
         
         // Schedule removal after fade animation - only on server confirmation
         setTimeout(() => {
-            this.removeMonster(monsterId);
+            // Verify monster still exists before removing
+            if (this.monsters.has(monsterId)) {
+                // Check if monster got respawned before removal
+                const monsterBeforeRemoval = this.monsters.get(monsterId);
+                if (monsterBeforeRemoval.isAlive === true) {
+                    console.log(`Monster ${monsterId} was respawned before removal timer, keeping alive`);
+                    return;
+                }
+                this.removeMonster(monsterId);
+            }
         }, 2000);
     }
     
@@ -558,15 +732,122 @@ export class MonsterManager {
      */
     removeMonster(monsterId) {
         const monster = this.monsters.get(monsterId);
-        if (!monster) return;
+        if (!monster) {
+            console.log(`Monster ${monsterId} not found for removal`);
+            return;
+        }
         
         console.log(`Removing monster: ${monsterId}`);
         
-        // Remove from scene
-        this.game.scene.remove(monster.mesh);
-        
-        // Remove from collection
-        this.monsters.delete(monsterId);
+        try {
+            // ENHANCED CLEANUP: Aggressively remove all resources
+            
+            // 1. Make sure the monster is marked as dead
+            monster.isAlive = false;
+            monster.health = 0;
+            
+            // 2. Remove the main mesh from scene
+            if (monster.mesh) {
+                // Hide immediately to prevent any visual glitches
+                monster.mesh.visible = false;
+                
+                // Remove from scene
+                this.game.scene.remove(monster.mesh);
+                
+                // Dispose of geometries and materials to prevent memory leaks
+                monster.mesh.traverse(child => {
+                    if (child.geometry) {
+                        child.geometry.dispose();
+                    }
+                    
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(material => material.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+                
+                // Clear any references in userData
+                if (monster.mesh.userData) {
+                    // Save the monster ID for logging
+                    const mId = monster.mesh.userData.monsterId;
+                    
+                    // Clear all userData properties
+                    for (const prop in monster.mesh.userData) {
+                        monster.mesh.userData[prop] = null;
+                    }
+                    
+                    // Just keep the ID for debugging
+                    monster.mesh.userData.monsterId = mId;
+                    monster.mesh.userData.wasRemoved = true;
+                }
+                
+                // Clear mesh reference
+                monster.mesh = null;
+            }
+            
+            // 3. Remove any visual mesh that was created for dead monsters
+            if (monster.visualMesh) {
+                // Hide immediately
+                monster.visualMesh.visible = false;
+                this.game.scene.remove(monster.visualMesh);
+                
+                // Also dispose of visual mesh resources
+                monster.visualMesh.traverse(child => {
+                    if (child.geometry) {
+                        child.geometry.dispose();
+                    }
+                    
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(material => material.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+                
+                // Clear reference
+                monster.visualMesh = null;
+            }
+            
+            // 4. Ensure any physics/collision handling is removed
+            if (this.game.physics) {
+                if (this.game.physics.removeObject) {
+                    this.game.physics.removeObject(monster.mesh);
+                }
+                if (this.game.physics.excludeObject) {
+                    this.game.physics.excludeObject(monster.mesh);
+                }
+            }
+            
+            // 5. Clear targeting if this monster is the current target
+            if (this.game.targetingManager && 
+                this.game.targetingManager.currentTarget && 
+                this.game.targetingManager.currentTarget.id === monsterId) {
+                console.log(`Clearing targeting for removed monster ${monsterId}`);
+                this.game.targetingManager.clearTarget();
+            }
+            
+            // 6. Notify the server that we've removed this monster from our client
+            if (this.game.networkManager && this.game.networkManager.socket) {
+                this.game.networkManager.socket.emit('client_monster_removed', {
+                    monsterId: monsterId
+                });
+            }
+            
+            // 7. Finally remove from collection
+            this.monsters.delete(monsterId);
+            
+            console.log(`Monster ${monsterId} completely removed from the game`);
+        } catch (error) {
+            console.error(`Error removing monster ${monsterId}:`, error);
+            
+            // Even if there's an error, make sure the monster is removed from the collection
+            this.monsters.delete(monsterId);
+        }
     }
     
     /**
@@ -583,11 +864,18 @@ export class MonsterManager {
         // Skip if not fully initialized
         if (!this.initialized || !this.monsters) return;
         
-        // Get current time
-        const now = Date.now();
-        
         // Update monsters
         this.monsters.forEach((monster) => {
+            // Skip updates for dead monsters - strict check
+            if (monster.isAlive === false || monster.health <= 0) {
+                // For debugging purposes, ensure the monster is fully marked as dead
+                if (monster.health <= 0 && monster.isAlive !== false) {
+                    console.log(`Monster ${monster.id} has 0 health but isAlive is not false, forcing death state`);
+                    this.handleMonsterDeath(monster.id);
+                }
+                return;
+            }
+            
             // Update animations
             this.updateMonsterAnimation(monster, deltaTime);
             
@@ -797,6 +1085,88 @@ export class MonsterManager {
             if (healthBar.material) {
                 healthBar.material.visible = true;
             }
+        }
+    }
+
+    /**
+     * Apply visual death effects to a monster without triggering full death handling
+     */
+    applyDeathVisuals(monster) {
+        if (!monster || !monster.mesh) return;
+        
+        // Get the mesh to apply effects to
+        const targetMesh = monster.visualMesh || monster.mesh;
+        
+        // CRITICAL ENHANCEMENT: Make dead monsters VERY clearly dead visually
+        
+        // 1. Make the monster semi-transparent and grayscale
+        targetMesh.traverse(child => {
+            if (child.isMesh && child.material) {
+                // Create a clone of the material to avoid affecting other instances
+                if (Array.isArray(child.material)) {
+                    child.material = child.material.map(m => {
+                        const newMat = m.clone();
+                        newMat.transparent = true;
+                        newMat.opacity = 0.5;
+                        // Add grayscale effect via color adjustment
+                        if (newMat.color) {
+                            const color = newMat.color.getHSL({});
+                            newMat.color.setHSL(0, 0, color.l * 0.7); // Remove saturation and darken
+                        }
+                        return newMat;
+                    });
+                } else {
+                    child.material = child.material.clone();
+                    child.material.transparent = true;
+                    child.material.opacity = 0.5;
+                    // Add grayscale effect via color adjustment
+                    if (child.material.color) {
+                        const color = child.material.color.getHSL({});
+                        child.material.color.setHSL(0, 0, color.l * 0.7); // Remove saturation and darken
+                    }
+                }
+            }
+        });
+        
+        // 2. Make health bar fade out and turn gray
+        const healthBar = targetMesh.userData.healthBar;
+        if (healthBar && healthBar.material) {
+            healthBar.material.opacity = 0.3;
+            // Make the health bar gray if it's a sprite
+            if (healthBar.material.map) {
+                // Update the canvas to show a gray health bar
+                const canvas = healthBar.userData.canvas;
+                const context = healthBar.userData.context;
+                
+                if (canvas && context) {
+                    // Clear the canvas
+                    context.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Fill with dark gray background
+                    context.fillStyle = '#333333';
+                    context.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Update the texture
+                    healthBar.material.map.needsUpdate = true;
+                }
+            }
+        }
+        
+        // 3. Optional: Add "death" effect (if we have particle effects system)
+        if (this.game.effectsManager && this.game.effectsManager.createDeathEffect) {
+            // Position the effect at the monster's position
+            const position = monster.position ? monster.position.clone() : 
+                            (targetMesh.position ? targetMesh.position.clone() : null);
+            
+            if (position) {
+                position.y += 1.0; // Offset slightly upward
+                this.game.effectsManager.createDeathEffect(position);
+            }
+        }
+        
+        // 4. Set a flag that this monster has had death visuals applied
+        if (targetMesh.userData) {
+            targetMesh.userData.deathVisualsApplied = true;
         }
     }
 }
