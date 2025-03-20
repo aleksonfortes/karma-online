@@ -13,6 +13,9 @@ export class UIManager {
         this.errorScreen = null;
         this.targetDisplay = null;
         this.deathScreen = null;
+        
+        // Set up resize handler
+        window.addEventListener('resize', this.handleResize.bind(this));
     }
     
     // Add init method
@@ -1168,7 +1171,8 @@ export class UIManager {
         if (!this.notificationElement) {
             this.notificationElement = document.createElement('div');
             this.notificationElement.style.position = 'fixed';
-            this.notificationElement.style.top = '20px';
+            // Position will be updated in updateNotificationPosition method
+            this.notificationElement.style.top = '60px'; // Initial position, will be updated
             this.notificationElement.style.left = '50%';
             this.notificationElement.style.transform = 'translateX(-50%)';
             this.notificationElement.style.padding = '10px 20px';
@@ -1176,11 +1180,72 @@ export class UIManager {
             this.notificationElement.style.color = 'white';
             this.notificationElement.style.fontFamily = 'Arial, sans-serif';
             this.notificationElement.style.fontSize = '16px';
-            this.notificationElement.style.zIndex = '2000';
+            this.notificationElement.style.zIndex = '1500'; // Above target display but below other UI
             this.notificationElement.style.textAlign = 'center';
             this.notificationElement.style.opacity = '0';
             this.notificationElement.style.transition = 'opacity 0.3s ease';
+            this.notificationElement.style.borderRadius = '3px';
+            this.notificationElement.style.border = '1px solid #444';
+            this.notificationElement.style.maxWidth = '80%';
+            this.notificationElement.style.boxShadow = '0 0 10px rgba(0, 0, 0, 0.5)';
+            this.notificationElement.style.whiteSpace = 'nowrap';
+            this.notificationElement.style.pointerEvents = 'none'; // Prevent blocking mouse clicks
             document.body.appendChild(this.notificationElement);
+            
+            // Create a queue for notifications
+            this.notificationQueue = [];
+            this.processingNotification = false;
+            this.currentNotificationMessage = null;
+        }
+        
+        // Update notification position relative to target display
+        this.updateNotificationPosition();
+        
+        // Ensure message ends with a period
+        if (message && 
+            !message.endsWith('.') && 
+            !message.endsWith('!') && 
+            !message.endsWith('?')) {
+            message += '.';
+        }
+        
+        // Check if this message is already in the queue or currently displaying
+        if (this.currentNotificationMessage === message || 
+            this.notificationQueue.some(item => item.message === message)) {
+            return; // Skip duplicate message
+        }
+        
+        // Add notification to queue
+        this.notificationQueue.push({
+            message,
+            color,
+            duration
+        });
+        
+        // Process queue if not already processing
+        if (!this.processingNotification) {
+            this.processNotificationQueue();
+        }
+    }
+    
+    // Process notification queue
+    processNotificationQueue() {
+        if (this.notificationQueue.length === 0) {
+            this.processingNotification = false;
+            return;
+        }
+        
+        this.processingNotification = true;
+        
+        // Get the next notification
+        const notification = this.notificationQueue.shift();
+        
+        // Ensure message ends with a period
+        if (notification.message && 
+            !notification.message.endsWith('.') && 
+            !notification.message.endsWith('!') && 
+            !notification.message.endsWith('?')) {
+            notification.message += '.';
         }
         
         // Clear any existing timeout
@@ -1188,32 +1253,59 @@ export class UIManager {
             clearTimeout(this.notificationTimeout);
         }
         
-        // Set color based on parameter
-        switch (color) {
+        // Set color based on parameter (standardize to black and white theme)
+        switch (notification.color) {
             case 'red':
-                this.notificationElement.style.color = '#ff6666';
+            case '#ff0000':
+            case '#ff3333':
+            case '#ff6666':
+            case '#ff9900':
+                this.notificationElement.style.color = 'white';
+                this.notificationElement.style.borderColor = '#800000';
                 break;
             case 'green':
-                this.notificationElement.style.color = '#66ff66';
+            case '#00ff00':
+            case '#66ff66':
+                this.notificationElement.style.color = 'white';
+                this.notificationElement.style.borderColor = '#008000';
                 break;
             case 'blue':
-                this.notificationElement.style.color = '#6666ff';
+            case '#6666ff':
+                this.notificationElement.style.color = 'white';
+                this.notificationElement.style.borderColor = '#000080';
                 break;
             case 'yellow':
-                this.notificationElement.style.color = '#ffff66';
+            case '#ffff66':
+            case '#ffcc00':
+            case 'yellow':
+                this.notificationElement.style.color = 'white';
+                this.notificationElement.style.borderColor = '#808000';
                 break;
             default:
                 this.notificationElement.style.color = 'white';
+                this.notificationElement.style.borderColor = '#444';
         }
         
+        // Update the notification position
+        this.updateNotificationPosition();
+        
         // Update the message and show
-        this.notificationElement.textContent = message;
+        this.notificationElement.textContent = notification.message;
         this.notificationElement.style.opacity = '1';
         
-        // Hide after duration
+        // Store the current message to check for duplicates
+        this.currentNotificationMessage = notification.message;
+        
+        // Hide after duration and process next notification
         this.notificationTimeout = setTimeout(() => {
             this.notificationElement.style.opacity = '0';
-        }, duration);
+            
+            // Process next notification after fade out
+            setTimeout(() => {
+                this.currentNotificationMessage = null;
+                this.processNotificationQueue();
+            }, 300);
+        }, notification.duration);
     }
     
     // Method to update status bars position above player
@@ -1239,8 +1331,18 @@ export class UIManager {
         this.statusBars.style.top = `${y}px`;
     }
     
-    update() {
-        // Update any animated UI elements here
+    update(delta) {
+        // Update notification position if it's visible
+        if (this.notificationElement && 
+            this.notificationElement.style.opacity !== '0' && 
+            this.targetDisplay && 
+            this.targetDisplay.container && 
+            this.targetDisplay.container.style.display !== 'none') {
+            
+            this.updateNotificationPosition();
+        }
+        
+        // Update any other animated UI elements here
     }
 
     updateKarmaDisplay(currentKarma, maxKarma) {
@@ -1454,6 +1556,9 @@ export class UIManager {
         
         // Show the target display
         this.targetDisplay.container.style.display = 'block';
+        
+        // Update notification position when target display is updated
+        this.updateNotificationPosition();
     }
     
     /**
@@ -1466,6 +1571,9 @@ export class UIManager {
         if (this.targetDisplay) {
             this.targetDisplay.container.style.display = 'none';
         }
+        
+        // Update notification position when target display is cleared
+        this.updateNotificationPosition();
     }
 
     /**
@@ -1687,40 +1795,9 @@ export class UIManager {
      * @param {string} message - The message to display
      * @param {number} [duration=3000] - How long to show the message in milliseconds
      */
-    showMessage(message, duration = 3000) {
-        // Create message element if it doesn't exist
-        if (!this.messageElement) {
-            this.messageElement = document.createElement('div');
-            this.messageElement.style.position = 'fixed';
-            this.messageElement.style.top = '20%';
-            this.messageElement.style.left = '50%';
-            this.messageElement.style.transform = 'translateX(-50%)';
-            this.messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-            this.messageElement.style.color = '#ffffff';
-            this.messageElement.style.padding = '10px 20px';
-            this.messageElement.style.borderRadius = '5px';
-            this.messageElement.style.fontFamily = 'Arial, sans-serif';
-            this.messageElement.style.fontSize = '16px';
-            this.messageElement.style.zIndex = '2000';
-            this.messageElement.style.textAlign = 'center';
-            this.messageElement.style.maxWidth = '80%';
-            this.messageElement.style.display = 'none';
-            document.body.appendChild(this.messageElement);
-        }
-        
-        // Clear any existing timeout
-        if (this.messageTimeout) {
-            clearTimeout(this.messageTimeout);
-        }
-        
-        // Set message and show
-        this.messageElement.textContent = message;
-        this.messageElement.style.display = 'block';
-        
-        // Hide after duration
-        this.messageTimeout = setTimeout(() => {
-            this.messageElement.style.display = 'none';
-        }, duration);
+    showMessage(message, duration = 3000, color = 'white') {
+        // Use the notification system for consistency
+        this.showNotification(message, color, duration);
     }
 
     /**
@@ -1801,7 +1878,7 @@ export class UIManager {
         
         // If level up occurred, show a level up notification
         if (levelUp && newLevel) {
-            this.showNotification(`Level up! You are now level ${newLevel}`, 3000, 'yellow');
+            this.showNotification(`Level up! You are now level ${newLevel}`, 'yellow', 3000);
         }
     }
 
@@ -1852,5 +1929,58 @@ export class UIManager {
             setTimeout(pulse, 1000);
         };
         pulse();
+    }
+
+    /**
+     * Clear all pending and currently displayed notifications
+     */
+    clearAllNotifications() {
+        // Clear queue
+        this.notificationQueue = [];
+        
+        // Clear currently displaying notification
+        if (this.notificationElement) {
+            // Clear any existing timeout
+            if (this.notificationTimeout) {
+                clearTimeout(this.notificationTimeout);
+                this.notificationTimeout = null;
+            }
+            
+            // Hide current notification
+            this.notificationElement.style.opacity = '0';
+            this.currentNotificationMessage = null;
+            this.processingNotification = false;
+        }
+    }
+    
+    /**
+     * Update notification position to be 50px (5cm) below the target bar
+     */
+    updateNotificationPosition() {
+        if (!this.notificationElement) return;
+        
+        const TARGET_OFFSET = 50; // 50px = 5cm at standard DPI
+        
+        if (this.targetDisplay && this.targetDisplay.container) {
+            // Get the target display position and dimensions
+            const targetRect = this.targetDisplay.container.getBoundingClientRect();
+            // Position notification 50px below the bottom of target display
+            const topPosition = targetRect.bottom + TARGET_OFFSET;
+            this.notificationElement.style.top = `${topPosition}px`;
+        } else {
+            // If target display doesn't exist, use a default position
+            this.notificationElement.style.top = '60px';
+        }
+    }
+
+    /**
+     * Handle window resize events to update UI elements
+     */
+    handleResize() {
+        // Update notification position
+        this.updateNotificationPosition();
+        
+        // Update any other UI elements that need repositioning
+        // ...
     }
 } 

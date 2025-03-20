@@ -269,7 +269,7 @@ export class NetworkManager {
                 if (isTargetInTemple) {
                     socket.emit('errorMessage', {
                         type: 'combat',
-                        message: 'Cannot attack players in temple safe zone'
+                        message: 'Cannot attack players that are close to the temple safe zone'
                     });
                     return;
                 }

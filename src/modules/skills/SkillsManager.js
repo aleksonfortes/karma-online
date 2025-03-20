@@ -1453,89 +1453,38 @@ export class SkillsManager {
     }
 
     /**
-     * Show error message to player
+     * Show an error message to the player
+     * @param {string} message - The error message to show
      */
     showErrorMessage(message) {
-        // If UI has a showMessage method, use it
-        if (this.game.ui && typeof this.game.ui.showMessage === 'function') {
-            this.game.ui.showMessage(message);
-        } else if (this.game.ui && typeof this.game.ui.showNotification === 'function') {
-            this.game.ui.showNotification(message, 'red');
+        // Use UI notification if available
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification(message, '#ff3333');
         } else {
-            // Fallback when UI system is not available - create a simple floating message
-            const messageElement = document.createElement('div');
-            messageElement.textContent = message;
-            messageElement.style.position = 'fixed';
-            messageElement.style.top = '10%';
-            messageElement.style.left = '50%';
-            messageElement.style.transform = 'translateX(-50%)';
-            messageElement.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-            messageElement.style.color = '#ff6666';
-            messageElement.style.padding = '10px 20px';
-            messageElement.style.borderRadius = '5px';
-            messageElement.style.fontFamily = 'Arial, sans-serif';
-            messageElement.style.fontSize = '16px';
-            messageElement.style.zIndex = '2000';
-            
-            document.body.appendChild(messageElement);
-            
-            // Remove after 3 seconds
-            setTimeout(() => {
-                if (messageElement.parentNode) {
-                    messageElement.parentNode.removeChild(messageElement);
-                }
-            }, 3000);
+            // Fallback to console
+            console.error(message);
         }
-        
-        // Also log to console
-        console.log(`Error: ${message}`);
     }
 
     /**
-     * Show a visual indicator for out-of-range targets
+     * Show a visual and text indicator that the target is out of range
      * @param {Object} target - The target that's out of range
      */
     showRangeIndicator(target) {
-        if (!this.game.scene || !this.game.localPlayer) {
-            console.warn('Cannot show range indicator: scene or local player missing');
+        // If we don't have a valid target, exit
+        if (!target || !target.id) {
+            // No target selected case
+            if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+                this.game.uiManager.showNotification('No target selected', 'white');
+            }
             return;
         }
         
-        // Get target position based on different possible structures
-        let targetPosition = null;
-        
-        try {
-            if (target.position && typeof target.position.clone === 'function') {
-                // Target has direct position property
-                targetPosition = target.position.clone();
-            } else if (target.object && target.object.position && typeof target.object.position.clone === 'function') {
-                // Target has nested object with position
-                targetPosition = target.object.position.clone();
-            } else if (target.mesh && target.mesh.position && typeof target.mesh.position.clone === 'function') {
-                // Target is a monster with mesh property
-                targetPosition = target.mesh.position.clone();
-            } else if (target.id && target.id.startsWith('monster-') && this.game.monsterManager) {
-                // Try to get monster from monster manager
-                const monster = this.game.monsterManager.getMonsterById(target.id);
-                if (monster && monster.mesh && monster.mesh.position) {
-                    targetPosition = monster.mesh.position.clone();
-                }
-            } else {
-                // Try to get position from current target in targeting manager
-                const currentTarget = this.game.targetingManager?.currentTarget;
-                if (currentTarget) {
-                    if (currentTarget.object && currentTarget.object.position && typeof currentTarget.object.position.clone === 'function') {
-                        targetPosition = currentTarget.object.position.clone();
-                    } else if (currentTarget.position && typeof currentTarget.position.clone === 'function') {
-                        targetPosition = currentTarget.position.clone();
-                    } else if (currentTarget.mesh && currentTarget.mesh.position && typeof currentTarget.mesh.position.clone === 'function') {
-                        targetPosition = currentTarget.mesh.position.clone();
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error determining target position:', error);
-        }
+        // Try to get position from current target in targeting manager
+        const currentTarget = this.game.targetingManager?.currentTarget;
+        const targetPosition = currentTarget?.object?.position || 
+                              target?.object?.position || 
+                              target?.position;
         
         // If we couldn't find a valid position, log error and exit
         if (!targetPosition) {

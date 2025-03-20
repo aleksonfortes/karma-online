@@ -316,12 +316,17 @@ export class Game {
                                 this.skillsManager.useSkillOnMonster(target.id);
                             }
                         } else if (this.skillsManager) {
-                            // Use appropriate skill based on path
-                            const skillToUse = this.skillsManager.getDefaultSkill();
-                            if (skillToUse === 'martial_arts') {
-                                this.skillsManager.useMartialArts();
-                            } else if (skillToUse === 'dark_strike') {
-                                this.skillsManager.useDarkStrike();
+                            // Check if there's no target and show notification if needed
+                            if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                this.uiManager.showNotification('No target selected', 'white');
+                            } else {
+                                // Use appropriate skill based on path
+                                const skillToUse = this.skillsManager.getDefaultSkill();
+                                if (skillToUse === 'martial_arts') {
+                                    this.skillsManager.useMartialArts();
+                                } else if (skillToUse === 'dark_strike') {
+                                    this.skillsManager.useDarkStrike();
+                                }
                             }
                         }
                     }
@@ -329,31 +334,42 @@ export class Game {
                 case 'KeyE':
                     // E handles both NPC interaction and skill usage for monsters, like PVP
                     if (this.isAlive) {
-                        // Check if we have targeting manager and a monster targeted
-                        const target = this.targetingManager?.currentTarget;
-                        if (target && target.type === 'monster' && this.skillsManager) {
-                            // Check if player has chosen a path - skip in test environment
-                            const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
-                            if (!this.playerStats.path && !isTestEnvironment) {
-                                console.log('You must choose a path (light or dark) before using skills');
-                                // Show UI message if UI manager exists
-                                if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                                    this.uiManager.showNotification('Choose a path (light or dark) first');
-                                } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
-                                    this.uiManager.showMessage('Choose a path (light or dark) first');
-                                }
-                                break;
-                            }
-                            
-                            // Get the monster
-                            const monster = this.monsterManager?.getMonsterById(target.id);
-                            if (monster) {
-                                // Only attempt to attack if monster exists
-                                this.skillsManager.useSkillOnMonster(target.id);
-                            }
-                        } else if (this.npcManager) {
-                            // Try to interact with NPCs
+                        // First check if we're near an NPC - prioritize NPC interaction
+                        if (this.npcManager && this.npcManager.isNearNPC()) {
+                            // Always prioritize NPC interaction if near one, regardless of targeting
                             this.npcManager.handleInteraction();
+                        } else {
+                            // Only use skills on targets if not near an NPC
+                            const target = this.targetingManager?.currentTarget;
+                            if (target && target.type === 'monster' && this.skillsManager) {
+                                // Check if player has chosen a path - skip in test environment
+                                const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+                                if (!this.playerStats.path && !isTestEnvironment) {
+                                    console.log('You must choose a path (light or dark) before using skills');
+                                    // Show UI message if UI manager exists
+                                    if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                        this.uiManager.showNotification('Choose a path (light or dark) first');
+                                    } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
+                                        this.uiManager.showMessage('Choose a path (light or dark) first');
+                                    }
+                                    break;
+                                }
+                                
+                                // Get the monster
+                                const monster = this.monsterManager?.getMonsterById(target.id);
+                                if (monster) {
+                                    // Use the skill in the E slot on the monster
+                                    const eSkill = this.skillsManager.getSkillBySlot(2); // Slot 2 is E
+                                    if (eSkill) {
+                                        this.skillsManager.useSkillOnMonster(target.id, eSkill);
+                                    }
+                                }
+                            } else if (!target && this.skillsManager && this.npcManager) {
+                                // Only show no target selected when not near an NPC and no target
+                                if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                    this.uiManager.showNotification('No target selected', 'white');
+                                }
+                            }
                         }
                     }
                     break;
