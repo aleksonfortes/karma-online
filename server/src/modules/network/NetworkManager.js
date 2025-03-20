@@ -341,6 +341,12 @@ export class NetworkManager {
                         killerId: socket.id
                     });
                     
+                    // Broadcast playerKilled event to all clients
+                    this.io.emit('playerKilled', {
+                        id: data.targetId,
+                        killerId: socket.id
+                    });
+                    
                     // Handle player death on server
                     this.playerManager.handlePlayerDeath(data.targetId, socket.id);
                 }
@@ -423,7 +429,8 @@ export class NetworkManager {
                     position: player.position,
                     life: player.life,
                     maxLife: player.maxLife,
-                    isDead: player.isDead
+                    isDead: player.isDead,
+                    visible: true
                 });
                 
                 // Also send a life update to ensure health bars are updated
@@ -806,7 +813,8 @@ export class NetworkManager {
                     stats: {
                         life: player.life,
                         maxLife: player.maxLife
-                    }
+                    },
+                    visible: true
                 });
                 
                 console.log(`Broadcast player ${socket.id} respawn to all clients`);
