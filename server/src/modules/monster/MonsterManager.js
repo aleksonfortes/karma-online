@@ -268,39 +268,31 @@ export class MonsterManager {
         // Save original spawn position for reference
         const originalPosition = { ...monster.position };
         
-        // Define water edge positions for respawning
-        const waterEdgePositions = [
-            // North water edge (moved slightly inward from water)
-            { x: 0, y: 0, z: 60 },    // Was 70, now 60
-            { x: 20, y: 0, z: 55 },   // Was 65, now 55
-            { x: -20, y: 0, z: 55 },  // Was 65, now 55
-            { x: 40, y: 0, z: 50 },   // Was 60, now 50
-            { x: -40, y: 0, z: 50 },  // Was 60, now 50
+        // Define water edge positions for respawning - keeping monsters away from temple
+        const safeSpawnPositions = [
+            // North region
+            { x: 0, y: 0, z: 60 },    // Restored original value
+            { x: 20, y: 0, z: 55 },   // Restored original value
+            { x: -20, y: 0, z: 55 },  // Restored original value
             
-            // East water edge (moved slightly inward from water)
-            { x: 60, y: 0, z: 0 },    // Was 70, now 60
-            { x: 55, y: 0, z: 20 },   // Was 65, now 55
-            { x: 55, y: 0, z: -20 },  // Was 65, now 55
-            { x: 50, y: 0, z: 40 },   // Was 60, now 50
-            { x: 50, y: 0, z: -40 },  // Was 60, now 50
+            // East region
+            { x: 60, y: 0, z: 0 },    // Restored original value
+            { x: 55, y: 0, z: 20 },   // Restored original value
+            { x: 55, y: 0, z: -20 },  // Restored original value
             
-            // South water edge (moved slightly inward from water)
-            { x: 0, y: 0, z: -60 },   // Was -70, now -60
-            { x: 20, y: 0, z: -55 },  // Was -65, now -55
-            { x: -20, y: 0, z: -55 }, // Was -65, now -55
-            { x: 40, y: 0, z: -50 },  // Was -60, now -50
-            { x: -40, y: 0, z: -50 }, // Was -60, now -50
+            // South region
+            { x: 0, y: 0, z: -60 },   // Restored original value
+            { x: 20, y: 0, z: -55 },  // Restored original value
+            { x: -20, y: 0, z: -55 }, // Restored original value
             
-            // West water edge (moved slightly inward from water)
-            { x: -60, y: 0, z: 0 },   // Was -70, now -60
-            { x: -55, y: 0, z: 20 },  // Was -65, now -55
-            { x: -55, y: 0, z: -20 }, // Was -65, now -55
-            { x: -50, y: 0, z: 40 },  // Was -60, now -50
-            { x: -50, y: 0, z: -40 }  // Was -60, now -50
+            // West region
+            { x: -60, y: 0, z: 0 },   // Restored original value
+            { x: -55, y: 0, z: 20 },  // Restored original value
+            { x: -55, y: 0, z: -20 }  // Restored original value
         ];
         
-        // Schedule respawn with a random position from the water edge positions
-        const respawnTime = 60000; // NEW: Fixed 60 seconds (1 minute) respawn time
+        // Schedule respawn with a random position from the safe positions
+        const respawnTime = 30000; // Reduced from 60 seconds to 30 seconds for better gameplay
         
         console.log(`Monster ${monsterId} will be removed and a new one created in ${respawnTime / 1000} seconds`);
         
@@ -311,18 +303,17 @@ export class MonsterManager {
         
         // Set a new respawn timer
         const timerId = setTimeout(() => {
-            // IMPROVED APPROACH: Remove the old monster completely
+            // Remove the old monster completely
             this.monsters.delete(monsterId);
             
-            // Choose a random position from water edge positions
-            const randomIndex = Math.floor(Math.random() * waterEdgePositions.length);
-            const newPosition = waterEdgePositions[randomIndex];
+            // Choose a random position from safe positions
+            const randomIndex = Math.floor(Math.random() * safeSpawnPositions.length);
+            const newPosition = safeSpawnPositions[randomIndex];
             
             // Create randomness around the chosen position to avoid monsters stacking
-            // Reduced random offset to avoid pushing monsters into water
             const randomOffset = {
-                x: (Math.random() * 10) - 5, // ±5 units (reduced from ±10)
-                z: (Math.random() * 10) - 5  // ±5 units (reduced from ±10)
+                x: (Math.random() * 6) - 3, // ±3 units 
+                z: (Math.random() * 6) - 3  // ±3 units
             };
             
             // Calculate the final position
@@ -332,30 +323,21 @@ export class MonsterManager {
                 z: newPosition.z + randomOffset.z
             };
             
-            // Extra check to ensure the position is not too close to water
-            // If the position is too close to the map edge, move it inward
-            const MAP_EDGE = 65; // Water starts around 70-75
-            const SAFE_MARGIN = 5; // Keep at least 5 units away from edge
-            
-            // Check each coordinate and adjust if needed
-            if (Math.abs(finalPosition.x) > MAP_EDGE - SAFE_MARGIN) {
-                // If too close to east/west edge, move inward
-                const direction = finalPosition.x > 0 ? -1 : 1; // Move inward
-                finalPosition.x = (MAP_EDGE - SAFE_MARGIN) * (finalPosition.x > 0 ? 1 : -1);
-            }
-            
-            if (Math.abs(finalPosition.z) > MAP_EDGE - SAFE_MARGIN) {
-                // If too close to north/south edge, move inward
-                const direction = finalPosition.z > 0 ? -1 : 1; // Move inward
-                finalPosition.z = (MAP_EDGE - SAFE_MARGIN) * (finalPosition.z > 0 ? 1 : -1);
-            }
-            
-            // Ensure the position is valid (not in temple)
+            // Double-check that the position is not in the temple
             if (this.isInTemple(finalPosition)) {
-                // If somehow in temple, use a completely random position
-                const randomPos = this.getRandomSpawnPosition();
-                finalPosition.x = randomPos.x;
-                finalPosition.z = randomPos.z;
+                // If somehow in temple, move it further away
+                const distanceFromCenter = Math.sqrt(finalPosition.x * finalPosition.x + finalPosition.z * finalPosition.z);
+                if (distanceFromCenter < 30) {
+                    // Scale the position outward
+                    const scale = 40 / distanceFromCenter;
+                    finalPosition.x *= scale;
+                    finalPosition.z *= scale;
+                } else {
+                    // Use a completely random position as fallback
+                    const randomPos = this.getRandomSpawnPosition();
+                    finalPosition.x = randomPos.x;
+                    finalPosition.z = randomPos.z;
+                }
             }
             
             // Create an entirely new monster with a new ID
@@ -367,6 +349,7 @@ export class MonsterManager {
                 type: monster.type,
                 isAlive: true,
                 health: GameConstants.MONSTER[monster.type].MAX_HEALTH,
+                maxHealth: GameConstants.MONSTER[monster.type].MAX_HEALTH,
                 position: finalPosition,
                 spawnPosition: finalPosition, // Set new spawn position for return-to-spawn behavior
                 rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 },
@@ -383,7 +366,7 @@ export class MonsterManager {
             // Add the new monster to our collection
             this.monsters.set(newMonsterId, newMonster);
             
-            console.log(`New monster ${newMonsterId} created at position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)} (Original monster ${monsterId} was removed)`);
+            console.log(`New monster ${newMonsterId} created at position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)}`);
             
             // Notify all clients about the new monster
             if (this.gameManager && this.gameManager.io) {
@@ -393,7 +376,7 @@ export class MonsterManager {
                         type: newMonster.type,
                         position: finalPosition,
                         health: newMonster.health,
-                        maxHealth: GameConstants.MONSTER[monster.type].MAX_HEALTH,
+                        maxHealth: newMonster.maxHealth,
                         isAlive: true
                     }
                 });
@@ -568,6 +551,31 @@ export class MonsterManager {
             const attackRange = monsterConfig.ATTACK_RANGE;
             const deltaTime = (currentTime - monster.lastMoveTime) / 1000; // Convert to seconds
             
+            // Emergency check - if monster is stuck in temple for some reason, forcefully teleport it out
+            if (this.isInTemple(monster.position)) {
+                console.log(`Monster ${monster.id} found in temple area - force teleporting to safe location`);
+                
+                // Use spawnPosition if available, or get a random position far from temple
+                if (monster.spawnPosition && !this.isInTemple(monster.spawnPosition)) {
+                    monster.position = { ...monster.spawnPosition };
+                } else {
+                    // Find a safe position away from temple
+                    const safePosition = this.getRandomSpawnPosition();
+                    monster.position = safePosition;
+                    monster.spawnPosition = { ...safePosition }; // Set as new spawn point
+                }
+                
+                monster.isReturningToSpawn = false;
+                monster.targetPlayerId = null;
+                monster.wanderAngle = Math.random() * Math.PI * 2;
+                
+                // Skip rest of update for this monster
+                monster.lastMoveTime = currentTime;
+                monster.lastUpdateTime = currentTime;
+                return;
+            }
+            
+            // Original update code continues...
             // Check if monster is currently in the temple area - if so, force it to return to spawn
             if (this.isInTemple(monster.position)) {
                 monster.isReturningToSpawn = true;
@@ -944,8 +952,19 @@ export class MonsterManager {
         // Calculate damage
         const damageAmount = monsterConfig.ATTACK_DAMAGE;
         
+        // Apply player's level-based damage reduction
+        const playerLevel = player.level || 1;
+        const maxDamageReduction = 0.3; // Cap at 30% damage reduction
+        const damageReduction = Math.min(
+            maxDamageReduction, 
+            (playerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL
+        );
+        
+        // Calculate final damage with reduction
+        const finalDamage = Math.floor(damageAmount * (1 - damageReduction));
+        
         // Apply damage to player
-        player.life -= damageAmount;
+        player.life -= finalDamage;
         if (player.life < 0) player.life = 0;
         
         // Notify client
@@ -953,7 +972,7 @@ export class MonsterManager {
             this.gameManager.io.to(playerId).emit('monsterDamage', {
                 targetId: playerId,
                 monsterId: monsterId,
-                damage: damageAmount,
+                damage: finalDamage,
                 monsterType: monster.type
             });
             
@@ -966,7 +985,7 @@ export class MonsterManager {
             });
         }
         
-        console.log(`Monster ${monsterId} attacked player ${playerId} for ${damageAmount} damage`);
+        console.log(`Monster ${monsterId} attacked player ${playerId} for ${finalDamage} damage (original: ${damageAmount}, reduction: ${Math.round(damageReduction * 100)}%)`);
         
         // Check if player died
         if (player.life <= 0 && !player.isDead) {

@@ -167,9 +167,34 @@ export default class GameManager {
             player.experience = (player.experience || 0) + expReward;
             
             // Check if player leveled up
+            const oldLevel = player.level || 1;
             const newLevel = this.calculatePlayerLevel(player.experience);
-            const didLevelUp = newLevel > (player.level || 1);
+            const didLevelUp = newLevel > oldLevel;
             player.level = newLevel;
+            
+            // Apply level-up rewards if player leveled up
+            if (didLevelUp) {
+                const levelsDiff = newLevel - oldLevel;
+                
+                // Initialize player stats if they don't exist
+                player.maxLife = player.maxLife || GameConstants.PLAYER.DEFAULT_MAX_LIFE;
+                player.life = player.life || player.maxLife;
+                player.maxMana = player.maxMana || GameConstants.PLAYER.DEFAULT_MAX_MANA;
+                player.mana = player.mana || player.maxMana;
+                
+                // Apply level-up stat bonuses
+                const lifeBonus = levelsDiff * GameConstants.LEVEL_REWARDS.LIFE_PER_LEVEL;
+                const manaBonus = levelsDiff * GameConstants.LEVEL_REWARDS.MANA_PER_LEVEL;
+                
+                player.maxLife += lifeBonus;
+                player.maxMana += manaBonus;
+                
+                // Fully restore life and mana on level up
+                player.life = player.maxLife;
+                player.mana = player.maxMana;
+                
+                console.log(`Player ${playerId} leveled up to ${newLevel}!`);
+            }
             
             // Ensure player path is maintained after level up
             if (playerPath) {
@@ -185,7 +210,11 @@ export default class GameManager {
                 totalExperience: player.experience,
                 level: player.level,
                 levelUp: didLevelUp,
-                path: player.path
+                path: player.path,
+                maxLife: player.maxLife,
+                maxMana: player.maxMana,
+                life: player.life,
+                mana: player.mana
             });
             
             console.log(`Player ${playerId} gained ${expReward} exp for killing monster ${monsterId}. Total: ${player.experience}, Level: ${player.level}, Path: ${player.path || 'none'}`);

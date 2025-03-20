@@ -92,6 +92,14 @@ const GameConstants = {
         BASE_EXPERIENCE: 100,  // Base experience needed for level 2
         SCALING_FACTOR: 1.5,   // How much more experience each level requires
         MAX_LEVEL: 50          // Maximum player level
+    },
+    
+    // Level-up rewards scaling
+    LEVEL_REWARDS: {
+        LIFE_PER_LEVEL: 10,       // Health points gained per level
+        MANA_PER_LEVEL: 5,        // Mana points gained per level
+        DAMAGE_BONUS_PER_LEVEL: 0.02, // 2% increased damage per level
+        DAMAGE_REDUCTION_PER_LEVEL: 0.01 // 1% reduced damage taken per level (max 30%)
     }
 };
 

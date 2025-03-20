@@ -567,145 +567,14 @@ export class NetworkManager {
 
         // Handle stats update
         this.socket.on('statsUpdate', (data) => {
-            const playerMesh = this.game.playerManager.players.get(data.id);
-            if (!playerMesh) {
-                return;
+            // Handle both single player updates and batch updates
+            if (data.players && Array.isArray(data.players)) {
+                // This is a batch update
+                data.players.forEach(playerData => this.handlePlayerStatsUpdate(playerData));
+            } else if (data.id) {
+                // This is a single player update
+                this.handlePlayerStatsUpdate(data);
             }
-
-            // Update the player's stats
-            if (!playerMesh.userData.stats) {
-                playerMesh.userData.stats = {};
-            }
-
-            const oldStats = { ...playerMesh.userData.stats };
-            playerMesh.userData.stats = {
-                ...playerMesh.userData.stats,
-                life: data.life,
-                maxLife: data.maxLife,
-                mana: data.mana,
-                maxMana: data.maxMana,
-                experience: data.experience,
-                level: data.level
-            };
-
-            // Update the visual status bars
-            if (this.game.updatePlayerStatus) {
-                this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-            }
-
-            // If this is our player, update the main UI
-            if (data.id === this.socket.id) {
-                this.game.playerStats.currentLife = data.life;
-                this.game.playerStats.maxLife = data.maxLife;
-                this.game.playerStats.currentMana = data.mana;
-                this.game.playerStats.maxMana = data.maxMana;
-                this.game.playerStats.experience = data.experience;
-                this.game.playerStats.level = data.level;
-                if (this.game.updateStatusBars) {
-                    this.game.updateStatusBars();
-                }
-            }
-        });
-
-        // Handle batch stats updates from server
-        this.socket.on('statsUpdate', (data) => {
-            // Skip if no players in the update
-            if (!data.players || data.players.length === 0) {
-                return;
-            }
-            
-            // Get the timestamp of this update
-            const timestamp = data.timestamp || Date.now();
-            
-            // Process each player's stats
-            data.players.forEach(playerData => {
-                // Get the player mesh
-                const playerMesh = this.game.playerManager.players.get(playerData.id);
-                if (!playerMesh) {
-                    return;
-                }
-                
-                // Check for unique update ID to prevent race conditions
-                if (playerData.updateId) {
-                    // Skip if we've already processed this exact update
-                    if (playerMesh.userData.lastUpdateId === playerData.updateId) {
-                        return;
-                    }
-                    
-                    // Store the update ID
-                    playerMesh.userData.lastUpdateId = playerData.updateId;
-                } else {
-                    // Fall back to timestamp checking for older server versions
-                    const lastTimestamp = playerMesh.userData.lastStatsUpdateTimestamp || 0;
-                    if (timestamp <= lastTimestamp) {
-                        return;
-                    }
-                    
-                    // Store the timestamp of this update
-                    playerMesh.userData.lastStatsUpdateTimestamp = timestamp;
-                }
-                
-                // Initialize player stats if needed
-                if (!playerMesh.userData.stats) {
-                    playerMesh.userData.stats = {};
-                }
-                
-                // Check if the current health value is different from what the server says
-                if (playerMesh.userData.stats.life !== playerData.life) {
-                    console.log(`Correcting health values for player ${playerData.id} from ${playerMesh.userData.stats.life} to ${playerData.life}`);
-                }
-                
-                // Store the server values as the absolute source of truth
-                playerMesh.userData.serverLife = playerData.life;
-                playerMesh.userData.serverMaxLife = playerData.maxLife;
-                
-                // Update player stats with server values (server authority)
-                playerMesh.userData.stats.life = playerData.life;
-                playerMesh.userData.stats.maxLife = playerData.maxLife;
-                
-                // Set player ID for better debugging
-                if (!playerMesh.userData.playerId) {
-                    playerMesh.userData.playerId = playerData.id;
-                }
-                
-                // Create health bar if it doesn't exist
-                if (!playerMesh.userData.healthBar) {
-                    this.game.playerManager.createHealthBar(playerMesh);
-                }
-                
-                // Force unlock health updates for server stats
-                // This ensures server stats can always update the health bar
-                playerMesh.userData.healthLocked = false;
-                
-                // Update the health bar immediately with server values
-                // This ensures health bars always reflect the server state
-                if (this.game.playerManager.updateHealthBarWithServerValues) {
-                    this.game.playerManager.updateHealthBarWithServerValues(playerMesh);
-                } else {
-                    // Fallback to regular update if the new method isn't available
-                    this.game.playerManager.updateHealthBar(playerMesh);
-                }
-                
-                // If this is our player, update the main UI
-                if (playerData.id === this.socket.id) {
-                    // Update player stats first
-                    this.game.playerStats.currentLife = playerData.life;
-                    this.game.playerStats.maxLife = playerData.maxLife;
-                    
-                    // Then update the UI
-                    if (this.game.uiManager && this.game.playerStats) {
-                        this.game.uiManager.updateStatusBars(this.game.playerStats);
-                    }
-                    
-                    // Check for death
-                    if (playerData.life <= 0 && !this.playerDead) {
-                        this.playerDead = true;
-                        this.handlePlayerDeath();
-                    } else if (playerData.life > 0 && this.playerDead) {
-                        this.playerDead = false;
-                    }
-                }
-            });
         });
 
         // Handle life update
@@ -1554,16 +1423,29 @@ export class NetworkManager {
             }
         });
         
-        // Handle experience gain when killing a monster
+        // Handle experience gain notification
         this.socket.on('experienceGain', (data) => {
-            console.log('Received experience gain event:', data);
+            // Keep only essential logging
+            if (data.levelUp) {
+                console.log(`Player leveled up to ${data.level}!`);
+            }
             
-            // Update player stats
+            // Create a player data object compatible with handlePlayerStatsUpdate
+            const playerData = {
+                id: this.socket.id,
+                life: data.life,
+                maxLife: data.maxLife,
+                mana: data.mana,
+                maxMana: data.maxMana,
+                experience: data.totalExperience,
+                level: data.level
+            };
+            
+            // Process the update using the unified handler
+            this.handlePlayerStatsUpdate(playerData);
+            
+            // Calculate experience required for next level using the same formula as server
             if (this.game.playerStats) {
-                this.game.playerStats.experience = data.totalExperience;
-                this.game.playerStats.level = data.level;
-                
-                // Calculate experience required for next level using the same formula as server
                 const baseExp = 100; // Same as server's GameConstants.EXPERIENCE.BASE_EXPERIENCE
                 const scalingFactor = 1.5; // Same as server's GameConstants.EXPERIENCE.SCALING_FACTOR
                 
@@ -1581,10 +1463,7 @@ export class NetworkManager {
                     }
                 }
                 
-                // Update the UI status bars for experience
-                if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
-                }
+                // Removed detailed stats logging here
             }
             
             // Use the new experience gain notification
@@ -2724,5 +2603,100 @@ export class NetworkManager {
         }
         
         return this.game.playerManager.players.get(playerId) || null;
+    }
+
+    handlePlayerStatsUpdate(playerData) {
+        // Log the incoming data
+        // Removed console.log statement here
+        
+        // Get the player mesh
+        const playerMesh = this.game.playerManager.players.get(playerData.id);
+        if (!playerMesh) {
+            return;
+        }
+        
+        // Check for unique update ID to prevent race conditions
+        if (playerData.updateId) {
+            // Skip if we've already processed this exact update
+            if (playerMesh.userData.lastUpdateId === playerData.updateId) {
+                return;
+            }
+            
+            // Store the update ID
+            playerMesh.userData.lastUpdateId = playerData.updateId;
+        }
+        
+        // Initialize player stats if needed
+        if (!playerMesh.userData.stats) {
+            playerMesh.userData.stats = {};
+        }
+
+        const oldStats = { ...playerMesh.userData.stats };
+        
+        // Update the player's stats
+        playerMesh.userData.stats = {
+            ...playerMesh.userData.stats,
+            life: playerData.life,
+            maxLife: playerData.maxLife,
+            mana: playerData.mana,
+            maxMana: playerData.maxMana,
+            experience: playerData.experience,
+            level: playerData.level
+        };
+        
+        // Removed console.log for mana changes
+        
+        // Update the visual status bars
+        if (this.game.updatePlayerStatus) {
+            this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+        }
+        
+        // Store the server values as the absolute source of truth
+        playerMesh.userData.serverLife = playerData.life;
+        playerMesh.userData.serverMaxLife = playerData.maxLife;
+        
+        // Create health bar if it doesn't exist
+        if (!playerMesh.userData.healthBar) {
+            this.game.playerManager.createHealthBar(playerMesh);
+        }
+        
+        // Force unlock health updates for server stats
+        // This ensures server stats can always update the health bar
+        playerMesh.userData.healthLocked = false;
+        
+        // Update the health bar immediately with server values
+        // This ensures health bars always reflect the server state
+        if (this.game.playerManager.updateHealthBarWithServerValues) {
+            this.game.playerManager.updateHealthBarWithServerValues(playerMesh);
+        } else {
+            // Fallback to regular update if the new method isn't available
+            this.game.playerManager.updateHealthBar(playerMesh);
+        }
+        
+        // If this is our player, update the main UI
+        if (playerData.id === this.socket.id) {
+            // Update player stats with the latest server values
+            this.game.playerStats.currentLife = playerData.life;
+            this.game.playerStats.maxLife = playerData.maxLife;
+            this.game.playerStats.currentMana = playerData.mana;
+            this.game.playerStats.maxMana = playerData.maxMana;
+            this.game.playerStats.experience = playerData.experience;
+            this.game.playerStats.level = playerData.level;
+            
+            // Removed console.log for player stats update
+            
+            // Update the UI with the updated values
+            if (this.game.uiManager) {
+                this.game.uiManager.updateStatusBars(this.game.playerStats);
+            }
+            
+            // Check for death
+            if (playerData.life <= 0 && !this.playerDead) {
+                this.playerDead = true;
+                this.handlePlayerDeath();
+            } else if (playerData.life > 0 && this.playerDead) {
+                this.playerDead = false;
+            }
+        }
     }
 }
