@@ -172,9 +172,17 @@ export class PlayerManager {
         const player = this.getPlayer(socketId);
         if (!player) return;
         
+        // Store current mana before resetting
+        const currentMana = player.mana;
+        const currentMaxMana = player.maxMana;
+        
         // Reset player stats
         player.isDead = false;
         player.life = player.maxLife || GameConstants.PLAYER.DEFAULT_MAX_LIFE;
+        
+        // Explicitly preserve mana values
+        player.mana = currentMana;
+        player.maxMana = currentMaxMana;
         
         // Apply invulnerability for a few seconds after respawn to prevent spawn camping
         player.isInvulnerable = true;
@@ -188,6 +196,7 @@ export class PlayerManager {
         
         console.log(`Player ${socketId} respawned in temple at position:`, player.position);
         console.log(`Preserving player path during respawn: ${player.path}`);
+        console.log(`Preserving player mana during respawn: ${player.mana}/${player.maxMana}`);
         
         // Remove temporary invulnerability after 3 seconds
         setTimeout(() => {

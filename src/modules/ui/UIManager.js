@@ -383,10 +383,35 @@ export class UIManager {
         fill.style.opacity = '0.8'; // Match XP ring opacity
         fill.style.borderRadius = '50%';
         
-        // Start fully filled
-        fill.style.clipPath = 'inset(0 0 0 0)';
-        // Add smooth transition for visual effect
-        fill.style.transition = 'clip-path 0.3s ease-out';
+        // Start fully filled for life, but empty for mana if depleted
+        if (statType === 'Life') {
+            fill.style.clipPath = 'inset(0 0 0 0)';
+            fill.style.transition = 'clip-path 0.3s ease-out';
+        } else if (statType === 'Mana') {
+            const currentMana = this.game?.playerStats?.currentMana;
+            
+            // We need to know if we're actually at 0 mana - log for debugging
+            console.log(`Initializing mana ring with currentMana: ${currentMana}`);
+            
+            if (currentMana === 0) {
+                // Start empty if mana is 0
+                fill.style.clipPath = 'inset(100% 0 0 0)';
+                fill.style.transition = 'none';
+                console.log('Mana ring initialized at empty (0 mana)');
+            } else {
+                // Start full or partially full based on current mana
+                const manaPercent = currentMana !== undefined ? (currentMana / 100) * 100 : 100;
+                const emptyPercent = 100 - manaPercent;
+                
+                fill.style.clipPath = `inset(${emptyPercent}% 0 0 0)`;
+                fill.style.transition = 'clip-path 0.3s ease-out';
+                console.log(`Mana ring initialized at ${manaPercent}%`);
+            }
+        } else {
+            // Default initialization for other ring types
+            fill.style.clipPath = 'inset(0 0 0 0)';
+            fill.style.transition = 'clip-path 0.3s ease-out';
+        }
         
         fillContainer.appendChild(fill);
         
@@ -398,7 +423,15 @@ export class UIManager {
         value.style.fontWeight = 'bold';
         value.style.position = 'relative';
         value.style.zIndex = '3';
-        value.textContent = '100';
+        
+        // Set initial value based on stat type and current stats
+        if (statType === 'Mana' && this.game?.playerStats?.currentMana !== undefined) {
+            // If we have a mana value, use it
+            value.textContent = Math.floor(this.game.playerStats.currentMana);
+        } else {
+            // Otherwise use default
+            value.textContent = '100';
+        }
         
         container.appendChild(value);
         
@@ -417,7 +450,15 @@ export class UIManager {
         tooltip.style.whiteSpace = 'nowrap';
         tooltip.style.display = 'none';
         tooltip.style.zIndex = '1010';
-        tooltip.textContent = `${statType}: 100/100`;
+        
+        // Set tooltip text based on current stats if available
+        if (statType === 'Mana' && this.game?.playerStats?.currentMana !== undefined) {
+            const maxMana = this.game.playerStats.maxMana || 100;
+            tooltip.textContent = `Mana: ${Math.floor(this.game.playerStats.currentMana)}/${maxMana}`;
+        } else {
+            tooltip.textContent = `${statType}: 100/100`;
+        }
+        
         container.appendChild(tooltip);
         
         // Show tooltip on hover
@@ -438,13 +479,17 @@ export class UIManager {
         // Extract player stats with default values
         const currentLife = playerStats.currentLife || 100;
         const maxLife = playerStats.maxLife || 100;
-        const currentMana = playerStats.currentMana || 100;
+        // Make sure we handle the case when currentMana is exactly 0
+        const currentMana = playerStats.currentMana !== undefined ? playerStats.currentMana : 100;
         const maxMana = playerStats.maxMana || 100;
         const currentKarma = playerStats.currentKarma || 50;
         const maxKarma = playerStats.maxKarma || 100;
         const experience = playerStats.experience || 0;
         const experienceToNextLevel = playerStats.experienceToNextLevel || 100;
         const level = playerStats.level || 1;
+        
+        // Debug log for mana updates - helps identify when changes happen
+        console.log(`UIManager: Updating status bars - Mana: ${Math.floor(currentMana)}/${maxMana} (actual value: ${playerStats.currentMana})`);
         
         // Update life ring
         if (this.lifeRingFill) {
@@ -473,26 +518,46 @@ export class UIManager {
         
         // Update mana ring
         if (this.manaRingFill) {
-            // Calculate mana percentage
-            const manaPercentage = Math.max(0, Math.min(100, (currentMana / maxMana) * 100));
-            const emptyPercentage = 100 - manaPercentage;
+            // Determine if mana is depleted (0)
+            const isManaEmpty = currentMana === 0;
             
-            // Make sure transitions are enabled for mana changes
-            if (!this.manaRingFill.style.transition) {
-                this.manaRingFill.style.transition = 'clip-path 0.3s ease-out'; 
+            let manaPercentage, emptyPercentage;
+            
+            if (isManaEmpty) {
+                // Force completely empty for zero mana
+                manaPercentage = 0;
+                emptyPercentage = 100;
+                
+                // Disable transition and force immediate update for zero mana
+                this.manaRingFill.style.transition = 'none';
+                
+                // Force the clip path to completely hide the fill
+                this.manaRingFill.style.clipPath = 'inset(100% 0 0 0)';
+            } else {
+                // Normal calculation for non-zero mana
+                manaPercentage = Math.max(0, Math.min(100, (currentMana / maxMana) * 100));
+                emptyPercentage = 100 - manaPercentage;
+                
+                // Re-enable transitions for normal mana changes
+                if (this.manaRingFill.style.transition === 'none') {
+                    this.manaRingFill.style.transition = 'clip-path 0.3s ease-out';
+                }
+                
+                // Apply the clip-path from top down (inset from top)
+                this.manaRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
             }
             
-            // Apply the clip-path from top down (inset from top)
-            this.manaRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
+            // Force a reflow to make sure the change takes effect immediately
+            void this.manaRingFill.offsetWidth;
             
-            // Also update the text value
+            // Update the text value (enforce zero for empty mana)
             const manaValue = this.manaRingFill.parentNode.parentNode.querySelector('.value');
             if (manaValue) {
-                manaValue.textContent = Math.floor(currentMana);
+                manaValue.textContent = isManaEmpty ? '0' : Math.floor(currentMana);
             }
             
             if (this.manaTooltip) {
-                this.manaTooltip.textContent = `Mana: ${Math.floor(currentMana)}/${maxMana}`;
+                this.manaTooltip.textContent = `Mana: ${isManaEmpty ? '0' : Math.floor(currentMana)}/${maxMana}`;
             }
         }
         
