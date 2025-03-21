@@ -183,7 +183,7 @@ export class UIManager {
         skillBarContainer.style.border = '1px solid #444';
         
         // Initialize skill slots
-        const keybinds = ['SPACE', 'Q', 'E', 'R', 'F'];
+        const keybinds = ['SPACE', 'R', 'F', 'V', '4'];
         this.skillElements = {};
         
         for (let i = 1; i <= 5; i++) {
