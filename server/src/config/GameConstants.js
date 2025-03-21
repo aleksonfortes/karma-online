@@ -99,10 +99,11 @@ const GameConstants = {
             ATTACK_RANGE: 6.0, // Significantly increased attack range to match the larger size
             ATTACK_SPEED: 2000, // Same attack speed
             ATTACK_ANIMATION_TIME: 500, // Same animation time
-            EXPERIENCE_REWARD: 500, // 10x more experience
+            EXPERIENCE_REWARD: 1500, // Increased from 500 to 1500 XP
             HEALTH_REGEN: true, // Will regenerate health when out of combat
             HEALTH_REGEN_AMOUNT: 10, // Amount of health regained per second when out of combat
-            HEALTH_REGEN_DELAY: 5000 // 5 seconds delay before health regeneration starts
+            HEALTH_REGEN_DELAY: 5000, // 5 seconds delay before health regeneration starts
+            LEVEL: 10 // Set Typhon to level 10
         }
     },
     

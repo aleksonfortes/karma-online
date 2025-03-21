@@ -648,17 +648,44 @@ export class MonsterManager {
                     // When monster dies, immediately clear the target
                     this.game.targetingManager?.clearTarget();
                 } else {
+                    // Format the monster name nicely (Typhon instead of TYPHON Monster, Cerberus instead of BASIC Monster)
+                    let name;
+                    const monsterTypeName = monster.type || 'Unknown';
+                    
+                    if (monsterTypeName === 'TYPHON') {
+                        name = 'Typhon';
+                    } else if (monsterTypeName === 'BASIC') {
+                        name = 'Cerberus';
+                    } else {
+                        // For any other monster types, just use the type name
+                        name = monsterTypeName.charAt(0).toUpperCase() + monsterTypeName.slice(1).toLowerCase();
+                    }
+                    
                     // Update the target display with new health
                     this.game.uiManager?.updateTargetDisplay(
-                        `${monster.type} Monster`,
+                        name,
                         monster.health,
                         monster.maxHealth,
                         'monster',
-                        1
+                        this.getMonsterLevel(monster.type)
                     );
                 }
             }
         }
+    }
+    
+    /**
+     * Get the level of a monster from its type
+     * @param {string} monsterType - The type of monster
+     * @returns {number} - The monster's level (defaults to 1)
+     */
+    getMonsterLevel(monsterType) {
+        if (monsterType && this.game.gameConstants && this.game.gameConstants.MONSTER && 
+            this.game.gameConstants.MONSTER[monsterType] && 
+            this.game.gameConstants.MONSTER[monsterType].LEVEL) {
+            return this.game.gameConstants.MONSTER[monsterType].LEVEL;
+        }
+        return 1; // Default level if not specified
     }
     
     /**

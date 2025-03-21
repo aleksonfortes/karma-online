@@ -31,6 +31,9 @@ export class Game {
         this.SERVER_URL = getServerUrl();
         this.currentTime = 0;
         
+        // Add game constants for use by other modules
+        this.gameConstants = GameConstants;
+        
         // Controls
         this.controls = {
             forward: false,
