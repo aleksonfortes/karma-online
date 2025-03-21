@@ -692,7 +692,7 @@ export class NetworkManager {
                 // Check if the monster is within range
                 const playerPos = player.position;
                 const monsterPos = monster.position;
-                const distance = this.calculateDistance(playerPos, monsterPos);
+                const distance = this.calculateDistance(playerPos, monsterPos, 'monster', monster);
                 
                 // Get skill range
                 const attackRange = this.getSkillRange(skillId);
@@ -700,11 +700,11 @@ export class NetworkManager {
                 // Use a dynamic tolerance based on distance:
                 // - For closer monsters (within range): more lenient
                 // - For farther monsters: more strict
-                const baseTolerance = 1.0; // Significantly increased from 0.5
-                const rangeTolerance = Math.max(baseTolerance, attackRange * 0.2); // At least 20% of the skill's range
+                const baseTolerance = 1.5; // Increased for better tolerance with larger monsters
+                const rangeTolerance = Math.max(baseTolerance, attackRange * 0.25); // Increased from 20% to 25% of skill range
                 
                 // Log the check for debugging purposes
-                console.log(`Range check for ${socket.id}: distance=${distance.toFixed(2)}, range=${attackRange}, tolerance=${rangeTolerance.toFixed(2)}`);
+                console.log(`Range check for ${socket.id}: distance=${distance.toFixed(2)}, range=${attackRange}, tolerance=${rangeTolerance.toFixed(2)}, monster type=${monster.type}`);
 
                 if (distance > attackRange + rangeTolerance) {
                     socket.emit('errorMessage', {
@@ -1041,14 +1041,25 @@ export class NetworkManager {
     /**
      * Calculate distance between two positions
      */
-    calculateDistance(pos1, pos2) {
+    calculateDistance(pos1, pos2, entityType = null, entityData = null) {
         if (!pos1 || !pos2) return Infinity;
         
         const dx = pos1.x - pos2.x;
         const dy = pos1.y - pos2.y;
         const dz = pos1.z - pos2.z;
         
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        // Calculate the basic distance
+        const basicDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        // If this is a monster with collision data, adjust the distance
+        if (entityType === 'monster' && entityData) {
+            // Subtract the monster's collision radius to account for its size
+            const adjustedDistance = basicDistance - (entityData.collisionRadius || 0);
+            // Return the adjusted distance, but never less than 0
+            return Math.max(0, adjustedDistance);
+        }
+        
+        return basicDistance;
     }
 
     /**
@@ -1152,11 +1163,11 @@ export class NetworkManager {
     getSkillRange(skillId) {
         switch(skillId) {
             case 'martial_arts':
-                return 3; // 3 units range
+                return 4.5; // Increased from 3 to 4.5 units range
             case 'dark_strike':
-                return 3; // 3 units range (matching client)
+                return 4.5; // Increased from 3 to 4.5 units range (matching client)
             default:
-                return 2; // Default range
+                return 3; // Increased default range from 2 to 3
         }
     }
 

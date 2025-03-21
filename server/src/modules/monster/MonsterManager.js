@@ -123,6 +123,11 @@ export class MonsterManager {
         });
         
         console.log(`Spawned ${spawnPositions.length} monsters around the map, safely away from water edges`);
+        
+        // Spawn Typhon boss monster to the south of the temple
+        const typhonPosition = { ...GameConstants.MONSTER.TYPHON.SPAWN_POSITION };
+        this.spawnMonsterAtPosition('TYPHON', typhonPosition);
+        console.log(`Spawned Typhon boss monster at position ${JSON.stringify(typhonPosition)}`);
     }
     
     /**
@@ -221,7 +226,9 @@ export class MonsterManager {
             isAttacking: false,
             attackAnimationEndTime: 0,
             // Store original spawn position for returning
-            spawnPosition: { ...position }
+            spawnPosition: { ...position },
+            // Add health regeneration properties
+            lastCombatTime: 0
         };
         
         // Add monster to the map
@@ -306,22 +313,32 @@ export class MonsterManager {
             // Remove the old monster completely
             this.monsters.delete(monsterId);
             
-            // Choose a random position from safe positions
-            const randomIndex = Math.floor(Math.random() * safeSpawnPositions.length);
-            const newPosition = safeSpawnPositions[randomIndex];
-            
-            // Create randomness around the chosen position to avoid monsters stacking
-            const randomOffset = {
-                x: (Math.random() * 6) - 3, // ±3 units 
-                z: (Math.random() * 6) - 3  // ±3 units
-            };
-            
-            // Calculate the final position
-            let finalPosition = {
-                x: newPosition.x + randomOffset.x,
-                y: 0,
-                z: newPosition.z + randomOffset.z
-            };
+            // For Typhon, always respawn at its configured position
+            let finalPosition;
+            if (monster.type === 'TYPHON') {
+                finalPosition = { ...GameConstants.MONSTER.TYPHON.SPAWN_POSITION };
+                // Apply a small random offset to avoid potential issues
+                finalPosition.x += (Math.random() * 5) - 2.5; // ±2.5 units 
+                finalPosition.z += (Math.random() * 5) - 2.5; // ±2.5 units
+            } else {
+                // For regular monsters, use the existing random position logic
+                // Choose a random position from safe positions
+                const randomIndex = Math.floor(Math.random() * safeSpawnPositions.length);
+                const newPosition = safeSpawnPositions[randomIndex];
+                
+                // Create randomness around the chosen position to avoid monsters stacking
+                const randomOffset = {
+                    x: (Math.random() * 6) - 3, // ±3 units 
+                    z: (Math.random() * 6) - 3  // ±3 units
+                };
+                
+                // Calculate the final position
+                finalPosition = {
+                    x: newPosition.x + randomOffset.x,
+                    y: 0,
+                    z: newPosition.z + randomOffset.z
+                };
+            }
             
             // Double-check that the position is not in the temple
             if (this.isInTemple(finalPosition)) {
@@ -360,7 +377,9 @@ export class MonsterManager {
                 lastMoveTime: Date.now(),
                 wanderAngle: Math.random() * Math.PI * 2,
                 wanderTimer: 0,
-                wanderInterval: 2000 + Math.random() * 3000
+                wanderInterval: 2000 + Math.random() * 3000,
+                // Add health regeneration properties
+                lastCombatTime: 0
             };
             
             // Add the new monster to our collection
@@ -626,13 +645,18 @@ export class MonsterManager {
                     const dz = targetPlayer.position.z - monster.position.z;
                     const distance = Math.sqrt(dx * dx + dz * dz);
                     
-                    if (distance > aggroRadius * 1.5) { // 1.5x aggro radius for leashing
+                    // Account for monster and player collision radius
+                    const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+                    const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+                    const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
+                    
+                    if (effectiveDistance > aggroRadius * 1.5) { // 1.5x aggro radius for leashing
                         console.log(`Monster ${monster.id} cleared target ${monster.targetPlayerId} (player out of aggro range)`);
                         monster.targetPlayerId = null;
                         targetPlayer = null;
                         // Set leashing flag to return to spawn
                         monster.isReturningToSpawn = true;
-                    } else if (distance <= attackRange && !monster.isAttacking) {
+                    } else if (effectiveDistance <= attackRange && !monster.isAttacking) {
                         // Player is in attack range - attack them
                         this.attackPlayer(monster.id, targetPlayer.id, playerManager);
                     }
@@ -668,9 +692,14 @@ export class MonsterManager {
                     const dz = player.position.z - monster.position.z;
                     const distance = Math.sqrt(dx * dx + dz * dz);
                     
-                    if (distance < aggroRadius && distance < closestDistance) {
+                    // Account for monster and player collision radius for targeting
+                    const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+                    const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+                    const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
+                    
+                    if (effectiveDistance < aggroRadius && effectiveDistance < closestDistance) {
                         closestPlayer = player;
-                        closestDistance = distance;
+                        closestDistance = effectiveDistance;
                     }
                 }
                 
@@ -883,6 +912,30 @@ export class MonsterManager {
             // Update the monster's last move time
             monster.lastMoveTime = currentTime;
             monster.lastUpdateTime = currentTime;
+            
+            // Add health regeneration for Typhon boss when out of combat
+            if (monster.type === 'TYPHON' && 
+                monsterConfig.HEALTH_REGEN &&
+                !monster.targetPlayerId && 
+                monster.health < monsterConfig.MAX_HEALTH && 
+                currentTime - monster.lastCombatTime > monsterConfig.HEALTH_REGEN_DELAY) {
+                
+                // Calculate how much health to regenerate based on time passed
+                const regenAmount = monsterConfig.HEALTH_REGEN_AMOUNT * deltaTime;
+                monster.health = Math.min(monster.health + regenAmount, monsterConfig.MAX_HEALTH);
+                
+                // If health changed significantly (at least 1 point), send an update
+                if (Math.floor(monster.health) > Math.floor(monster.health - regenAmount)) {
+                    // Broadcast health update to all players
+                    if (this.gameManager && this.gameManager.io) {
+                        this.gameManager.io.emit('monsterUpdate', {
+                            id: monster.id,
+                            health: monster.health,
+                            maxHealth: monster.maxHealth
+                        });
+                    }
+                }
+            }
         });
     }
     
@@ -934,7 +987,12 @@ export class MonsterManager {
         const monsterConfig = GameConstants.MONSTER[monster.type];
         const attackRange = monsterConfig.ATTACK_RANGE;
         
-        if (distance > attackRange) {
+        // Account for monster and player collision radius in attack range calculation
+        const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+        const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+        const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
+        
+        if (effectiveDistance > attackRange) {
             return; // Too far to attack
         }
         
@@ -948,6 +1006,9 @@ export class MonsterManager {
         monster.isAttacking = true;
         monster.attackAnimationEndTime = currentTime + monsterConfig.ATTACK_ANIMATION_TIME;
         monster.lastAttackTime = currentTime;
+        
+        // Update last combat time for health regeneration
+        monster.lastCombatTime = currentTime;
         
         // Calculate damage
         const damageAmount = monsterConfig.ATTACK_DAMAGE;
@@ -1015,6 +1076,61 @@ export class MonsterManager {
      */
     generateUUID() {
         return uuidv4();
+    }
+
+    /**
+     * Monster takes damage from a player attack
+     * @param {string} playerId - ID of the attacking player
+     * @param {string} monsterId - ID of the monster being attacked
+     * @param {number} damage - Amount of damage to apply
+     * @param {Object} playerManager - The player manager
+     * @returns {Object} Result of the damage
+     */
+    takeDamage(playerId, monsterId, damage, playerManager) {
+        const monster = this.monsters.get(monsterId);
+        if (!monster) {
+            return { success: false, message: "Monster not found" };
+        }
+        
+        // Update last combat time for health regeneration
+        monster.lastCombatTime = Date.now();
+        
+        // If monster is already dead, ignore the damage
+        if (!monster.isAlive || monster.health <= 0) {
+            return { success: false, message: "Monster is already dead", health: 0, maxHealth: monster.maxHealth };
+        }
+
+        // Apply damage to monster
+        monster.health -= damage;
+        if (monster.health < 0) monster.health = 0;
+        
+        // Notify client
+        if (this.gameManager && this.gameManager.io) {
+            this.gameManager.io.to(playerId).emit('monsterDamage', {
+                targetId: playerId,
+                monsterId: monsterId,
+                damage: damage,
+                monsterType: monster.type
+            });
+            
+            // Broadcast health update to all players
+            this.gameManager.io.emit('lifeUpdate', {
+                id: monsterId,
+                life: monster.health,
+                maxLife: monster.maxHealth,
+                timestamp: Date.now()
+            });
+        }
+        
+        console.log(`Monster ${monsterId} took ${damage} damage (current health: ${monster.health}/${monster.maxHealth})`);
+        
+        // Check if monster died
+        if (monster.health <= 0 && !monster.isDead) {
+            // Handle monster death through monster manager
+            this.handleMonsterDeath(playerId, monsterId);
+        }
+        
+        return { success: true, message: "Damage applied successfully", health: monster.health, maxHealth: monster.maxHealth };
     }
 }
 

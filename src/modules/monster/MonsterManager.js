@@ -84,6 +84,10 @@ export class MonsterManager {
             // Also store it under lowercase key for case-insensitive matching
             this.monsterModels['basic'] = cerberusMonster.scene;
             
+            // Use the same cerberus model for Typhon boss monster
+            this.monsterModels['TYPHON'] = cerberusMonster.scene;
+            this.monsterModels['typhon'] = cerberusMonster.scene;
+            
             console.log('Monster models preloaded. Available models:', Object.keys(this.monsterModels));
         } catch (error) {
             console.error('Error preloading monster models:', error);
