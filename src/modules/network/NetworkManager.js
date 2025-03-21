@@ -595,18 +595,18 @@ export class NetworkManager {
             if (data.players && Array.isArray(data.players)) {
                 // This is a batch update
                 data.players.forEach(playerData => {
-                    // Mark source as periodic for batch updates
+                    // Use the source from the batch update if available, otherwise mark as periodic
                     const playerDataWithSource = {
                         ...playerData,
-                        source: 'periodic'
+                        source: data.source || 'periodic'
                     };
                     this.handlePlayerStatsUpdate(playerDataWithSource);
                 });
             } else if (data.id) {
-                // This is a single player update - mark as periodic
+                // This is a single player update - use source if available
                 const playerDataWithSource = {
                     ...data,
-                    source: 'periodic'
+                    source: data.source || 'periodic'
                 };
                 this.handlePlayerStatsUpdate(playerDataWithSource);
             }
@@ -2803,7 +2803,8 @@ export class NetworkManager {
             const isFromSpecificEvent = playerData.source === 'mana_update' || 
                                        playerData.source === 'respawn' || 
                                        playerData.source === 'experience_gain' ||
-                                       playerData.source === 'skill_effect';
+                                       playerData.source === 'skill_effect' ||
+                                       playerData.source === 'regeneration';
             
             const acceptManaUpdate = 
                 this.game.playerStats.currentMana === undefined || 
