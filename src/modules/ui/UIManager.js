@@ -1281,7 +1281,8 @@ export class UIManager {
                         skillCard.style.gap = '5px';
                         
                         // Determine skill state
-                        const isAvailable = playerLevel >= skill.level;
+                        const skillRequiredLevel = skill.level || skill.minLevel;
+                        const isAvailable = playerLevel >= skillRequiredLevel;
                         const isLearned = skill.alreadyLearned;
                         
                         // Set card color based on status
@@ -1307,7 +1308,10 @@ export class UIManager {
                         const skillLevel = document.createElement('div');
                         skillLevel.style.color = isAvailable ? '#ffd700' : '#777';
                         skillLevel.style.fontSize = '12px';
-                        skillLevel.textContent = `Level ${skill.level}`;
+                        
+                        // Use the correct level property (some skills use 'level', others use 'minLevel')
+                        const levelToShow = skill.level || skill.minLevel;
+                        skillLevel.textContent = `Level ${levelToShow}`;
                         
                         skillHeader.appendChild(skillName);
                         skillHeader.appendChild(skillLevel);
@@ -1333,7 +1337,7 @@ export class UIManager {
                             skillAction.style.backgroundColor = '#4CAF50';
                             skillAction.style.color = 'white';
                         } else if (!isAvailable) {
-                            skillAction.textContent = `Requires Level ${skill.level}`;
+                            skillAction.textContent = `Requires Level ${skillRequiredLevel}`;
                             skillAction.style.backgroundColor = '#555';
                             skillAction.style.color = '#999';
                             skillAction.disabled = true;
@@ -1514,8 +1518,8 @@ export class UIManager {
                         {
                             id: 'embrace_void',
                             name: 'Embrace the Void',
-                            level: 5,
-                            description: 'Become invisible to players and monsters for 10 seconds or until you attack',
+                            minLevel: 5,
+                            description: 'Become invisible to players and monsters for 20 seconds or until you attack',
                             alreadyLearned: playerSkills.has('embrace_void')
                         }
                     ];
@@ -1532,7 +1536,8 @@ export class UIManager {
                         skillCard.style.gap = '5px';
                         
                         // Determine skill state
-                        const isAvailable = playerLevel >= skill.level;
+                        const skillRequiredLevel = skill.level || skill.minLevel;
+                        const isAvailable = playerLevel >= skillRequiredLevel;
                         const isLearned = skill.alreadyLearned;
                         
                         // Set card color based on status
@@ -1558,7 +1563,10 @@ export class UIManager {
                         const skillLevel = document.createElement('div');
                         skillLevel.style.color = isAvailable ? '#ff6e6e' : '#777';
                         skillLevel.style.fontSize = '12px';
-                        skillLevel.textContent = `Level ${skill.level}`;
+                        
+                        // Use the correct level property (some skills use 'level', others use 'minLevel')
+                        const levelToShow = skill.level || skill.minLevel;
+                        skillLevel.textContent = `Level ${levelToShow}`;
                         
                         skillHeader.appendChild(skillName);
                         skillHeader.appendChild(skillLevel);
@@ -1584,7 +1592,7 @@ export class UIManager {
                             skillAction.style.backgroundColor = '#4CAF50';
                             skillAction.style.color = 'white';
                         } else if (!isAvailable) {
-                            skillAction.textContent = `Requires Level ${skill.level}`;
+                            skillAction.textContent = `Requires Level ${skillRequiredLevel}`;
                             skillAction.style.backgroundColor = '#555';
                             skillAction.style.color = '#999';
                             skillAction.disabled = true;

@@ -393,7 +393,8 @@ export class Game {
                     break;
                 case 'KeyO':
                     // O key for gaining XP in dev mode
-                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                    if (this.networkManager && typeof this.networkManager.isDevModeAvailable === 'function' 
+                        && this.networkManager.isDevModeAvailable()) {
                         console.log('DEV MODE: Gaining XP');
                         // Show notification
                         if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
@@ -409,7 +410,8 @@ export class Game {
                     break;
                 case 'KeyK':
                     // K key for gaining karma in dev mode
-                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                    if (this.networkManager && typeof this.networkManager.isDevModeAvailable === 'function'
+                        && this.networkManager.isDevModeAvailable()) {
                         console.log('DEV MODE: Gaining Karma');
                         // Show notification
                         if (this.uiManager && typeof this.uiManager.showNotification === 'function') {

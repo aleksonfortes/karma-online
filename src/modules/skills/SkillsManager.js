@@ -1565,12 +1565,12 @@ export class SkillsManager {
             embrace_void: {
                 id: 'embrace_void',
                 name: 'Embrace the Void',
-                description: 'Become invisible to players and monsters for 10 seconds or until you attack.',
+                description: 'Become invisible to players and monsters for 20 seconds or until you attack.',
                 cooldown: 60000, // 60 second cooldown
                 range: 0, // Self-cast
                 damage: 0,
                 mana: 35,
-                duration: 10000, // 10 seconds of invisibility
+                duration: 20000, // 20 seconds of invisibility (increased from 10 seconds)
                 lastUsed: 0,
                 path: 'dark',
                 minLevel: 5,
@@ -2662,35 +2662,33 @@ export class SkillsManager {
      * @param {number} duration - Duration of the effect in milliseconds
      */
     createEmbraceVoidEffect(duration) {
-        if (!this.game.localPlayer || !this.game.scene) return;
+        const playerMesh = this.game.localPlayer;
+        if (!playerMesh) return;
         
         console.log('Starting Embrace Void effect');
         
-        // Get player's mesh and materials
-        const playerMesh = this.game.localPlayer;
-        
-        // Fixed: Reset any previous state - critical for preventing duplication issues
-        if (playerMesh.userData) {
-            // Make sure we start with a clean slate, no invisibility flags
-            console.log('Clearing previous invisibility state');
-            delete playerMesh.userData.isInvisible;
+        // Clear any existing invisibility state
+        if (this.invisibilityEffectData) {
+            // Force end previous effect to avoid stacking issues
+            console.log('Clearing previous invisibility effect before starting new one');
+            this.clearInvisibilityState();
         }
         
-        // Store original material states
+        // Store original materials and opacities
         const originalMaterials = [];
         const originalOpacities = [];
         
-        // Store original materials and opacities
+        // Store original material states
         if (playerMesh.material) {
-            // Single material case
+            // If player has a single material
             originalMaterials.push(playerMesh.material);
             originalOpacities.push(playerMesh.material.opacity || 1);
         } else if (playerMesh.children) {
-            // Find and store materials for child meshes
+            // For more complex player models with child meshes
             playerMesh.traverse(child => {
                 if (child.isMesh && child.material) {
                     if (Array.isArray(child.material)) {
-                        // Multiple materials
+                        // For multiple materials on a single mesh
                         child.material.forEach(mat => {
                             originalMaterials.push(mat);
                             originalOpacities.push(mat.opacity || 1);
@@ -2715,7 +2713,7 @@ export class SkillsManager {
             opacity: 0.7
         });
         
-        const playerPos = this.game.localPlayer.position.clone();
+        const playerPos = playerMesh.position.clone();
         
         // Create smoke particles
         for (let i = 0; i < smokeParticleCount; i++) {
@@ -2783,100 +2781,78 @@ export class SkillsManager {
         // Immediately set semi-transparent
         setPlayerTransparency(0.3);
             
+        // Store the server-side visibility state in userData
+        if (!playerMesh.userData) playerMesh.userData = {};
+        playerMesh.userData.isInvisible = true;
+        
         // Show notification
         if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
             this.game.uiManager.showNotification('You have embraced the void - you are invisible to others', '#000000');
         }
         
-        // Track effect state
-        const effectData = {
+        // Initialize the invisibility effect data
+        this.invisibilityEffectData = {
             active: true,
             startTime: Date.now(),
             duration: duration,
             smokeParticles: smokeParticles,
             originalMaterials: originalMaterials,
-            originalOpacities: originalOpacities
+            originalOpacities: originalOpacities,
+            smokeGeometry: smokeGeometry
         };
         
         console.log(`Embrace Void effect active for ${duration/1000} seconds`);
         
+        // Set up a listener for attack events that would break invisibility
+        const attackListener = (event) => {
+            if (!this.invisibilityEffectData || !this.invisibilityEffectData.active) return;
+            
+            // Calculate remaining duration
+            const elapsedTime = Date.now() - this.invisibilityEffectData.startTime;
+            const remainingDuration = this.invisibilityEffectData.duration - elapsedTime;
+            
+            if (remainingDuration > 0) {
+                console.log('Attack detected - ending invisibility early');
+                
+                // Show notification
+                if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+                    this.game.uiManager.showNotification('Your attack revealed you from the void', '#ff0000');
+                }
+                
+                // Clear invisibility state
+                this.clearInvisibilityState();
+            }
+        };
+        
+        // Store the attack listener for removal later
+        this.invisibilityEffectData.attackListener = attackListener;
+        
+        // Add event listeners for local attack attempts
+        document.addEventListener('attack', attackListener);
+        document.addEventListener('useSkill', attackListener);
+        document.addEventListener('playerAttack', attackListener);
+        
         // Define smoke animation
         const animateSmoke = () => {
-            if (!effectData.active) return;
+            if (!this.invisibilityEffectData || !this.invisibilityEffectData.active) return;
             
+            const effectData = this.invisibilityEffectData;
             const elapsedTime = Date.now() - effectData.startTime;
             const progress = elapsedTime / effectData.duration;
             
             // Get current player position
-            const currentPlayerPos = this.game.localPlayer.position.clone();
+            const currentPlayerPos = playerMesh.position.clone();
             
             // If effect duration is complete, end animation
             if (progress >= 1.0) {
                 // End effect
-                effectData.active = false;
                 console.log('Embrace Void effect ending');
-                
-                // Restore original opacity
-                const restoreOriginalState = () => {
-                    console.log('Restoring original player opacity');
-                    
-                    // Restore original materials and opacities
-                    let materialIndex = 0;
-                    if (playerMesh.material) {
-                        // Single material case
-                        playerMesh.material.opacity = effectData.originalOpacities[0] || 1;
-                        playerMesh.material.needsUpdate = true;
-                        materialIndex++;
-                    } else if (playerMesh.children) {
-                        // Restore materials for child meshes
-                        playerMesh.traverse(child => {
-                            if (child.isMesh && child.material) {
-                                if (Array.isArray(child.material)) {
-                                    // Multiple materials
-                                    child.material.forEach(mat => {
-                                        if (materialIndex < effectData.originalOpacities.length) {
-                                            mat.opacity = effectData.originalOpacities[materialIndex] || 1;
-                                            mat.needsUpdate = true;
-                                            materialIndex++;
-                                        }
-                                    });
-                                } else {
-                                    // Single material
-                                    if (materialIndex < effectData.originalOpacities.length) {
-                                        child.material.opacity = effectData.originalOpacities[materialIndex] || 1;
-                                        child.material.needsUpdate = true;
-                                        materialIndex++;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                };
-                
-                // Immediate restore original state
-                restoreOriginalState();
-                
-                // Remove smoke particles
-                for (const particle of smokeParticles) {
-                    if (particle.parent) {
-                        this.game.scene.remove(particle);
-                        particle.material.dispose();
-                    }
-                }
-                
-                // Dispose geometry
-                smokeGeometry.dispose();
-                
-                // Show notification
-                if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
-                    this.game.uiManager.showNotification('You have returned from the void', '#333333');
-                }
-                
+                this.clearInvisibilityState();
                 return;
             }
                 
             // Update smoke particles
-            for (const particle of smokeParticles) {
+            for (const particle of effectData.smokeParticles) {
                 // Move particles with player movement
                 const playerDelta = new THREE.Vector3().subVectors(
                     currentPlayerPos,
@@ -2914,6 +2890,14 @@ export class SkillsManager {
             // Continue animation
             requestAnimationFrame(animateSmoke);
         };
+        
+        // Set a timeout to end the effect after the duration
+        setTimeout(() => {
+            if (this.invisibilityEffectData && this.invisibilityEffectData.active) {
+                console.log('Embrace Void effect timeout - ending effect');
+                this.clearInvisibilityState();
+            }
+        }, duration);
         
         // Start animation
         animateSmoke();
@@ -3197,5 +3181,125 @@ export class SkillsManager {
         
         // Start animation
         requestAnimationFrame(animateSmoke);
+    }
+    
+    clearInvisibilityState() {
+        if (!this.invisibilityEffectData) return;
+        
+        console.log('Clearing invisibility state');
+        
+        const playerMesh = this.game.localPlayer;
+        if (!playerMesh) return;
+        
+        // Restore original opacity
+        let materialIndex = 0;
+        if (playerMesh.material) {
+            // Single material case
+            playerMesh.material.opacity = this.invisibilityEffectData.originalOpacities[0] || 1;
+            playerMesh.material.needsUpdate = true;
+            materialIndex++;
+        } else if (playerMesh.children) {
+            // Restore materials for child meshes
+            playerMesh.traverse(child => {
+                if (child.isMesh && child.material) {
+                    if (Array.isArray(child.material)) {
+                        // Multiple materials
+                        child.material.forEach(mat => {
+                            if (materialIndex < this.invisibilityEffectData.originalOpacities.length) {
+                                mat.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
+                                mat.needsUpdate = true;
+                                materialIndex++;
+                            }
+                        });
+                    } else {
+                        // Single material
+                        if (materialIndex < this.invisibilityEffectData.originalOpacities.length) {
+                            child.material.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
+                            child.material.needsUpdate = true;
+                            materialIndex++;
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Remove smoke particles
+        for (const particle of this.invisibilityEffectData.smokeParticles) {
+            if (particle.parent) {
+                this.game.scene.remove(particle);
+                particle.material.dispose();
+            }
+        }
+        
+        // Set player's userData for tracking invisibility state
+        if (playerMesh && playerMesh.userData) {
+            playerMesh.userData.isInvisible = false;
+        }
+        
+        // Remove any remaining event listeners
+        if (this.invisibilityEffectData.attackListener) {
+            document.removeEventListener('attack', this.invisibilityEffectData.attackListener);
+            document.removeEventListener('useSkill', this.invisibilityEffectData.attackListener);
+            document.removeEventListener('playerAttack', this.invisibilityEffectData.attackListener);
+        }
+        
+        this.invisibilityEffectData = null;
+        
+        // Show notification
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('You have returned from the void', '#333333');
+        }
+    }
+    
+    /**
+     * Check if a skill can be used on a target
+     * @param {Object} player - The player using the skill
+     * @param {Object} target - The target of the skill
+     * @param {number} range - The range of the skill
+     * @returns {Object} Result with success boolean and message
+     */
+    canUseSkillOnTarget(player, target, range) {
+        // Check if target exists
+        const targetId = this.game.targetingManager.getTargetId();
+        if (!targetId) {
+            return { success: false, message: 'No target selected' };
+        }
+        
+        // Get target type (player or monster)
+        const targetType = this.game.targetingManager.getTargetType();
+        
+        // Get target object based on type
+        let targetObject = null;
+        if (targetType === 'player') {
+            targetObject = this.game.playerManager.getPlayerById(targetId);
+        } else if (targetType === 'monster') {
+            targetObject = this.game.monsterManager.getMonsterById(targetId);
+        }
+        
+        if (!targetObject) {
+            return { success: false, message: 'Target no longer exists' };
+        }
+        
+        // Get target position
+        const targetPosition = targetObject.position || (targetObject.mesh ? targetObject.mesh.position : null);
+        if (!targetPosition) {
+            return { success: false, message: 'Cannot determine target position' };
+        }
+        
+        // Get player position
+        const playerPosition = player ? player.position : null;
+        if (!playerPosition) {
+            return { success: false, message: 'Cannot determine player position' };
+        }
+        
+        // Calculate distance
+        const distance = playerPosition.distanceTo(targetPosition);
+        
+        // Check if target is in range
+        if (distance > range) {
+            return { success: false, message: `Target out of range (${distance.toFixed(1)} > ${range})` };
+        }
+        
+        return { success: true, message: 'Target in range' };
     }
 }
