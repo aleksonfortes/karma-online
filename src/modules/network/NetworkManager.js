@@ -34,7 +34,10 @@ export class NetworkManager {
         this.pendingMonsterData = null;
         this.monsterManagerCheckInterval = null;
         
-        // Connect to the server after initializing all fields
+        // Flag to track whether socket handlers have been initialized
+        this._handlersInitialized = false;
+        
+        // Connect to server and setup event listeners
         this.connect();
     }
     
@@ -152,6 +155,27 @@ export class NetworkManager {
         if (!this.socket) {
             console.warn('Cannot setup handlers: No socket connection');
             return false; // Return false to indicate failure
+        }
+
+        // Clean up previous handlers to prevent duplicates
+        if (this._handlersInitialized) {
+            console.log('Cleaning up previous socket handlers to prevent duplicates');
+            this.socket.removeAllListeners('connect');
+            this.socket.removeAllListeners('connect_error');
+            this.socket.removeAllListeners('disconnect');
+            this.socket.removeAllListeners('playerJoined');
+            this.socket.removeAllListeners('playerLeft');
+            this.socket.removeAllListeners('playerMovement');
+            this.socket.removeAllListeners('lifeUpdate');
+            this.socket.removeAllListeners('manaUpdate');
+            this.socket.removeAllListeners('karmaUpdate');
+            this.socket.removeAllListeners('gameStateSync');
+            this.socket.removeAllListeners('respawnConfirmed');
+            this.socket.removeAllListeners('playerRespawned');
+            this.socket.removeAllListeners('playerResetConfirmed');
+            this.socket.removeAllListeners('skillDamage');
+            this.socket.removeAllListeners('errorMessage');
+            // Add other events that should be cleaned up
         }
 
         // Handle successful connection
@@ -570,10 +594,21 @@ export class NetworkManager {
             // Handle both single player updates and batch updates
             if (data.players && Array.isArray(data.players)) {
                 // This is a batch update
-                data.players.forEach(playerData => this.handlePlayerStatsUpdate(playerData));
+                data.players.forEach(playerData => {
+                    // Mark source as periodic for batch updates
+                    const playerDataWithSource = {
+                        ...playerData,
+                        source: 'periodic'
+                    };
+                    this.handlePlayerStatsUpdate(playerDataWithSource);
+                });
             } else if (data.id) {
-                // This is a single player update
-                this.handlePlayerStatsUpdate(data);
+                // This is a single player update - mark as periodic
+                const playerDataWithSource = {
+                    ...data,
+                    source: 'periodic'
+                };
+                this.handlePlayerStatsUpdate(playerDataWithSource);
             }
         });
 
@@ -780,30 +815,65 @@ export class NetworkManager {
 
         // Handle mana update
         this.socket.on('manaUpdate', (data) => {
+            // Debug counter for this particular event handler being called
+            this._manaUpdateCallCount = (this._manaUpdateCallCount || 0) + 1;
+            console.log(`[ManaUpdate Call #${this._manaUpdateCallCount}] Received mana update - Handler ID: ${this._handlersInitialized}`);
+            
+            // Ignore if no data
+            if (!data || data.id === undefined) return;
+            
+            // Detailed verbose logging to trace mana changes for debugging
+            console.log(`MANA UPDATE from server: ID=${data.id}, mana=${data.mana}, maxMana=${data.maxMana}`);
+            
+            // Get player mesh
             const playerMesh = this.game.playerManager.players.get(data.id);
-            if (!playerMesh) {
-                return;
-            }
-
-            // Update stored mana stats
-            if (!playerMesh.userData.stats) {
-                playerMesh.userData.stats = {};
+            
+            // Get server mana value, defaulting to 0 if undefined
+            const serverMana = data.mana !== undefined ? data.mana : 0;
+            const serverMaxMana = data.maxMana || 100;
+            
+            // Process update for other players' meshes
+            if (playerMesh) {
+                // Initialize player userData if needed
+                if (!playerMesh.userData) playerMesh.userData = {};
+                if (!playerMesh.userData.stats) playerMesh.userData.stats = {};
+                
+                // Get current mana
+                const currentMana = playerMesh.userData.stats.mana !== undefined ? 
+                    playerMesh.userData.stats.mana : 100;
+                
+                // Critical fix: log the update for clarity
+                console.log(`Updating player mesh mana: ${currentMana} → ${serverMana} (Player: ${data.id})`);
+                
+                // Always update other players' mana state
+                playerMesh.userData.stats.mana = serverMana;
+                playerMesh.userData.stats.maxMana = serverMaxMana;
+                
+                // Update visual status bars if available
+                if (this.game.updatePlayerStatus) {
+                    this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
+                }
             }
             
-            playerMesh.userData.stats.mana = data.mana;
-            playerMesh.userData.stats.maxMana = data.maxMana;
-            
-            // Update visual status bars
-            if (this.game.updatePlayerStatus) {
-                this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-            }
-
-            // If this is our player, update the main UI
-            if (data.id === this.socket.id) {
-                this.game.playerStats.currentMana = data.mana;
-                this.game.playerStats.maxMana = data.maxMana;
-                if (this.game.updateStatusBars) {
-                    this.game.updateStatusBars();
+            // Special handling for local player
+            if (data.id === this.socket.id && this.game.playerStats) {
+                const localCurrentMana = this.game.playerStats.currentMana !== undefined ? 
+                    this.game.playerStats.currentMana : 100;
+                
+                // Instead of directly updating, use handlePlayerStatsUpdate with source
+                if (serverMana !== localCurrentMana) {
+                    // Create a player data object with source for handlePlayerStatsUpdate
+                    const playerData = {
+                        id: data.id,
+                        mana: serverMana,
+                        maxMana: serverMaxMana,
+                        source: 'mana_update' // Mark the source of this update
+                    };
+                    
+                    // Process through the unified handler
+                    this.handlePlayerStatsUpdate(playerData);
+                } else {
+                    console.log(`Mana already at ${serverMana}, no update needed`);
                 }
             }
         });
@@ -1106,13 +1176,26 @@ export class NetworkManager {
                 this.game.playerStats.currentLife = data.life;
                 this.game.playerStats.maxLife = data.maxLife;
                 
+                // Use handlePlayerStatsUpdate for mana with respawn source
+                if (data.mana !== undefined || data.maxMana !== undefined) {
+                    const playerData = {
+                        id: this.socket.id,
+                        mana: data.mana,
+                        maxMana: data.maxMana,
+                        source: 'respawn' // Mark this as a respawn update
+                    };
+                    
+                    this.handlePlayerStatsUpdate(playerData);
+                    console.log(`Updated player mana during respawn: ${data.mana}`);
+                }
+                
                 // Update death count from server if provided
                 if (data.deathCount !== undefined) {
                     this.game.playerStats.deaths = data.deathCount;
                     console.log(`Updated player death count: ${data.deathCount}`);
                 }
                 
-                console.log(`Updated player stats: Life ${this.game.playerStats.currentLife}/${this.game.playerStats.maxLife}`);
+                console.log(`Updated player stats: Life ${this.game.playerStats.currentLife}/${this.game.playerStats.maxLife}, Mana ${this.game.playerStats.currentMana}/${this.game.playerStats.maxMana}`);
                 
                 // Update UI
                 if (this.game.uiManager) {
@@ -1438,7 +1521,8 @@ export class NetworkManager {
                 mana: data.mana,
                 maxMana: data.maxMana,
                 experience: data.totalExperience,
-                level: data.level
+                level: data.level,
+                source: 'experience_gain' // Mark the source of this update
             };
             
             // Process the update using the unified handler
@@ -1570,6 +1654,16 @@ export class NetworkManager {
             }, 1000);
         });
         
+        // Track last state sync request to prevent spam
+        this.lastStateSyncRequest = 0;
+        this.stateSyncCooldown = 2000; // 2 seconds cooldown between requests
+        
+        // Debug for mana updates: Count how many times handlers are registered
+        console.log(`Socket handlers setup completed - ${this._handlersInitialized ? 'previously initialized' : 'first initialization'}`);
+        
+        // Mark handlers as initialized to prevent duplicate events
+        this._handlersInitialized = true;
+        
         return true; // Return true to indicate success
     }
 
@@ -1624,29 +1718,50 @@ export class NetworkManager {
         }
     }
 
+    /**
+     * Handle reconnection
+     */
     handleReconnection() {
-        console.log('Handling reconnection to server');
+        console.log('Handling reconnection...');
         
-        // Track that we're reconnecting
-        this.connectionState.isReconnecting = true;
+        // Store the current player state before reconnection
+        const currentMana = this.game.playerStats?.currentMana;
+        const currentMaxMana = this.game.playerStats?.maxMana;
+        const currentPath = this.game.playerStats?.path;
         
-        // Request full game state synchronization from server
-        this.requestStateSync();
+        // Send a message to request server-side reset
+        this.socket.emit('requestPlayerReset', { 
+            position: this.game.localPlayer?.position 
+        });
         
-        // Request specific player data
-        if (this.socket) {
-            this.socket.emit('requestPlayerReset');
-            console.log('Requested player reset from server');
-        }
-        
-        // Reset death state
-        this.playerDead = false;
-        
-        // Reset pending inputs
-        this.pendingInputs = [];
-        
-        // Start the periodic health check
-        this.startPeriodicHealthCheck();
+        // Set up handler for reset confirmation
+        this.socket.once('playerResetConfirmed', (data) => {
+            console.log('Player reset confirmed by server');
+            
+            // Restore mana values if they exist
+            if (currentMana !== undefined && this.game.playerStats) {
+                this.game.playerStats.currentMana = currentMana;
+                console.log(`Preserved mana during reconnection: ${currentMana}`);
+            }
+            
+            if (currentMaxMana !== undefined && this.game.playerStats) {
+                this.game.playerStats.maxMana = currentMaxMana;
+            }
+            
+            // Restore path if it exists
+            if (currentPath && this.game.playerStats) {
+                this.game.playerStats.path = currentPath;
+                console.log(`Preserved path during reconnection: ${currentPath}`);
+            }
+            
+            // Update UI
+            if (this.game.uiManager && this.game.uiManager.updateStatusBars) {
+                this.game.uiManager.updateStatusBars(this.game.playerStats);
+            }
+            
+            // Request state synchronization
+            this.requestStateSync();
+        });
     }
 
     async createLocalPlayer() {
@@ -1712,7 +1827,16 @@ export class NetworkManager {
     sendPlayerState() {
         if (!this.connected || !this.socket || !this.game?.localPlayer) return;
         
-        // Send current player state to server
+        // Get accurate mana values from playerStats if available, then fall back to userData
+        const currentMana = this.game.playerStats?.currentMana !== undefined ? 
+            this.game.playerStats.currentMana : 
+            (this.game.localPlayer.userData.stats?.mana !== undefined ? 
+                this.game.localPlayer.userData.stats.mana : 100);
+                
+        const maxMana = this.game.playerStats?.maxMana || 
+            this.game.localPlayer.userData.stats?.maxMana || 100;
+        
+        // Send current player state to server with correct mana values
         this.socket.emit('playerMovement', {
             position: {
                 x: this.game.localPlayer.position.x,
@@ -1725,8 +1849,8 @@ export class NetworkManager {
             path: this.game.localPlayer.userData.path || null,
             karma: this.game.localPlayer.userData.stats?.karma || 50,
             maxKarma: this.game.localPlayer.userData.stats?.maxKarma || 100,
-            mana: this.game.localPlayer.userData.stats?.mana || 100,
-            maxMana: this.game.localPlayer.userData.stats?.maxMana || 100
+            mana: currentMana, // Use the accurate value from above
+            maxMana: maxMana   // Use the accurate value from above
         });
     }
 
@@ -2033,7 +2157,14 @@ export class NetworkManager {
     }
 
     initialize() {
-        this.setupSocketHandlers();
+        // Only set up socket handlers if not already initialized
+        if (!this._handlersInitialized && this.socket) {
+            console.log('Initializing socket handlers from initialize method');
+            this.setupSocketHandlers();
+        } else if (this._handlersInitialized) {
+            console.log('Socket handlers already initialized, skipping setup');
+        }
+        
         this.setupGameListeners();
         
         // Start periodic health check to ensure health values stay consistent
@@ -2126,113 +2257,128 @@ export class NetworkManager {
      * @param {Object} data - The game state data
      */
     handleGameStateSync(data) {
-        if (!data || !data.timestamp) return;
+        if (!data || !data.players || !Array.isArray(data.players)) {
+            console.warn('Received invalid game state sync data:', data);
+            return;
+        }
         
         console.log('Received game state sync from server');
         
-        // Synchronize players
-        if (data.players && Array.isArray(data.players)) {
-            data.players.forEach(playerData => {
-                // Don't sync the local player's position, only health and other stats
-                const isLocalPlayer = playerData.id === this.socket.id;
+        // Store current mana values before processing sync
+        const currentMana = this.game.playerStats?.currentMana;
+        const currentMaxMana = this.game.playerStats?.maxMana;
+        
+        // Process each player update
+        data.players.forEach(playerData => {
+            // Skip if no player ID
+            if (!playerData.id) return;
+            
+            // Handle the player update
+            const player = this.game.playerManager.players.get(playerData.id);
+            
+            if (player) {
+                // Update existing player data
                 
-                if (isLocalPlayer) {
-                    // For local player, just update stats but not position (to avoid rubberbanding)
-                    if (this.game.playerManager && this.game.playerManager.localPlayer) {
-                        // Update health and other stats
-                        if (this.game.playerStats) {
-                            this.game.playerStats.updateHealth(playerData.life, playerData.maxLife);
-                        }
-                        
-                        // Update dead state if needed
-                        if (playerData.isDead !== this.playerDead) {
-                            this.playerDead = playerData.isDead;
-                            
-                            if (playerData.isDead) {
-                                this.handlePlayerDeath();
-                            }
-                        }
-                    }
-                } else {
-                    // For other players, update all properties
-                    const existingPlayer = this.game.playerManager?.players.get(playerData.id);
+                // Don't update position for local player - server might have outdated position
+                if (playerData.id !== this.socket.id && playerData.position) {
+                    player.position.copy(new THREE.Vector3(
+                        playerData.position.x,
+                        playerData.position.y,
+                        playerData.position.z
+                    ));
+                }
+                
+                // Update player health if provided
+                if (typeof playerData.life === 'number' && typeof playerData.maxLife === 'number') {
+                    if (!player.userData) player.userData = {};
+                    if (!player.userData.stats) player.userData.stats = {};
                     
-                    if (existingPlayer) {
-                        // Update player position if they've moved significantly
-                        if (this.hasPositionChanged(existingPlayer.position, playerData.position)) {
-                            existingPlayer.position.copy(playerData.position);
-                            // Update player mesh position
-                            if (existingPlayer.mesh) {
-                                existingPlayer.mesh.position.copy(playerData.position);
-                            }
-                        }
-                        
-                        // Update health and other stats
-                        existingPlayer.life = playerData.life;
-                        existingPlayer.maxLife = playerData.maxLife;
-                        existingPlayer.isDead = playerData.isDead;
-                        
-                        // Update health bar if available
-                        if (this.game.ui && typeof this.game.ui.updatePlayerHealthBar === 'function') {
-                            this.game.ui.updatePlayerHealthBar(existingPlayer);
-                        }
-                    } else {
-                        // Store for later if player manager not ready
-                        this.pendingUpdates.set(playerData.id, playerData);
+                    player.userData.stats.life = playerData.life;
+                    player.userData.stats.maxLife = playerData.maxLife;
+                    
+                    // Update health bar if exists
+                    if (player.healthBar) {
+                        player.healthBar.updateHealth(playerData.life, playerData.maxLife);
                     }
                 }
-            });
-        }
+                
+                // Handle player death state
+                if (playerData.isDead) {
+                    player.visible = false;
+                }
+            } else {
+                // Only create new players for others - we should already have our own local player
+                if (playerData.id !== this.socket.id) {
+                    this.createNetworkPlayer({
+                        ...playerData,
+                        position: new THREE.Vector3(
+                            playerData.position.x,
+                            playerData.position.y,
+                            playerData.position.z
+                        )
+                    });
+                }
+            }
+            
+            // Update player stats for local player only
+            if (playerData.id === this.socket.id && this.game.playerStats) {
+                // Update life stats
+                this.game.playerStats.currentLife = playerData.life;
+                this.game.playerStats.maxLife = playerData.maxLife;
+                
+                // Mark player as dead if server says so
+                if (playerData.isDead && !this.playerDead) {
+                    this.playerDead = true;
+                    this.game.isAlive = false;
+                    this.handlePlayerDeath();
+                }
+                
+                // Add source to playerData and use handlePlayerStatsUpdate for mana
+                if (playerData.mana !== undefined) {
+                    // Create a copy with source information
+                    const playerDataWithSource = {
+                        ...playerData,
+                        source: 'game_state_sync'
+                    };
+                    
+                    // Process through the unified handler which will decide whether to accept it
+                    this.handlePlayerStatsUpdate(playerDataWithSource);
+                }
+                
+                // Update UI
+                this.updateStatusBars();
+            }
+        });
         
-        // Synchronize monsters
+        // Process monster updates if available
         if (data.monsters && Array.isArray(data.monsters) && this.game.monsterManager) {
             data.monsters.forEach(monsterData => {
+                // Check if the monster exists in our world
                 const monster = this.game.monsterManager.getMonsterById(monsterData.id);
                 
                 if (monster) {
-                    // Update health
-                    monster.health = monsterData.health;
-                    
-                    // Update position if significant change - avoid unnecessary updates
-                    if (this.hasPositionChanged(monster.position, monsterData.position, 0.15)) {
-                        // Store the original position for reference
-                        const originalPosition = monster.position ? { 
-                            x: monster.position.x, 
-                            y: monster.position.y, 
-                            z: monster.position.z 
-                        } : null;
-                        
-                        // Update data position
-                        monster.position = monsterData.position;
-                        
-                        // Update mesh position if it exists
-                        if (monster.mesh) {
-                            // Add a flag to indicate this is a sync update
-                            monster.mesh.userData.syncUpdate = true;
+                    // Update existing monster health
+                    if (typeof monsterData.health === 'number') {
+                        // Only update if server health is different
+                        if (monster.health !== monsterData.health) {
+                            const oldHealth = monster.health;
+                            monster.health = monsterData.health;
+                            console.log(`Monster ${monsterData.id} health synced from ${oldHealth} to ${monsterData.health} (server authority)`);
                             
-                            // Update position in mesh, keeping Y offset consistent
-                            monster.mesh.position.set(
-                                monsterData.position.x,
-                                monsterData.position.y + 2.0, // Keep the height adjustment consistent
-                                monsterData.position.z
-                            );
+                            // Update health bar
+                            this.game.monsterManager.updateHealthBar(monster);
                         }
                     }
                     
-                    // Update health bar
-                    this.game.monsterManager.updateHealthBar(monster);
-                    
-                    // Handle death state
-                    if (monsterData.isDead && monster.health > 0) {
-                        monster.health = 0;
-                        this.game.monsterManager.handleMonsterDeath(monster.id);
+                    // Handle monster death state if needed
+                    if (monsterData.isDead && monster.isAlive) {
+                        console.log(`Monster ${monsterData.id} is dead according to server - updating local state`);
+                        this.game.monsterManager.handleMonsterDeath(monsterData.id);
                     }
-                } else {
-                    // Store for later if monster manager not ready or monster not loaded yet
-                    if (this.pendingMonsterData === null) {
-                        this.pendingMonsterData = [];
-                    }
-                    this.pendingMonsterData.push(monsterData);
+                } else if (!monsterData.isDead) {
+                    // Monster doesn't exist locally but should - let monster manager handle it
+                    console.log(`Monster ${monsterData.id} exists on server but not client - requesting state`);
+                    this.socket.emit('request_monster_state', { monsterId: monsterData.id });
                 }
             });
         }
@@ -2284,6 +2430,10 @@ export class NetworkManager {
             });
             
             // Set up handlers again
+            console.log('Setting up socket handlers during reconnection');
+            
+            // Reset handlers flag to ensure clean slate for reconnection
+            this._handlersInitialized = false;
             this.setupSocketHandlers();
         } catch (error) {
             console.error('Error during reconnection attempt:', error);
@@ -2605,98 +2755,119 @@ export class NetworkManager {
         return this.game.playerManager.players.get(playerId) || null;
     }
 
+    /**
+     * Handle player stats update, preserving mana values
+     */
     handlePlayerStatsUpdate(playerData) {
-        // Log the incoming data
-        // Removed console.log statement here
+        if (!playerData || !playerData.id) return;
         
-        // Get the player mesh
-        const playerMesh = this.game.playerManager.players.get(playerData.id);
-        if (!playerMesh) {
+        const playerId = playerData.id;
+        const currentPlayer = this.game.playerManager?.players.get(playerId);
+        
+        // For other players, just update their stats directly
+        if (currentPlayer && playerId !== this.socket.id) {
+            if (!currentPlayer.userData) {
+                currentPlayer.userData = {};
+            }
+            if (!currentPlayer.userData.stats) {
+                currentPlayer.userData.stats = {};
+            }
+            
+            // Update their stats
+            currentPlayer.userData.stats.life = playerData.life ?? currentPlayer.userData.stats.life;
+            currentPlayer.userData.stats.maxLife = playerData.maxLife ?? currentPlayer.userData.stats.maxLife;
+            currentPlayer.userData.stats.mana = playerData.mana ?? currentPlayer.userData.stats.mana;
+            currentPlayer.userData.stats.maxMana = playerData.maxMana ?? currentPlayer.userData.stats.maxMana;
+            
+            // Update their health bar if available
+            if (currentPlayer.healthBar) {
+                currentPlayer.healthBar.updateHealth(
+                    currentPlayer.userData.stats.life, 
+                    currentPlayer.userData.stats.maxLife
+                );
+            }
             return;
         }
         
-        // Check for unique update ID to prevent race conditions
-        if (playerData.updateId) {
-            // Skip if we've already processed this exact update
-            if (playerMesh.userData.lastUpdateId === playerData.updateId) {
-                return;
-            }
-            
-            // Store the update ID
-            playerMesh.userData.lastUpdateId = playerData.updateId;
-        }
-        
-        // Initialize player stats if needed
-        if (!playerMesh.userData.stats) {
-            playerMesh.userData.stats = {};
-        }
-
-        const oldStats = { ...playerMesh.userData.stats };
-        
-        // Update the player's stats
-        playerMesh.userData.stats = {
-            ...playerMesh.userData.stats,
-            life: playerData.life,
-            maxLife: playerData.maxLife,
-            mana: playerData.mana,
-            maxMana: playerData.maxMana,
-            experience: playerData.experience,
-            level: playerData.level
-        };
-        
-        // Removed console.log for mana changes
-        
-        // Update the visual status bars
-        if (this.game.updatePlayerStatus) {
-            this.game.updatePlayerStatus(playerMesh, playerMesh.userData.stats);
-        }
-        
-        // Store the server values as the absolute source of truth
-        playerMesh.userData.serverLife = playerData.life;
-        playerMesh.userData.serverMaxLife = playerData.maxLife;
-        
-        // Create health bar if it doesn't exist
-        if (!playerMesh.userData.healthBar) {
-            this.game.playerManager.createHealthBar(playerMesh);
-        }
-        
-        // Force unlock health updates for server stats
-        // This ensures server stats can always update the health bar
-        playerMesh.userData.healthLocked = false;
-        
-        // Update the health bar immediately with server values
-        // This ensures health bars always reflect the server state
-        if (this.game.playerManager.updateHealthBarWithServerValues) {
-            this.game.playerManager.updateHealthBarWithServerValues(playerMesh);
-        } else {
-            // Fallback to regular update if the new method isn't available
-            this.game.playerManager.updateHealthBar(playerMesh);
-        }
-        
-        // If this is our player, update the main UI
-        if (playerData.id === this.socket.id) {
-            // Update player stats with the latest server values
+        // Handle local player stats
+        if (playerId === this.socket.id && this.game.playerStats) {
+            // Update health values normally
             this.game.playerStats.currentLife = playerData.life;
             this.game.playerStats.maxLife = playerData.maxLife;
-            this.game.playerStats.currentMana = playerData.mana;
-            this.game.playerStats.maxMana = playerData.maxMana;
-            this.game.playerStats.experience = playerData.experience;
-            this.game.playerStats.level = playerData.level;
             
-            // Removed console.log for player stats update
+            // Only accept mana updates in certain situations:
+            // 1. When our current mana is undefined (initialization)
+            // 2. When we're dead/respawning
+            // 3. When receiving mana from specific events (not periodic updates)
+            const isFromPeriodicUpdate = !playerData.source || playerData.source === 'periodic';
+            const isFromSpecificEvent = playerData.source === 'mana_update' || 
+                                       playerData.source === 'respawn' || 
+                                       playerData.source === 'experience_gain' ||
+                                       playerData.source === 'skill_effect';
             
-            // Update the UI with the updated values
-            if (this.game.uiManager) {
+            const acceptManaUpdate = 
+                this.game.playerStats.currentMana === undefined || 
+                !this.game.isAlive ||
+                isFromSpecificEvent ||
+                !isFromPeriodicUpdate;
+                
+            if (playerData.mana !== undefined && acceptManaUpdate) {
+                console.log(`Setting local player mana to ${playerData.mana} from server (source: ${playerData.source || 'unknown'})`);
+                this.game.playerStats.currentMana = playerData.mana;
+                
+                // Sync with userData for consistency
+                if (this.game.localPlayer && this.game.localPlayer.userData) {
+                    if (!this.game.localPlayer.userData.stats) {
+                        this.game.localPlayer.userData.stats = {};
+                    }
+                    this.game.localPlayer.userData.stats.mana = playerData.mana;
+                    console.log(`Also synced localPlayer.userData.stats.mana=${playerData.mana}`);
+                }
+            } else if (playerData.mana !== undefined) {
+                console.log(`Ignoring server mana update: ${playerData.mana} (current: ${this.game.playerStats.currentMana}, source: ${playerData.source || 'unknown'})`);
+            }
+            
+            // Update max mana if provided
+            if (playerData.maxMana !== undefined) {
+                this.game.playerStats.maxMana = playerData.maxMana;
+            }
+            
+            // Only update karma if provided
+            if (playerData.karma !== undefined) {
+                this.game.playerStats.currentKarma = playerData.karma;
+            }
+            if (playerData.maxKarma !== undefined) {
+                this.game.playerStats.maxKarma = playerData.maxKarma;
+            }
+            
+            // Only update experience and level if provided
+            if (playerData.experience !== undefined) {
+                this.game.playerStats.experience = playerData.experience;
+            }
+            if (playerData.level !== undefined) {
+                this.game.playerStats.level = playerData.level;
+            }
+            
+            // Path should only be updated if it doesn't exist or is null
+            if (playerData.path && (!this.game.playerStats.path || this.game.playerStats.path === null)) {
+                this.game.playerStats.path = playerData.path;
+            }
+            
+            // Update UI
+            if (this.game.uiManager && typeof this.game.uiManager.updateStatusBars === 'function') {
                 this.game.uiManager.updateStatusBars(this.game.playerStats);
             }
-            
-            // Check for death
-            if (playerData.life <= 0 && !this.playerDead) {
-                this.playerDead = true;
-                this.handlePlayerDeath();
-            } else if (playerData.life > 0 && this.playerDead) {
-                this.playerDead = false;
-            }
+        }
+    }
+
+    /**
+     * Helper method to update status bars through the UI manager
+     */
+    updateStatusBars() {
+        if (this.game.updateStatusBars) {
+            this.game.updateStatusBars();
+        } else if (this.game.uiManager && this.game.uiManager.updateStatusBars) {
+            this.game.uiManager.updateStatusBars(this.game.playerStats);
         }
     }
 }

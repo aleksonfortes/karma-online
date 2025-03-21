@@ -240,6 +240,32 @@ export class NetworkManager {
                     return;
                 }
                 
+                // Check if player has enough mana
+                let manaCost = 10; // Default mana cost
+                if (data.skillName === 'dark_ball') {
+                    manaCost = 25;
+                } else if (data.skillName === 'martial_arts') {
+                    manaCost = 10;
+                }
+                
+                // Initialize mana if not set
+                if (player.mana === undefined) {
+                    player.mana = 100;
+                }
+                if (player.maxMana === undefined) {
+                    player.maxMana = 100;
+                }
+                
+                // Check if player has enough mana
+                if (player.mana < manaCost) {
+                    console.log(`Player ${socket.id} tried to use ${data.skillName} without enough mana (${player.mana}/${manaCost})`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Not enough mana to use this skill'
+                    });
+                    return;
+                }
+                
                 // Update skill cooldown
                 player.skillCooldowns.set(data.skillName, now);
                 
@@ -321,6 +347,9 @@ export class NetworkManager {
                     player.maxLife = 100;
                 }
                 
+                // Consume mana
+                player.mana -= manaCost;
+                
                 // Calculate and apply damage
                 const previousLife = targetPlayer.life;
                 
@@ -372,6 +401,14 @@ export class NetworkManager {
                     maxLife: targetPlayer.maxLife || 100,
                     timestamp: Date.now(), // Add timestamp for client-side validation
                     final: true // Mark this as a final update that shouldn't be overridden
+                });
+                
+                // Broadcast mana update for the player who used the skill
+                this.io.emit('manaUpdate', {
+                    id: socket.id,
+                    mana: player.mana,
+                    maxMana: player.maxMana || 100,
+                    timestamp: Date.now()
                 });
                 
                 // Also broadcast the attacker's stats to ensure everyone has the latest data
@@ -638,6 +675,32 @@ export class NetworkManager {
                 // Make sure we use the skill name from the data if available
                 const skillName = data.skillName || skillId;
                 
+                // Check if player has enough mana
+                let manaCost = 10; // Default mana cost
+                if (skillName === 'dark_ball') {
+                    manaCost = 25;
+                } else if (skillName === 'martial_arts') {
+                    manaCost = 10;
+                }
+                
+                // Initialize mana if not set
+                if (player.mana === undefined) {
+                    player.mana = 100;
+                }
+                if (player.maxMana === undefined) {
+                    player.maxMana = 100;
+                }
+                
+                // Check if player has enough mana
+                if (player.mana < manaCost) {
+                    console.log(`Player ${socket.id} tried to use ${skillName} on monster without enough mana (${player.mana}/${manaCost})`);
+                    socket.emit('errorMessage', {
+                        type: 'combat',
+                        message: 'Not enough mana to use this skill'
+                    });
+                    return;
+                }
+                
                 // Check server-side cooldown
                 const now = Date.now();
                 const lastUsedTime = player.skillCooldowns.get(skillName) || 0;
@@ -719,6 +782,9 @@ export class NetworkManager {
                     return; // Important: return here to prevent attack processing
                 }
                 
+                // Consume mana
+                player.mana -= manaCost;
+                
                 // Calculate damage from the server side
                 const damage = this.calculateMonsterDamage(skillName, player, monster);
                 
@@ -728,6 +794,14 @@ export class NetworkManager {
                 
                 // Log the attack
                 this.log(`Player ${socket.id} used ${skillName} on monster ${monster.id} for ${damage} damage (health: ${monster.health}/${monster.maxHealth || 100})`);
+                
+                // Broadcast mana update for the player who used the skill
+                this.io.emit('manaUpdate', {
+                    id: socket.id,
+                    mana: player.mana,
+                    maxMana: player.maxMana || 100,
+                    timestamp: Date.now()
+                });
                 
                 // Check if monster is dead
                 if (monster.health <= 0) {
@@ -787,6 +861,8 @@ export class NetworkManager {
                     },
                     life: player.life,
                     maxLife: player.maxLife || 100,
+                    mana: player.mana, // Add mana to respawn data
+                    maxMana: player.maxMana || 100,
                     deathCount: player.deathCount || 0
                 };
                 
