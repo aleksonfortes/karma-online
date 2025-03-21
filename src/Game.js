@@ -327,8 +327,8 @@ export class Game {
                                 const skillToUse = this.skillsManager.getDefaultSkill();
                                 if (skillToUse === 'martial_arts') {
                                     this.skillsManager.useMartialArts();
-                                } else if (skillToUse === 'dark_strike') {
-                                    this.skillsManager.useDarkStrike();
+                                } else if (skillToUse === 'dark_ball') {
+                                    this.skillsManager.useDarkBall();
                                 }
                             }
                         }

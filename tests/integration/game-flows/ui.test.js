@@ -25,7 +25,7 @@ const mockGameManager = {
       
       // Add appropriate skills based on path
       if (path === 'dark') {
-        player.stats.skills = ['dark_strike'];
+        player.stats.skills = ['dark_ball'];
       } else if (path === 'light') {
         player.stats.skills = ['martial_arts'];
       }
@@ -294,7 +294,7 @@ describe('UI Integration Tests', () => {
       await new Promise(resolve => setTimeout(resolve, 50));
       
       // Verify player received dark path skill
-      expect(player.stats.skills).toContain('dark_strike');
+      expect(player.stats.skills).toContain('dark_ball');
     });
   });
 }); 

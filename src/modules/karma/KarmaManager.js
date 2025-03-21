@@ -520,17 +520,17 @@ export class KarmaManager {
                 }
             } else if (path === 'dark') {
                 // Add dark path skills
-                this.game.skillsManager.addSkill('dark_strike');
+                this.game.skillsManager.addSkill('dark_ball');
                 
                 // Validate that the skill was added
-                if (!this.game.activeSkills.has('dark_strike')) {
-                    console.error('Failed to add dark_strike skill');
-                    this.game.activeSkills.add('dark_strike');
+                if (!this.game.activeSkills.has('dark_ball')) {
+                    console.error('Failed to add dark_ball skill');
+                    this.game.activeSkills.add('dark_ball');
                 }
                 
                 // Ensure skill has proper slot value
-                if (this.game.skillsManager.skills.dark_strike) {
-                    this.game.skillsManager.skills.dark_strike.slot = 1;
+                if (this.game.skillsManager.skills.dark_ball) {
+                    this.game.skillsManager.skills.dark_ball.slot = 1;
                 }
             }
             

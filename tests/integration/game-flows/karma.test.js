@@ -25,7 +25,7 @@ const mockGameManager = {
       
       // Add appropriate skills based on path
       if (path === 'dark') {
-        player.stats.skills = ['dark_strike'];
+        player.stats.skills = ['dark_ball'];
       } else if (path === 'light') {
         player.stats.skills = ['martial_arts'];
       }

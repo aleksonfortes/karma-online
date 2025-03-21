@@ -238,12 +238,12 @@ describe('SkillsManager (Real Implementation)', () => {
       return true;
     });
     
-    skillsManager.useDarkStrike = jest.fn().mockImplementation(function(targetId) {
+    skillsManager.useDarkBall = jest.fn().mockImplementation(function(targetId) {
       const target = this.game.playerManager.getPlayerById(targetId);
       if (!target) return false;
       
       // Set lastUsed to current time
-      this.skills.dark_strike.lastUsed = performance.now();
+      this.skills.dark_ball.lastUsed = performance.now();
       
       // Set player animation
       this.game.playerManager.setPlayerAnimationState(this.game.playerManager.localPlayer, 'attack');
@@ -254,16 +254,16 @@ describe('SkillsManager (Real Implementation)', () => {
         const maxLife = target.userData.maxLife || 100;
         this.game.playerManager.updatePlayerLife(
           target, 
-          Math.max(0, currentLife - this.skills.dark_strike.damage), 
+          Math.max(0, currentLife - this.skills.dark_ball.damage), 
           maxLife
         );
       }
       
       // Create visual effect
-      this.createDamageEffect(target, this.skills.dark_strike.damage);
+      this.createDamageEffect(target, this.skills.dark_ball.damage);
       
       // Tell server we used skill
-      this.game.networkManager.useSkill(targetId, 'dark_strike');
+      this.game.networkManager.useSkill(targetId, 'dark_ball');
       
       return true;
     });
@@ -355,9 +355,9 @@ describe('SkillsManager (Real Implementation)', () => {
         description: 'Close-range martial arts attack. Requires target and proximity.',
         path: 'light'
       },
-      dark_strike: {
-        id: 'dark_strike',
-        name: 'Dark Strike',
+      dark_ball: {
+        id: 'dark_ball',
+        name: 'Dark Ball',
         icon: '⚔️',
         slot: 2,
         cooldown: 2000,
@@ -388,7 +388,7 @@ describe('SkillsManager (Real Implementation)', () => {
     test('should initialize with default skills', () => {
       expect(skillsManager.skills).toBeDefined();
       expect(skillsManager.skills.martial_arts).toBeDefined();
-      expect(skillsManager.skills.dark_strike).toBeDefined();
+      expect(skillsManager.skills.dark_ball).toBeDefined();
     });
     
     test('should initialize active effects array', () => {

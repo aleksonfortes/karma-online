@@ -63,7 +63,7 @@ const mockGameManager = {
       
       // Add appropriate skills based on path
       if (path === 'dark') {
-        player.stats.skills = ['dark_strike'];
+        player.stats.skills = ['dark_ball'];
       } else if (path === 'light') {
         player.stats.skills = ['martial_arts'];
       }
@@ -94,8 +94,14 @@ const mockGameManager = {
     const dz = player.position.z - monster.position.z;
     const distance = Math.sqrt(dx * dx + dz * dz);
     
-    // Default range is 3 units
-    const skillRange = 3;
+    // Set skill range based on skill name
+    let skillRange = 3; // Default range
+    
+    if (skillName === 'martial_arts') {
+      skillRange = 3;
+    } else if (skillName === 'dark_ball') {
+      skillRange = 6; // Doubled from martial arts range
+    }
     
     if (distance > skillRange) {
       return { valid: false, message: 'Target is out of range' };
@@ -211,7 +217,7 @@ describe('PVM Integration Tests', () => {
       client.emit('useSkill', {
         targetType: 'monster',
         monsterId: 'monster-1',
-        skillId: 'dark_strike'
+        skillId: 'dark_ball'
       });
       
       // Give time for event processing
@@ -238,7 +244,7 @@ describe('PVM Integration Tests', () => {
       // Now try to attack the monster
       client.emit('attack_monster', {
         monsterId: 'monster-1',
-        skillName: 'dark_strike'
+        skillName: 'dark_ball'
       });
       
       // Give time for event processing
@@ -316,7 +322,7 @@ describe('PVM Integration Tests', () => {
       client.emit('useSkill', {
         targetType: 'monster',
         monsterId: 'monster-1',
-        skillId: 'dark_strike',
+        skillId: 'dark_ball',
         damage: 10
       });
       
@@ -348,7 +354,7 @@ describe('PVM Integration Tests', () => {
       client.emit('useSkill', {
         targetType: 'monster',
         monsterId: 'monster-1',
-        skillId: 'dark_strike',
+        skillId: 'dark_ball',
         damage: 10  // Enough to kill the monster
       });
       
@@ -385,16 +391,16 @@ describe('PVM Integration Tests', () => {
       mockGameManager.processSkillOnMonster = jest.fn();
       mockGameManager.validateSkillUse = jest.fn().mockReturnValue(true);
       
-      // Add dark_strike skill to player
+      // Add dark_ball skill to player
       const player = mockPlayers.get(socketId);
-      if (!player.stats.skills.includes('dark_strike')) {
-        player.stats.skills.push('dark_strike');
+      if (!player.stats.skills.includes('dark_ball')) {
+        player.stats.skills.push('dark_ball');
       }
       
       // First skill use - should succeed
       client.emit('attack_monster', {
         monsterId: 'monster-1',
-        skillName: 'dark_strike',
+        skillName: 'dark_ball',
         damage: 10
       });
       
@@ -413,7 +419,7 @@ describe('PVM Integration Tests', () => {
       // Second skill use - should be rejected due to cooldown
       client.emit('attack_monster', {
         monsterId: 'monster-1',
-        skillName: 'dark_strike',
+        skillName: 'dark_ball',
         damage: 10
       });
       
