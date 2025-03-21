@@ -76,46 +76,6 @@ export class SkillsManager {
             return false;
         }
         
-        // Get target information
-        const targetId = this.game.targetingManager.getTargetId();
-        const targetType = this.game.targetingManager.getTargetType();
-        
-        if (!targetId) {
-            console.log('No target selected for skill use');
-            return false;
-        }
-        
-        console.log(`Using skill ${skillId} on target ${targetType}-${targetId}`);
-        
-        // Check range
-        if (!this.isTargetInRange(targetId, skillId)) {
-            console.log(`Target is out of range for ${skillId}`);
-            return false;
-        }
-        
-        // Check if target is in temple safe zone (only for player targets)
-        if (targetType === 'player') {
-            const targetPlayer = this.game.targetingManager.getTargetObject();
-            
-            // Skip temple check in test environment
-            if (!isTestEnvironment && this.game.environmentManager && targetPlayer) {
-                const targetPos = targetPlayer.position;
-                const playerPos = this.game.localPlayer.position;
-                
-                // Check if target is in temple safe zone
-                if (this.game.environmentManager.isInTempleSafeZone(targetPos)) {
-                    console.log('Cannot attack target in temple safe zone');
-                    return false;
-                }
-                
-                // Check if attack crosses temple boundary
-                if (this.game.environmentManager.isAttackBlockedByTemple(playerPos, targetPos)) {
-                    console.log('Attack blocked by temple safe zone');
-                    return false;
-                }
-            }
-        }
-        
         // Use ability based on type
         if (skillId === 'martial_arts') {
             // We don't await the result here since this method returns boolean
@@ -124,6 +84,22 @@ export class SkillsManager {
         } else if (skillId === 'dark_ball') {
             // We don't await the result here since this method returns boolean
             this.useDarkBall();
+            return true;
+        } else if (skillId === 'flow_of_life') {
+            // We don't await the result here since this method returns boolean
+            this.useFlowOfLife();
+            return true;
+        } else if (skillId === 'life_drain') {
+            // We don't await the result here since this method returns boolean
+            this.useLifeDrain();
+            return true;
+        } else if (skillId === 'one_with_universe') {
+            // We don't await the result here since this method returns boolean
+            this.useOneWithUniverse();
+            return true;
+        } else if (skillId === 'embrace_void') {
+            // We don't await the result here since this method returns boolean
+            this.useEmbraceVoid();
             return true;
         }
         
@@ -668,62 +644,116 @@ export class SkillsManager {
     }
     
     /**
-     * Create a floating damage number
-     * @param {THREE.Object3D} target - The target object
-     * @param {number} damage - The damage amount to display
-     * @param {boolean} isCritical - Whether this is critical damage
+     * Create a floating damage number at the target position
+     * @param {Object} target - The target object
+     * @param {number|string} damage - The damage amount or text to display
+     * @param {boolean} isCritical - Whether this is a critical hit
+     * @param {boolean} isHealing - Whether this is healing (green) instead of damage (red)
+     * @param {string} customColor - Optional custom color for the text (overrides isHealing)
      */
-    createDamageNumber(target, damage, isCritical = false) {
+    createDamageNumber(target, damage, isCritical = false, isHealing = false, customColor = null) {
         if (!target || !target.position) return;
         
-        // Create a HTML element for the damage number
+        const position = target.position.clone();
+        position.y += 2; // Show damage number above the target
+        
+        // Create a div for the damage number
         const damageElement = document.createElement('div');
         damageElement.className = 'damage-number';
-        damageElement.textContent = isCritical ? `${damage}!` : damage;
         damageElement.style.position = 'absolute';
-        damageElement.style.color = isCritical ? '#ff0000' : '#ffffff';
+        damageElement.style.zIndex = '1000';
         damageElement.style.fontSize = isCritical ? '24px' : '20px';
         damageElement.style.fontWeight = 'bold';
-        damageElement.style.textShadow = '2px 2px 2px rgba(0, 0, 0, 0.7)';
+        damageElement.style.fontFamily = 'Arial, sans-serif';
+        damageElement.style.textShadow = '0 0 3px #000';
+        
+        // Determine the color based on parameters
+        if (customColor) {
+            damageElement.style.color = customColor;
+        } else if (isHealing) {
+            damageElement.style.color = '#00ff00'; // Green for healing
+        } else {
+            damageElement.style.color = '#ff0000'; // Red for damage
+        }
+        
+        // Set the text content, handling both number and string values
+        damageElement.textContent = typeof damage === 'string' ? damage : Math.round(damage);
+        damageElement.style.opacity = '1';
+        damageElement.style.userSelect = 'none';
         damageElement.style.pointerEvents = 'none';
-        damageElement.style.zIndex = '1000';
+        
+        // Add to document
         document.body.appendChild(damageElement);
         
-        // Get screen position of target
-        const screenPosition = new THREE.Vector3();
-        screenPosition.copy(target.position);
-        screenPosition.y += 2; // Position above the target's head
-        
-        // Project 3D position to 2D screen space
-        screenPosition.project(this.game.cameraManager.camera);
-        
-        // Convert to CSS coordinates
-        const x = (screenPosition.x * 0.5 + 0.5) * window.innerWidth;
-        const y = (-screenPosition.y * 0.5 + 0.5) * window.innerHeight;
-        
-        // Initial position
-        damageElement.style.left = `${x}px`;
-        damageElement.style.top = `${y}px`;
-        
-        // Animate the damage number
-        let animationFrame = 0;
-        const animateNumber = () => {
-            animationFrame++;
+        // Position the damage number in 3D space
+        const updatePosition = () => {
+            if (!target || !target.position) return;
             
-            // Move upward and fade out
-            const newY = y - animationFrame * 1;
-            const opacity = 1 - (animationFrame / 60);
+            // Calculate screen position
+            const worldPos = target.position.clone();
+            worldPos.y += 1.5; // Above the target's head
             
-            damageElement.style.top = `${newY}px`;
-            damageElement.style.opacity = opacity.toString();
+            let screenPos;
             
-            // Continue animation until fully faded
-            if (opacity > 0) {
-                requestAnimationFrame(animateNumber);
+            // Check if worldToScreen method exists on the game object
+            if (typeof this.game.worldToScreen === 'function') {
+                screenPos = this.game.worldToScreen(worldPos);
             } else {
+                // Fallback to manual calculation using the camera
+                const camera = this.game.camera || (this.game.cameraManager ? this.game.cameraManager.getCamera() : null);
+                if (!camera) return;
+                
+                // Create a vector copy to avoid modifying the original
+                const vector = worldPos.clone();
+                
+                // Project the 3D position to screen space
+                vector.project(camera);
+                
+                // Convert to screen coordinates
+                screenPos = {
+                    x: (vector.x + 1) * window.innerWidth / 2,
+                    y: (-vector.y + 1) * window.innerHeight / 2
+                };
+            }
+            
+            // Update position
+            damageTextContainer.style.left = `${screenPos.x}px`;
+            damageTextContainer.style.top = `${screenPos.y}px`;
+        };
+        
+        // Initial positioning
+        if (!updatePosition()) {
+            // If positioning fails, clean up and exit
+            document.body.removeChild(damageElement);
+            return;
+        }
+        
+        // Animation parameters
+        let startTime = null;
+        const duration = 1000;
+        
+        // Animate the damage number (float up and fade out)
+        const animateNumber = (timestamp) => {
+            if (!startTime) startTime = timestamp;
+            const elapsed = timestamp - startTime;
+            const progress = elapsed / duration;
+            
+            // Check if animation is complete
+            if (progress >= 1) {
                 // Remove the element when animation is complete
                 document.body.removeChild(damageElement);
+                return;
             }
+            
+            // Update position and opacity
+            position.y += 0.02; // Float upward
+            updatePosition();
+            
+            // Fade out
+            damageElement.style.opacity = (1 - progress).toString();
+            
+            // Continue animation
+            requestAnimationFrame(animateNumber);
         };
         
         // Start animation
@@ -744,28 +774,30 @@ export class SkillsManager {
         return activeSkills;
     }
     
+    /**
+     * Get the skill assigned to a specific slot
+     * @param {number} slot - The slot number (1-5)
+     * @returns {string|null} - The skill ID or null if no skill is in that slot
+     */
     getSkillBySlot(slot) {
         for (const skillId in this.skills) {
             if (this.skills[skillId].slot === slot && this.game.activeSkills.has(skillId)) {
-                return this.skills[skillId];
+                return skillId;
             }
         }
         return null;
     }
     
+    /**
+     * Use the skill assigned to a specific slot
+     * @param {number} slot - The slot number (1-5)
+     * @returns {boolean} - Whether the skill was successfully used
+     */
     useSkillBySlot(slot) {
-        const skill = this.getSkillBySlot(slot);
-        if (!skill) return false;
+        const skillId = this.getSkillBySlot(slot);
+        if (!skillId) return false;
         
-        if (skill.id === 'martial_arts') {
-            this.useMartialArts();
-            return true;
-        } else if (skill.id === 'dark_ball') {
-            this.useDarkBall();
-            return true;
-        }
-        
-        return false;
+        return this.useSkill(skillId);
     }
     
     addSkill(skillId) {
@@ -1055,10 +1087,10 @@ export class SkillsManager {
     }
     
     /**
-     * Create a visual effect for a skill between source and target
-     * @param {string} skillId - The ID of the skill to create effects for
-     * @param {THREE.Vector3} sourcePosition - Position of the source player
-     * @param {THREE.Vector3} targetPosition - Position of the target player
+     * Create a skill effect
+     * @param {string} skillId - The ID of the skill to create an effect for
+     * @param {THREE.Vector3} sourcePosition - The position of the source
+     * @param {THREE.Vector3} targetPosition - The position of the target
      * @returns {Object} The created effect
      */
     createSkillEffect(skillId, sourcePosition, targetPosition) {
@@ -1462,10 +1494,11 @@ export class SkillsManager {
             martial_arts: {
                 id: 'martial_arts',
                 name: 'Martial Arts',
-                description: 'A powerful hand-to-hand combat technique.',
+                description: 'A powerful hand-to-hand combat technique that requires no mana.',
                 cooldown: 1000, // 1 second cooldown
                 range: 3,
                 damage: 25,
+                mana: 0, // No mana cost
                 lastUsed: 0, // Timestamp of last use
                 path: 'light', // Requires light path
                 slot: 1, // Skill slot in the UI
@@ -1474,24 +1507,25 @@ export class SkillsManager {
             dark_ball: {
                 id: 'dark_ball',
                 name: 'Dark Ball',
-                description: 'Launches a ball of dark energy at your target from a distance. Deals less damage than melee skills but has greater range.',
-                cooldown: 1500, // Changed from 2000ms to 1500ms to match server cooldown
-                range: 7, // Extended range (martial arts is 3)
-                damage: 20, // Reduced from 35 to be less than martial arts (25)
-                mana: 15,
+                description: 'Launches a ball of dark energy at your target from a distance, consuming mana.',
+                cooldown: 1500, 
+                range: 8, // Increased range to 8
+                damage: 20,
+                mana: 20, // Updated mana cost to 20
                 lastUsed: 0, // Timestamp of last use
                 path: 'dark', // Requires dark path
                 slot: 1, // Skill slot in the UI
-                icon: '🔮' // Changed from ⚔️ to 🔮 for a ball-like appearance
+                icon: '🔮'
             },
             flow_of_life: {
                 id: 'flow_of_life',
                 name: 'Flow of Life',
-                description: 'Level 2 Light path skill placeholder',
+                description: 'Channel life energy to heal yourself, consuming mana.',
                 cooldown: 3000,
-                range: 5,
-                damage: 30,
-                mana: 20,
+                range: 0, // Self-cast only
+                healing: 20, // Amount of health recovered
+                damage: 0, // No damage as it's a healing spell
+                mana: 30, // Mana cost of 30
                 lastUsed: 0,
                 path: 'light',
                 minLevel: 2,
@@ -1501,39 +1535,42 @@ export class SkillsManager {
             one_with_universe: {
                 id: 'one_with_universe',
                 name: 'One with the Universe',
-                description: 'Level 5 Light path skill placeholder',
-                cooldown: 5000,
-                range: 8,
-                damage: 45,
-                mana: 35,
+                description: 'Become immune to all damage for 5 seconds, consuming all your mana.',
+                cooldown: 60000, // 60 second cooldown
+                range: 0, // Self-cast only
+                damage: 0,
+                consumeAllMana: true, // Special flag to consume all mana
+                duration: 5000, // 5 seconds of immunity
                 lastUsed: 0,
                 path: 'light',
                 minLevel: 5,
                 slot: 3,
                 icon: '✨'
             },
-            shadow_strike: {
-                id: 'shadow_strike',
-                name: 'Shadow Strike',
-                description: 'Quick attack that deals bonus damage and slows enemies',
+            life_drain: {
+                id: 'life_drain',
+                name: 'Life Drain',
+                description: 'Drain life from your target to heal yourself, consuming mana.',
                 cooldown: 3000,
-                range: 5,
-                damage: 30,
-                mana: 20,
+                range: 3, // Close range
+                damage: 15, // Less damage than dark ball
+                healing: 15, // Amount of health recovered
+                mana: 30, // Mana cost of 30
                 lastUsed: 0,
                 path: 'dark',
                 minLevel: 2,
                 slot: 2,
                 icon: '💀'
             },
-            curse_of_decay: {
-                id: 'curse_of_decay',
-                name: 'Curse of Decay',
-                description: 'Level 5 Dark path skill placeholder',
-                cooldown: 5000,
-                range: 8,
-                damage: 45,
+            embrace_void: {
+                id: 'embrace_void',
+                name: 'Embrace the Void',
+                description: 'Become invisible to players and monsters for 10 seconds or until you attack.',
+                cooldown: 60000, // 60 second cooldown
+                range: 0, // Self-cast
+                damage: 0,
                 mana: 35,
+                duration: 10000, // 10 seconds of invisibility
                 lastUsed: 0,
                 path: 'dark',
                 minLevel: 5,
@@ -1734,5 +1771,1431 @@ export class SkillsManager {
         }
         
         return { success: true, message: `You have learned ${this.skills[skillId].name}` };
+    }
+
+    /**
+     * Use the Flow of Life skill to heal the player
+     */
+    async useFlowOfLife() {
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return false;
+        }
+
+        // Check if skill is on cooldown
+        const now = Date.now();
+        const skill = this.skills.flow_of_life;
+        const cooldownTime = skill.cooldown;
+        
+        if (now - skill.lastUsed < cooldownTime) {
+            console.log('Flow of Life is on cooldown');
+            this.showCooldownError('flow_of_life');
+            return false;
+        }
+
+        // Check if player has the light path - but skip in test environment
+        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+        if (!isTestEnvironment) {
+            const playerPath = this.game.playerStats?.path || null;
+            if (playerPath !== 'light') {
+                console.log(`Cannot use flow_of_life - requires light path (current: ${playerPath || 'none'})`);
+                return false;
+            }
+        }
+
+        // Apply a temporary cooldown to prevent spam clicking while waiting for server response
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
+
+        // Let the server handle mana consumption and validation
+        const result = await this.game.networkManager.useSkill(
+            this.game.networkManager.socket.id, // Target self
+            'flow_of_life',
+            -skill.healing // Negative value for healing
+        );
+        
+        if (!result.success) {
+            console.log('Server rejected Flow of Life skill use');
+            
+            // Special error handling based on error type
+            if (result.errorType && result.errorType.includes('mana')) {
+                console.log('Not enough mana to use Flow of Life');
+                this.showErrorMessage('Not enough mana to use Flow of Life');
+                
+                // Reset the cooldown for mana errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            } else if (result.errorType === 'timeout') {
+                console.log('Server timeout for Flow of Life skill use');
+                this.handleServerTimeoutError();
+                
+                // Reset the cooldown for timeout errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            }
+            
+            // If the server rejected the skill, restore the previous cooldown
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                skill.lastUsed = tempLastUsed;
+            }
+            
+            return false;
+        }
+        
+        console.log('Server confirmed Flow of Life skill use');
+        
+        // Create healing visual effect around the player
+        this.createFlowOfLifeEffect();
+        
+        return true;
+    }
+    
+    /**
+     * Create a healing effect around the player
+     */
+    createFlowOfLifeEffect() {
+        if (!this.game.localPlayer || !this.game.scene) return;
+        
+        const particleCount = 15;
+        const particles = [];
+        
+        // Create particle geometries and materials
+        const particleGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const particleMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.7
+        });
+        
+        // Get player position
+        const playerPos = this.game.localPlayer.position.clone();
+        
+        // Create particles in a spiral around the player
+        for (let i = 0; i < particleCount; i++) {
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial.clone());
+            
+            // Position particles in a spiral pattern around the player
+            const angle = (i / particleCount) * Math.PI * 2;
+            const radius = 0.5 + (i / particleCount) * 0.5;
+            const height = 0.2 + (i / particleCount) * 1.5;
+            
+            particle.position.set(
+                playerPos.x + Math.cos(angle) * radius,
+                playerPos.y + height,
+                playerPos.z + Math.sin(angle) * radius
+            );
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+            
+            // Store original position for animation
+            particle.userData = {
+                originalY: particle.position.y,
+                speed: 0.01 + Math.random() * 0.02
+            };
+        }
+        
+        // Define animation
+        let time = 0;
+        const animate = () => {
+            time += 0.05;
+            let allParticlesRemoved = true;
+            
+            for (let i = 0; i < particles.length; i++) {
+                const particle = particles[i];
+                if (!particle) continue;
+                
+                allParticlesRemoved = false;
+                
+                // Spiral upwards
+                const angle = (i / particleCount) * Math.PI * 2 + time;
+                const radius = 0.5 + (i / particleCount) * 0.5;
+                
+                particle.position.x = playerPos.x + Math.cos(angle) * radius;
+                particle.position.z = playerPos.z + Math.sin(angle) * radius;
+                
+                // Rise up
+                particle.position.y += particle.userData.speed;
+                
+                // Fade out based on height
+                const heightDiff = particle.position.y - particle.userData.originalY;
+                particle.material.opacity = Math.max(0, 0.7 - heightDiff * 0.3);
+                
+                // Remove when fully transparent
+                if (particle.material.opacity <= 0) {
+                    this.game.scene.remove(particle);
+                    particle.material.dispose();
+                    particles[i] = null;
+                }
+            }
+            
+            if (!allParticlesRemoved) {
+                requestAnimationFrame(animate);
+            } else {
+                // Cleanup geometry when all particles are gone
+                particleGeometry.dispose();
+            }
+        };
+        
+        // Start animation
+        animate();
+    }
+
+    /**
+     * Use the Life Drain skill to damage a target and heal the player
+     */
+    async useLifeDrain() {
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return false;
+        }
+
+        // Check if skill is on cooldown
+        const now = Date.now();
+        const skill = this.skills.life_drain;
+        const cooldownTime = skill.cooldown;
+        
+        if (now - skill.lastUsed < cooldownTime) {
+            console.log('Life Drain is on cooldown');
+            this.showCooldownError('life_drain');
+            return false;
+        }
+
+        // Check if player has the dark path - but skip in test environment
+        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+        if (!isTestEnvironment) {
+            const playerPath = this.game.playerStats?.path || null;
+            if (playerPath !== 'dark') {
+                console.log(`Cannot use life_drain - requires dark path (current: ${playerPath || 'none'})`);
+                return false;
+            }
+        }
+
+        // Check if there is a target
+        const targetId = this.game.targetingManager.getTargetId();
+        const targetType = this.game.targetingManager.getTargetType();
+        
+        if (!targetId) {
+            console.log('No target selected for Life Drain');
+            this.showErrorMessage('You need a target for Life Drain');
+            return false;
+        }
+
+        // Check if the target is in range
+        if (!this.isTargetInRange(targetId, 'life_drain')) {
+            console.log('Target is out of range for Life Drain');
+            
+            // Get the target object for visual feedback
+            if (targetType === 'player') {
+                const targetObject = this.game.playerManager.getPlayerById(targetId);
+                if (targetObject) this.showRangeIndicator(targetObject);
+            } else if (targetType === 'monster') {
+                const monster = this.game.monsterManager.getMonsterById(targetId);
+                if (monster) this.showRangeIndicator(monster);
+            }
+            
+            return false;
+        }
+
+        // Apply a temporary cooldown to prevent spam clicking while waiting for server response
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
+
+        // Let the server handle mana consumption and validation
+        const result = await this.game.networkManager.useSkill(
+            targetId,
+            'life_drain',
+            skill.damage, // Damage to target
+            { healing: skill.healing } // Additional data for healing amount
+        );
+        
+        if (!result.success) {
+            console.log('Server rejected Life Drain skill use');
+            
+            // Special error handling based on error type
+            if (result.errorType && result.errorType.includes('out of range')) {
+                console.log('Target is out of range for Life Drain');
+                
+                // Get the target object for visual feedback
+                if (targetType === 'player') {
+                    const targetObject = this.game.playerManager.getPlayerById(targetId);
+                    if (targetObject) this.showRangeIndicator(targetObject);
+                } else if (targetType === 'monster') {
+                    const monster = this.game.monsterManager.getMonsterById(targetId);
+                    if (monster) this.showRangeIndicator(monster);
+                }
+                
+                // Reset the cooldown for range errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            } else if (result.errorType === 'timeout') {
+                console.log('Server timeout for Life Drain skill use');
+                this.handleServerTimeoutError();
+                
+                // Reset the cooldown for timeout errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            } else if (result.errorType && result.errorType.includes('mana')) {
+                console.log('Not enough mana to use Life Drain');
+                this.showErrorMessage('Not enough mana to use Life Drain');
+                
+                // Reset the cooldown for mana errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            }
+            
+            // If the server rejected the skill, restore the previous cooldown
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                skill.lastUsed = tempLastUsed;
+            }
+            
+            return false;
+        }
+        
+        console.log('Server confirmed Life Drain skill use');
+        
+        // Create visual effect
+        this.createLifeDrainEffect(targetId);
+        
+        return true;
+    }
+    
+    /**
+     * Create a life drain visual effect between the player and target
+     * @param {string} targetId - The ID of the target
+     */
+    createLifeDrainEffect(targetId) {
+        if (!this.game.scene || !this.game.localPlayer) return;
+        
+        // Get target position
+        let targetPosition = null;
+        let targetObject = null;
+        
+        // Get target based on type
+        if (targetId.startsWith('monster-')) {
+            // Monster target
+            const monster = this.game.monsterManager.getMonsterById(targetId);
+            if (monster && monster.mesh) {
+                targetObject = monster;
+                targetPosition = monster.mesh.position.clone();
+            }
+        } else {
+            // Player target
+            const targetPlayer = this.game.playerManager.getPlayerById(targetId);
+            if (targetPlayer) {
+                targetObject = targetPlayer;
+                targetPosition = targetPlayer.position.clone();
+            }
+        }
+        
+        if (!targetPosition) {
+            console.warn('Cannot create Life Drain effect: Target position not found');
+            return;
+        }
+        
+        // Get player position
+        const playerPosition = this.game.localPlayer.position.clone();
+        
+        // Adjust positions to be at upper body level
+        playerPosition.y += 1;
+        targetPosition.y += 1;
+        
+        // Create particle geometries and materials
+        const particleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+        const particleMaterial = new THREE.MeshBasicMaterial({
+            color: 0xaa0000,
+            transparent: true,
+            opacity: 0.8
+        });
+        
+        // Number of particles
+        const numParticles = 20;
+        const particles = [];
+        
+        // Create directional vector from target to player (life flowing to player)
+        const direction = new THREE.Vector3().subVectors(playerPosition, targetPosition).normalize();
+        
+        // Calculate distance
+        const distance = targetPosition.distanceTo(playerPosition);
+        
+        // Create particles
+        for (let i = 0; i < numParticles; i++) {
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial.clone());
+            
+            // Position particles along the path from target to player (initial positions)
+            const offset = (i / numParticles) * 0.9; // Don't start at exact target position
+            particle.position.lerpVectors(targetPosition, playerPosition, offset);
+            
+            // Add random offset for more organic feel
+            particle.position.x += (Math.random() - 0.5) * 0.2;
+            particle.position.y += (Math.random() - 0.5) * 0.2;
+            particle.position.z += (Math.random() - 0.5) * 0.2;
+            
+            // Store particle data for animation
+            particle.userData = {
+                speed: 0.05 + Math.random() * 0.05,
+                progressOnLine: offset,
+                initialOffset: new THREE.Vector3(
+                    particle.position.x - targetPosition.x - direction.x * offset * distance,
+                    particle.position.y - targetPosition.y - direction.y * offset * distance,
+                    particle.position.z - targetPosition.z - direction.z * offset * distance
+                )
+            };
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+        }
+        
+        // Define animation
+        const animate = () => {
+            let allParticlesRemoved = true;
+            
+            for (const particle of particles) {
+                if (!particle || !particle.parent) continue;
+                
+                allParticlesRemoved = false;
+                
+                // Update progress along line
+                particle.userData.progressOnLine += particle.userData.speed / distance;
+                
+                // When particle reaches player, reset to start at target for continuous effect
+                if (particle.userData.progressOnLine >= 1.0) {
+                    particle.userData.progressOnLine = 0;
+                }
+                
+                // Update position with progress and maintain initial offset
+                const newBasePos = new THREE.Vector3().lerpVectors(
+                    targetPosition, 
+                    playerPosition,
+                    particle.userData.progressOnLine
+                );
+                
+                particle.position.copy(newBasePos);
+                
+                // Add oscillation effect
+                const oscillation = Math.sin(particle.userData.progressOnLine * Math.PI * 4) * 0.05;
+                particle.position.y += oscillation;
+                
+                // Scale particle based on progress (smaller near start, larger near player)
+                const scaleMultiplier = 0.7 + particle.userData.progressOnLine * 0.6;
+                particle.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
+            }
+            
+            if (!allParticlesRemoved) {
+                requestAnimationFrame(animate);
+            } else {
+                // Cleanup geometry when all particles are gone
+                particleGeometry.dispose();
+            }
+        };
+        
+        // Start animation
+        animate();
+        
+        // Create final healing effect at player after a delay
+        setTimeout(() => {
+            this.createHealingEffect(playerPosition, 0x990000);
+        }, 800);
+        
+        // Create damage effect at target
+        this.createAttackEffect(targetPosition, '#aa0000');
+        
+        // After 2 seconds, remove all particles
+        setTimeout(() => {
+            for (const particle of particles) {
+                if (particle && particle.parent) {
+                    this.game.scene.remove(particle);
+                    particle.material.dispose();
+                }
+            }
+        }, 2000);
+    }
+    
+    /**
+     * Create a healing effect at the specified position
+     * @param {THREE.Vector3} position - Position to create the effect
+     * @param {number} color - Color of the healing effect
+     */
+    createHealingEffect(position, color = 0x00ff00) {
+        if (!this.game.scene) return;
+        
+        const particleCount = 8;
+        const particles = [];
+        
+        // Create particle geometry and materials
+        const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+        
+        // Create particles in a circle
+        for (let i = 0; i < particleCount; i++) {
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.7
+            });
+            
+            const particle = new THREE.Mesh(geometry, material);
+            
+            // Position in a circle
+            const angle = (i / particleCount) * Math.PI * 2;
+            const radius = 0.3;
+            
+            particle.position.set(
+                position.x + Math.cos(angle) * radius,
+                position.y,
+                position.z + Math.sin(angle) * radius
+            );
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+        }
+        
+        // Define animation
+        let time = 0;
+        const animate = () => {
+            time += 0.1;
+            
+            for (let i = 0; i < particles.length; i++) {
+                const particle = particles[i];
+                
+                // Expand circle
+                const angle = (i / particleCount) * Math.PI * 2;
+                const radius = 0.3 + time * 0.2;
+                
+                particle.position.x = position.x + Math.cos(angle) * radius;
+                particle.position.z = position.z + Math.sin(angle) * radius;
+                
+                // Rise
+                particle.position.y = position.y + time * 0.1;
+                
+                // Fade out
+                particle.material.opacity = Math.max(0, 0.7 - time / 3);
+                
+                // Scale down
+                const scale = Math.max(0.1, 1 - time / 4);
+                particle.scale.set(scale, scale, scale);
+            }
+            
+            if (time < 3) {
+                requestAnimationFrame(animate);
+            } else {
+                // Remove particles when animation is complete
+                for (const particle of particles) {
+                    this.game.scene.remove(particle);
+                    particle.material.dispose();
+                }
+                
+                // Dispose geometry
+                geometry.dispose();
+            }
+        };
+        
+        // Start animation
+        animate();
+    }
+
+    /**
+     * Use the One with Universe skill to become temporarily immune to damage
+     */
+    async useOneWithUniverse() {
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return false;
+        }
+
+        // Check if player has full mana (required for this skill)
+        if (!this.game.playerStats || this.game.playerStats.currentMana < this.game.playerStats.maxMana) {
+            console.log('One with Universe requires maximum mana to use');
+            this.showErrorMessage('One with Universe requires maximum mana to use');
+            return false;
+        }
+
+        // Check if skill is on cooldown
+        const now = Date.now();
+        const skill = this.skills.one_with_universe;
+        const cooldownTime = skill.cooldown;
+        
+        if (now - skill.lastUsed < cooldownTime) {
+            console.log('One with Universe is on cooldown');
+            this.showCooldownError('one_with_universe');
+            return false;
+        }
+
+        // Check if player has the light path - but skip in test environment
+        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+        if (!isTestEnvironment) {
+            const playerPath = this.game.playerStats?.path || null;
+            if (playerPath !== 'light') {
+                console.log(`Cannot use one_with_universe - requires light path (current: ${playerPath || 'none'})`);
+                return false;
+            }
+        }
+        
+        // Apply a temporary cooldown to prevent spam clicking while waiting for server response
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
+
+        // Let the server handle mana consumption and validation
+        const result = await this.game.networkManager.useSkill(
+            this.game.networkManager.socket.id, // Target self
+            'one_with_universe',
+            0, // No damage
+            { consumeAllMana: true, duration: skill.duration } // Additional data
+        );
+        
+        if (!result.success) {
+            console.log('Server rejected One with Universe skill use');
+            
+            if (result.errorType && result.errorType.includes('mana')) {
+                console.log('Not enough mana to use One with Universe');
+                this.showErrorMessage('You need more mana to use One with Universe');
+                
+                // Reset the cooldown for mana errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            } else if (result.errorType === 'timeout') {
+                console.log('Server timeout for One with Universe skill use');
+                this.handleServerTimeoutError();
+                
+                // Reset the cooldown for timeout errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            }
+            
+            // If the server rejected the skill, restore the previous cooldown
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                skill.lastUsed = tempLastUsed;
+            }
+            
+            return false;
+        }
+        
+        console.log('Server confirmed One with Universe skill use');
+        
+        // Create immunity visual effect around the player
+        this.createOneWithUniverseEffect(skill.duration);
+        
+        return true;
+    }
+    
+    /**
+     * Create a visual effect for the One with Universe immunity skill
+     * @param {number} duration - Duration of the effect in milliseconds
+     */
+    createOneWithUniverseEffect(duration) {
+        if (!this.game.localPlayer || !this.game.scene) return;
+        
+        const playerPos = this.game.localPlayer.position.clone();
+        
+        // Create a shield-like dome around the player
+        const shieldGeometry = new THREE.SphereGeometry(1.2, 16, 16);
+        const shieldMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        
+        const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+        shield.position.copy(playerPos);
+        shield.position.y += 1; // Center at player's torso
+        
+        this.game.scene.add(shield);
+        
+        // Create star particles within the shield
+        const particleCount = 20;
+        const particles = [];
+        
+        // Create star particles
+        const starGeometry = new THREE.SphereGeometry(0.07, 8, 8);
+        const starMaterials = [
+            new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true }),
+            new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true }),
+            new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true })
+        ];
+        
+        for (let i = 0; i < particleCount; i++) {
+            const starMaterial = starMaterials[Math.floor(Math.random() * starMaterials.length)].clone();
+            const star = new THREE.Mesh(starGeometry, starMaterial);
+            
+            // Distribute particles within the shield
+            const radius = 0.8;
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI;
+            
+            star.position.set(
+                playerPos.x + radius * Math.sin(phi) * Math.cos(theta),
+                playerPos.y + radius * Math.cos(phi) + 1, // Center at player's torso
+                playerPos.z + radius * Math.sin(phi) * Math.sin(theta)
+            );
+            
+            // Store movement information for animation
+            star.userData = {
+                orbit: { 
+                    center: playerPos.clone(),
+                    radius: radius,
+                    speed: 0.005 + Math.random() * 0.01,
+                    angle: Math.random() * Math.PI * 2
+                },
+                startTime: Date.now()
+            };
+            
+            this.game.scene.add(star);
+            particles.push(star);
+        }
+        
+        // Track when the effect is active
+        const effectData = {
+            active: true,
+            startTime: Date.now(),
+            duration: duration,
+            shield: shield,
+            particles: particles
+        };
+        
+        // Show notification
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('You are immune to damage', '#ffffff');
+        }
+        
+        // Animate immunity effect
+        const animate = () => {
+            if (!effectData.active) return;
+            
+            const elapsedTime = Date.now() - effectData.startTime;
+            const progress = elapsedTime / effectData.duration;
+            
+            // If effect duration is complete, end animation
+            if (progress >= 1.0) {
+                // End effect
+                effectData.active = false;
+                
+                // Remove shield
+                if (shield.parent) {
+                    this.game.scene.remove(shield);
+                }
+                
+                // Remove all particles
+                for (const particle of particles) {
+                    if (particle.parent) {
+                        this.game.scene.remove(particle);
+                        particle.material.dispose();
+                    }
+                }
+                
+                // Dispose geometries
+                shieldGeometry.dispose();
+                starGeometry.dispose();
+                
+                // Show end notification
+                if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+                    this.game.uiManager.showNotification('Immunity effect has ended', '#ffffff');
+                }
+                
+                return;
+            }
+            
+            // Update player position tracking (for moving player)
+            if (this.game.localPlayer) {
+                const newPlayerPos = this.game.localPlayer.position.clone();
+                
+                // Update shield position
+                shield.position.copy(newPlayerPos);
+                shield.position.y += 1; // Center at player's torso
+                
+                // Update orbit centers for particles
+                for (const particle of particles) {
+                    if (particle.userData && particle.userData.orbit) {
+                        particle.userData.orbit.center.copy(newPlayerPos);
+                    }
+                }
+            }
+            
+            // Update shield appearance
+            const pulseScale = 1 + 0.1 * Math.sin(progress * Math.PI * 10);
+            shield.scale.set(pulseScale, pulseScale, pulseScale);
+            
+            // Pulse opacity
+            const opacity = 0.3 + 0.15 * Math.sin(progress * Math.PI * 8);
+            shield.material.opacity = opacity;
+            
+            // Create flash effect in last second
+            if (progress > 0.8) {
+                const fadeProgress = (progress - 0.8) / 0.2; // 0 to 1 in last 20% of time
+                const flashValue = Math.sin(fadeProgress * Math.PI * 10) * 0.5 + 0.5;
+                shield.material.opacity = Math.max(0.1, opacity * (1 - flashValue));
+                
+                // Change color to indicate ending soon
+                shield.material.color.setRGB(
+                    1.0, // Red
+                    1.0 - fadeProgress * 0.7, // Green decreasing
+                    1.0 - fadeProgress * 0.7  // Blue decreasing
+                );
+            }
+            
+            // Move particles in orbits
+            for (const particle of particles) {
+                if (particle.userData && particle.userData.orbit) {
+                    const orbit = particle.userData.orbit;
+                    
+                    // Update orbit angle
+                    orbit.angle += orbit.speed;
+                    
+                    // Calculate new position based on orbit
+                    const radius = orbit.radius;
+                    const angle = orbit.angle;
+                    const height = 0.5 * Math.sin(angle * 3) + 1; // Oscillate up and down
+                    
+                    particle.position.set(
+                        orbit.center.x + radius * Math.cos(angle),
+                        orbit.center.y + height,
+                        orbit.center.z + radius * Math.sin(angle)
+                    );
+                    
+                    // Pulse particle size
+                    const particlePulse = 0.8 + 0.3 * Math.sin(angle * 5);
+                    particle.scale.set(particlePulse, particlePulse, particlePulse);
+                    
+                    // Flash particles in last second
+                    if (progress > 0.8) {
+                        const fadeProgress = (progress - 0.8) / 0.2;
+                        const flashAlpha = Math.sin(fadeProgress * Math.PI * 15) * 0.5 + 0.5;
+                        particle.material.opacity = 1 - flashAlpha * fadeProgress;
+                    }
+                }
+            }
+            
+            // Continue animation
+            requestAnimationFrame(animate);
+        };
+        
+        // Start animation
+        animate();
+    }
+
+    /**
+     * Use the Embrace the Void skill to become temporarily invisible
+     */
+    async useEmbraceVoid() {
+        if (!this.game.isAlive) {
+            console.log('Cannot use skills while dead');
+            return false;
+        }
+
+        // Check if skill is on cooldown
+        const now = Date.now();
+        const skill = this.skills.embrace_void;
+        const cooldownTime = skill.cooldown;
+        
+        if (now - skill.lastUsed < cooldownTime) {
+            console.log('Embrace the Void is on cooldown');
+            this.showCooldownError('embrace_void');
+            return false;
+        }
+
+        // Check if player has the dark path - but skip in test environment
+        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+        if (!isTestEnvironment) {
+            const playerPath = this.game.playerStats?.path || null;
+            if (playerPath !== 'dark') {
+                console.log(`Cannot use embrace_void - requires dark path (current: ${playerPath || 'none'})`);
+                return false;
+            }
+        }
+        
+        // Apply a temporary cooldown to prevent spam clicking while waiting for server response
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
+
+        // Let the server handle mana consumption and validation
+        const result = await this.game.networkManager.useSkill(
+            this.game.networkManager.socket.id, // Target self
+            'embrace_void',
+            0, // No damage
+            { duration: skill.duration } // Additional data
+        );
+        
+        if (!result.success) {
+            console.log('Server rejected Embrace the Void skill use');
+            
+            if (result.errorType && result.errorType.includes('mana')) {
+                console.log('Not enough mana to use Embrace the Void');
+                this.showErrorMessage('Not enough mana to use Embrace the Void');
+                
+                // Reset the cooldown for mana errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            } else if (result.errorType === 'timeout') {
+                console.log('Server timeout for Embrace the Void skill use');
+                this.handleServerTimeoutError();
+                
+                // Reset the cooldown for timeout errors
+                skill.lastUsed = tempLastUsed;
+                return false;
+            }
+            
+            // If the server rejected the skill, restore the previous cooldown
+            // Only for errors that aren't cooldown errors
+            if (!result.errorType || !result.errorType.includes('cooldown')) {
+                skill.lastUsed = tempLastUsed;
+            }
+            
+            return false;
+        }
+        
+        console.log('Server confirmed Embrace the Void skill use');
+        
+        // Create invisibility visual effect 
+        this.createEmbraceVoidEffect(skill.duration);
+        
+        return true;
+    }
+    
+    /**
+     * Create a visual effect for the Embrace the Void invisibility skill
+     * @param {number} duration - Duration of the effect in milliseconds
+     */
+    createEmbraceVoidEffect(duration) {
+        if (!this.game.localPlayer || !this.game.scene) return;
+        
+        console.log('Starting Embrace Void effect');
+        
+        // Get player's mesh and materials
+        const playerMesh = this.game.localPlayer;
+        
+        // Fixed: Reset any previous state - critical for preventing duplication issues
+        if (playerMesh.userData) {
+            // Make sure we start with a clean slate, no invisibility flags
+            console.log('Clearing previous invisibility state');
+            delete playerMesh.userData.isInvisible;
+        }
+        
+        // Store original material states
+        const originalMaterials = [];
+        const originalOpacities = [];
+        
+        // Store original materials and opacities
+        if (playerMesh.material) {
+            // Single material case
+            originalMaterials.push(playerMesh.material);
+            originalOpacities.push(playerMesh.material.opacity || 1);
+        } else if (playerMesh.children) {
+            // Find and store materials for child meshes
+            playerMesh.traverse(child => {
+                if (child.isMesh && child.material) {
+                    if (Array.isArray(child.material)) {
+                        // Multiple materials
+                        child.material.forEach(mat => {
+                            originalMaterials.push(mat);
+                            originalOpacities.push(mat.opacity || 1);
+                        });
+                    } else {
+                        // Single material
+                        originalMaterials.push(child.material);
+                        originalOpacities.push(child.material.opacity || 1);
+                    }
+                }
+            });
+        }
+        
+        // Create a dark smoke effect around the player
+        const smokeParticleCount = 30;
+        const smokeParticles = [];
+        
+        const smokeGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const smokeMaterial = new THREE.MeshBasicMaterial({
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.7
+        });
+        
+        const playerPos = this.game.localPlayer.position.clone();
+        
+        // Create smoke particles
+        for (let i = 0; i < smokeParticleCount; i++) {
+            const smoke = new THREE.Mesh(smokeGeometry, smokeMaterial.clone());
+            
+            // Position around player
+            const radius = 0.5 + Math.random() * 0.3;
+            const angle = Math.random() * Math.PI * 2;
+            const height = Math.random() * 1.5;
+            
+            smoke.position.set(
+                playerPos.x + Math.cos(angle) * radius,
+                playerPos.y + height,
+                playerPos.z + Math.sin(angle) * radius
+            );
+            
+            // Add to scene
+            this.game.scene.add(smoke);
+            smokeParticles.push(smoke);
+            
+            // Store animation data
+            smoke.userData = {
+                initialPos: smoke.position.clone(),
+                speed: 0.01 + Math.random() * 0.02,
+                direction: new THREE.Vector3(
+                    Math.random() * 2 - 1,
+                    Math.random() * 2 - 1,
+                    Math.random() * 2 - 1
+                ).normalize(),
+                moveFactor: Math.random() * 0.1
+            };
+        }
+        
+        // Make player transparent
+        const setPlayerTransparency = (opacity) => {
+            console.log(`Setting player transparency to ${opacity}`);
+            
+            if (playerMesh.material) {
+                // Single material case
+                playerMesh.material.transparent = true;
+                playerMesh.material.opacity = opacity;
+                playerMesh.material.needsUpdate = true;
+            } else if (playerMesh.children) {
+                // Find and update materials for child meshes
+                playerMesh.traverse(child => {
+                    if (child.isMesh && child.material) {
+                        if (Array.isArray(child.material)) {
+                            // Multiple materials
+                            child.material.forEach(mat => {
+                                mat.transparent = true;
+                                mat.opacity = opacity;
+                                mat.needsUpdate = true;
+                            });
+                        } else {
+                            // Single material
+                            child.material.transparent = true;
+                            child.material.opacity = opacity;
+                            child.material.needsUpdate = true;
+                        }
+                    }
+                });
+            }
+        };
+        
+        // Immediately set semi-transparent
+        setPlayerTransparency(0.3);
+            
+        // Show notification
+        if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+            this.game.uiManager.showNotification('You have embraced the void - you are invisible to others', '#000000');
+        }
+        
+        // Track effect state
+        const effectData = {
+            active: true,
+            startTime: Date.now(),
+            duration: duration,
+            smokeParticles: smokeParticles,
+            originalMaterials: originalMaterials,
+            originalOpacities: originalOpacities
+        };
+        
+        console.log(`Embrace Void effect active for ${duration/1000} seconds`);
+        
+        // Define smoke animation
+        const animateSmoke = () => {
+            if (!effectData.active) return;
+            
+            const elapsedTime = Date.now() - effectData.startTime;
+            const progress = elapsedTime / effectData.duration;
+            
+            // Get current player position
+            const currentPlayerPos = this.game.localPlayer.position.clone();
+            
+            // If effect duration is complete, end animation
+            if (progress >= 1.0) {
+                // End effect
+                effectData.active = false;
+                console.log('Embrace Void effect ending');
+                
+                // Restore original opacity
+                const restoreOriginalState = () => {
+                    console.log('Restoring original player opacity');
+                    
+                    // Restore original materials and opacities
+                    let materialIndex = 0;
+                    if (playerMesh.material) {
+                        // Single material case
+                        playerMesh.material.opacity = effectData.originalOpacities[0] || 1;
+                        playerMesh.material.needsUpdate = true;
+                        materialIndex++;
+                    } else if (playerMesh.children) {
+                        // Restore materials for child meshes
+                        playerMesh.traverse(child => {
+                            if (child.isMesh && child.material) {
+                                if (Array.isArray(child.material)) {
+                                    // Multiple materials
+                                    child.material.forEach(mat => {
+                                        if (materialIndex < effectData.originalOpacities.length) {
+                                            mat.opacity = effectData.originalOpacities[materialIndex] || 1;
+                                            mat.needsUpdate = true;
+                                            materialIndex++;
+                                        }
+                                    });
+                                } else {
+                                    // Single material
+                                    if (materialIndex < effectData.originalOpacities.length) {
+                                        child.material.opacity = effectData.originalOpacities[materialIndex] || 1;
+                                        child.material.needsUpdate = true;
+                                        materialIndex++;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                };
+                
+                // Immediate restore original state
+                restoreOriginalState();
+                
+                // Remove smoke particles
+                for (const particle of smokeParticles) {
+                    if (particle.parent) {
+                        this.game.scene.remove(particle);
+                        particle.material.dispose();
+                    }
+                }
+                
+                // Dispose geometry
+                smokeGeometry.dispose();
+                
+                // Show notification
+                if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
+                    this.game.uiManager.showNotification('You have returned from the void', '#333333');
+                }
+                
+                return;
+            }
+                
+            // Update smoke particles
+            for (const particle of smokeParticles) {
+                // Move particles with player movement
+                const playerDelta = new THREE.Vector3().subVectors(
+                    currentPlayerPos,
+                    playerPos
+                );
+                
+                // Update particle position relative to player movement
+                if (particle.userData && particle.userData.initialPos) {
+                    particle.userData.initialPos.add(playerDelta);
+                    
+                    // Add some random movement
+                    const moveFactor = particle.userData.moveFactor || 0.05;
+                    const dir = particle.userData.direction || new THREE.Vector3(0, 1, 0);
+                    
+                    // Calculate new position with some oscillation
+                    const time = Date.now() * 0.001;
+                    const oscillation = Math.sin(time * 2 + particle.position.x) * 0.03;
+                    
+                    particle.position.copy(particle.userData.initialPos);
+                    particle.position.addScaledVector(dir, oscillation);
+                    
+                    // Add vertical oscillation
+                    particle.position.y += Math.sin(time * 3 + particle.position.z) * 0.02;
+                    
+                    // Adjust opacity based on time and position
+                    const fadeOut = progress > 0.7 ? (progress - 0.7) / 0.3 : 0;
+                    const baseOpacity = 0.7 - fadeOut * 0.7;
+                    particle.material.opacity = baseOpacity * (1 + Math.sin(time * 4 + particle.position.x * 5) * 0.2);
+                }
+            }
+            
+            // Update player position for next frame
+            playerPos.copy(currentPlayerPos);
+            
+            // Continue animation
+            requestAnimationFrame(animateSmoke);
+        };
+        
+        // Start animation
+        animateSmoke();
+    }
+    
+    /**
+     * Create damage number
+     * @param {Object} target - The target to show damage number for
+     * @param {number|string} damage - Amount of damage (or text to display)
+     * @param {boolean} isCritical - Whether this is a critical hit
+     * @param {boolean} isHealing - Whether this is healing (green) or damage (red)
+     * @param {string} customColor - Optional custom color for the damage number
+     */
+    createDamageNumber(target, damage, isCritical = false, isHealing = false, customColor = null) {
+        if (!target || !this.game.scene) return;
+        
+        // Get target position (for either player or monster)
+        const targetPosition = target.position.clone();
+        
+        // Create a floating damage number above the target's position
+        const damageTextContainer = document.createElement('div');
+        damageTextContainer.className = 'damage-number';
+        
+        // Create text node with damage amount
+        const damageText = document.createElement('span');
+        damageText.textContent = typeof damage === 'string' ? damage : Math.round(damage).toString();
+        
+        // Apply appropriate styling based on damage type
+        let textColor;
+        if (customColor) {
+            textColor = customColor;
+        } else if (isHealing) {
+            textColor = '#00ff00'; // Green for healing
+        } else {
+            textColor = '#ff3333'; // Red for damage
+        }
+        
+        // Apply styles
+        damageText.style.color = textColor;
+        damageText.style.fontSize = isCritical ? '24px' : '18px';
+        damageText.style.fontWeight = isCritical ? 'bold' : 'normal';
+        damageText.style.textShadow = '2px 2px 2px rgba(0, 0, 0, 0.7)';
+        
+        // Add to container
+        damageTextContainer.appendChild(damageText);
+        document.body.appendChild(damageTextContainer);
+        
+        // Position the damage number in 3D space
+        const updatePosition = () => {
+            if (!target || !target.position) return;
+            
+            // Calculate screen position
+            const worldPos = target.position.clone();
+            worldPos.y += 1.5; // Above the target's head
+            
+            let screenPos;
+            
+            // Check if worldToScreen method exists on the game object
+            if (typeof this.game.worldToScreen === 'function') {
+                screenPos = this.game.worldToScreen(worldPos);
+            } else {
+                // Fallback to manual calculation using the camera
+                const camera = this.game.camera || (this.game.cameraManager ? this.game.cameraManager.getCamera() : null);
+                if (!camera) return;
+                
+                // Create a vector copy to avoid modifying the original
+                const vector = worldPos.clone();
+                
+                // Project the 3D position to screen space
+                vector.project(camera);
+                
+                // Convert to screen coordinates
+                screenPos = {
+                    x: (vector.x + 1) * window.innerWidth / 2,
+                    y: (-vector.y + 1) * window.innerHeight / 2
+                };
+            }
+            
+            // Update position
+            damageTextContainer.style.left = `${screenPos.x}px`;
+            damageTextContainer.style.top = `${screenPos.y}px`;
+        };
+        
+        // Initial positioning
+        updatePosition();
+        
+        // Animation for floating up and fading out
+        let opacity = 1.0;
+        let yOffset = 0;
+        
+        const animate = () => {
+            opacity -= 0.025;
+            yOffset += 1;
+            
+            damageTextContainer.style.opacity = opacity;
+            damageTextContainer.style.transform = `translateY(-${yOffset}px)`;
+            
+            if (opacity > 0) {
+                // Continue animation
+                requestAnimationFrame(animate);
+            } else {
+                // Remove element when animation is complete
+                document.body.removeChild(damageTextContainer);
+            }
+        };
+        
+        // Start animation
+        requestAnimationFrame(animate);
+    }
+    
+    /**
+     * Create an immunity effect for when damage is blocked
+     * @param {Object} target - The target that blocked damage
+     */
+    createImmunityEffect(target) {
+        if (!target || !target.position) return;
+        
+        // 1. Create a "IMMUNE" text using the damage number system with custom styling
+        this.createDamageNumber(
+            target,
+            "IMMUNE",
+            false,  // not critical
+            false,  // not healing
+            '#00ffff' // Cyan color for immunity
+        );
+        
+        // 2. Create a shield flash effect around the target
+        const targetPosition = target.position.clone();
+        
+        // Create a shield-like sphere around the target
+        const shieldGeometry = new THREE.SphereGeometry(1.0, 16, 16);
+        const shieldMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ffff, // Cyan
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        
+        const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+        
+        // Position shield at target
+        shield.position.copy(targetPosition);
+        shield.position.y += 1; // Center at player's torso
+        
+        // Add to scene
+        this.game.scene.add(shield);
+        
+        // Animate the shield - expand and fade out
+        let scale = 1.0;
+        let opacity = 0.3;
+        
+        const animateShield = () => {
+            scale += 0.05;
+            opacity -= 0.015;
+            
+            shield.scale.set(scale, scale, scale);
+            shieldMaterial.opacity = opacity;
+            
+            if (opacity > 0) {
+                requestAnimationFrame(animateShield);
+            } else {
+                // Clean up
+                this.game.scene.remove(shield);
+                shieldGeometry.dispose();
+                shieldMaterial.dispose();
+            }
+        };
+        
+        // Start animation
+        requestAnimationFrame(animateShield);
+        
+        // Play immunity sound if available
+        if (this.game.soundManager) {
+            this.game.soundManager.playSound('immune_block');
+        }
+    }
+    
+    /**
+     * Get the appropriate healing color based on skill
+     * @param {string} skillName - Name of the skill
+     * @returns {string} - Color hex code
+     */
+    getHealingColor(skillName) {
+        if (skillName === 'flow_of_life') {
+            return '#00ff80'; // Bright mint green for Life path abilities
+        }
+        return '#00ff00'; // Default green for other healing
+    }
+    
+    /**
+     * Create a smoke puff effect at the specified position
+     * @param {THREE.Vector3} position - Position for the smoke effect
+     * @param {number} color - Hexadecimal color for the smoke particles
+     * @param {number} size - Size multiplier for the effect (default: 1)
+     */
+    createSmokePuff(position, color = 0x000000, size = 1) {
+        if (!this.game.scene) return;
+        
+        // Number of particles based on size
+        const particleCount = Math.floor(15 * size);
+        const particles = [];
+        
+        // Create particle geometry and material
+        const particleGeometry = new THREE.SphereGeometry(0.1 * size, 8, 8);
+        const particleMaterial = new THREE.MeshBasicMaterial({
+            color: color,
+            transparent: true,
+            opacity: 0.7
+        });
+        
+        // Create and position particles
+        for (let i = 0; i < particleCount; i++) {
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial.clone());
+            
+            // Position around the target position
+            const radius = (0.3 + Math.random() * 0.3) * size;
+            const angle = Math.random() * Math.PI * 2;
+            const height = (Math.random() * 1.5) * size;
+            
+            particle.position.set(
+                position.x + Math.cos(angle) * radius,
+                position.y + height,
+                position.z + Math.sin(angle) * radius
+            );
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+            
+            // Store animation data
+            particle.userData = {
+                initialPos: particle.position.clone(),
+                speed: 0.01 + Math.random() * 0.02,
+                direction: new THREE.Vector3(
+                    Math.random() * 2 - 1,
+                    Math.random() * 1,  // Mostly upward
+                    Math.random() * 2 - 1
+                ).normalize(),
+                startTime: Date.now(),
+                lifetime: 800 + Math.random() * 400  // 0.8-1.2 seconds
+            };
+        }
+        
+        // Animate smoke puff
+        const animateSmoke = () => {
+            const currentTime = Date.now();
+            let allDone = true;
+            
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+                const elapsed = currentTime - particle.userData.startTime;
+                
+                if (elapsed < particle.userData.lifetime) {
+                    allDone = false;
+                    
+                    // Move particle
+                    particle.position.add(
+                        particle.userData.direction.clone()
+                        .multiplyScalar(particle.userData.speed)
+                    );
+                    
+                    // Fade out
+                    const progress = elapsed / particle.userData.lifetime;
+                    particle.material.opacity = 0.7 * (1 - progress);
+                    
+                    // Grow slightly
+                    const scale = 1 + progress * 0.5;
+                    particle.scale.set(scale, scale, scale);
+                } else {
+                    // Remove completed particle
+                    this.game.scene.remove(particle);
+                    particles.splice(i, 1);
+                }
+            }
+            
+            // Continue animation if particles remain
+            if (!allDone) {
+                requestAnimationFrame(animateSmoke);
+            }
+        };
+        
+        // Start animation
+        requestAnimationFrame(animateSmoke);
     }
 }

@@ -13,6 +13,9 @@ export class MonsterManager {
         this.monsterModels = {};
         this.initialized = false;
         this.healthCheckInterval = null;
+        this.lastDebugTime = undefined;
+        this.lastProcessLogTime = 0;
+        this.DEBUG_MONSTER_VERBOSE = false; // Set to false to reduce console spam
     }
     
     /**
@@ -126,22 +129,55 @@ export class MonsterManager {
      * @param {Array} monsterData - Array of monster data objects from server
      */
     processServerMonsters(monsterData) {
+        // Limit logging to once every 10 seconds to reduce console spam
+        const now = Date.now();
+        const shouldLog = this.DEBUG_MONSTER_VERBOSE || (now - this.lastProcessLogTime > 10000);
+        
+        if (shouldLog) {
+            console.log('Processing server monsters data:', monsterData ? monsterData.length : 0, 'monsters received');
+            this.lastProcessLogTime = now;
+        }
+        
         if (!monsterData || !Array.isArray(monsterData)) {
             console.error('Invalid monster data received from server:', monsterData);
             return;
         }
+        
+        // CRITICAL: If we received empty monster data but have monsters, this is likely a bug
+        // We should NOT clear all monsters unless explicitly told to do so
+        if (monsterData.length === 0 && this.monsters.size > 0) {
+            console.error('Received empty monster data with existing monsters. This is likely a bug - preserving current monsters.');
+            return;
+        }
+        
+        // Create a map of monster IDs for faster lookup
+        const monsterDataMap = new Map();
+        monsterData.forEach(monster => {
+            if (monster && monster.id) {
+                monsterDataMap.set(monster.id, monster);
+            }
+        });
         
         // Flag to track if we're processing a batch of new monsters
         const startTime = Date.now();
         
         // Track existing monsters to find ones that should be removed
         const existingMonsterIds = new Set(this.monsters.keys());
+        if (shouldLog) {
+            console.log('Current client monsters before update:', existingMonsterIds.size);
+        }
         
         // Track IDs of monsters we know are dead to prevent resurrection
         const knownDeadMonsterIds = new Set();
         
         // Process each monster from the server data
         monsterData.forEach(monster => {
+            // Skip invalid monster data
+            if (!monster || !monster.id) {
+                console.warn('Received invalid monster data without ID:', monster);
+                return;
+            }
+            
             // CRITICAL FIX: Handle inconsistent dead/alive states in the data
             // Explicitly check for BOTH health and isAlive status
             const hasZeroHealth = monster.health !== undefined && monster.health <= 0;
@@ -152,7 +188,9 @@ export class MonsterManager {
             if (hasZeroHealth) {
                 // Override any inconsistent alive status
                 monster.isAlive = false;
-                console.log(`Fixing inconsistent monster state for ${monster.id}: Had 0 health but was marked alive, correcting to dead`);
+                if (this.DEBUG_MONSTER_VERBOSE) {
+                    console.log(`Fixing inconsistent monster state for ${monster.id}: Had 0 health but was marked alive, correcting to dead`);
+                }
             }
             
             // Define death status one single time to avoid inconsistency
@@ -174,7 +212,9 @@ export class MonsterManager {
                     // If we think it's dead but server says it's alive and has health, only respawn if
                     // we don't have this in our confirmed dead monsters set (prevents resurrection bug)
                     if (monster.isAlive === true && monster.health > 0 && !knownDeadMonsterIds.has(monster.id)) {
-                        console.log(`Monster ${monster.id} was locally dead but server says it's alive (health=${monster.health}) - respawning`);
+                        if (this.DEBUG_MONSTER_VERBOSE) {
+                            console.log(`Monster ${monster.id} was locally dead but server says it's alive (health=${monster.health}) - respawning`);
+                        }
                         this.removeMonster(monster.id);
                         const newMonster = this.createMonster(monster);
                         
@@ -185,7 +225,9 @@ export class MonsterManager {
                         }
                     } else if (isDead) {
                         // Both client and server agree monster is dead - just maintain death state
-                        console.log(`Monster ${monster.id} is confirmed dead by both client and server`);
+                        if (this.DEBUG_MONSTER_VERBOSE) {
+                            console.log(`Monster ${monster.id} is confirmed dead by both client and server`);
+                        }
                         
                         // Just ensure health is set to 0
                         existingMonster.health = 0;
@@ -209,7 +251,9 @@ export class MonsterManager {
                 else if (existingMonster.isAlive === true) {
                     if (isDead || knownDeadMonsterIds.has(monster.id)) {
                         // Server says it's dead, or we know it's dead, so kill it
-                        console.log(`Monster ${monster.id} was alive in client but server says it's dead - killing it`);
+                        if (this.DEBUG_MONSTER_VERBOSE) {
+                            console.log(`Monster ${monster.id} was alive in client but server says it's dead - killing it`);
+                        }
                         this.handleMonsterDeath(monster.id);
                     } else {
                         // Both agree it's alive - normal update
@@ -219,12 +263,16 @@ export class MonsterManager {
             } else {
                 // Skip creating monsters that we know are dead
                 if (knownDeadMonsterIds.has(monster.id)) {
-                    console.log(`Skipping creation of monster ${monster.id} because it's known to be dead`);
+                    if (this.DEBUG_MONSTER_VERBOSE) {
+                        console.log(`Skipping creation of monster ${monster.id} because it's known to be dead`);
+                    }
                     return;
                 }
                 
                 // Create new monster
-                console.log(`Creating new monster ${monster.id} from server data, isDead=${isDead}`);
+                if (this.DEBUG_MONSTER_VERBOSE) {
+                    console.log(`Creating new monster ${monster.id} from server data, isDead=${isDead}`);
+                }
                 const newMonster = this.createMonster(monster);
                 
                 // Mark creation time to prevent initial health bar flickering
@@ -235,21 +283,45 @@ export class MonsterManager {
                 
                 // If the new monster should be dead, handle it immediately
                 if (isDead) {
-                    console.log(`Newly created monster ${monster.id} should be dead - handling death`);
+                    if (this.DEBUG_MONSTER_VERBOSE) {
+                        console.log(`Newly created monster ${monster.id} should be dead - handling death`);
+                    }
                     this.handleMonsterDeath(monster.id);
                 }
             }
         });
         
-        // Remove monsters that no longer exist
-        existingMonsterIds.forEach(id => {
-            this.removeMonster(id);
-        });
+        // CRITICAL: Only remove monsters that we're sure should be removed
+        // Protect against empty updates that would erroneously remove all monsters
+        if (monsterData.length > 0) {
+            // Remove monsters that no longer exist
+            let removedCount = 0;
+            existingMonsterIds.forEach(id => {
+                if (this.DEBUG_MONSTER_VERBOSE) {
+                    console.log(`Removing monster ${id} - not in server data anymore`);
+                }
+                this.removeMonster(id);
+                removedCount++;
+            });
+            
+            if (removedCount > 0 && shouldLog) {
+                console.log(`Removed ${removedCount} monsters not present in server data. Remaining monsters: ${this.monsters.size}`);
+            }
+        } else {
+            if (shouldLog) {
+                console.warn('Did not remove any monsters because received data was empty.');
+            }
+        }
+        
+        if (shouldLog) {
+            console.log('Monster processing complete. Current monster count:', this.monsters.size);
+        }
     }
     
     /**
-     * Create a new monster instance based on server data
+     * Create a monster from server data
      * @param {Object} monsterData - Monster data from server
+     * @returns {Object|null} The created monster or null if failed
      */
     createMonster(monsterData) {
         try {
@@ -258,50 +330,61 @@ export class MonsterManager {
                 return null;
             }
             
-            // Generate a unique ID for each monster
             const id = monsterData.id;
-            
-            if (this.monsters.has(id)) {
-                console.warn(`Monster ${id} already exists. Updating instead of creating.`);
-                this.updateMonster(monsterData);
-                return this.monsters.get(id);
-            }
-            
-            // Set up monster model and configuration
             const monsterType = monsterData.type || 'BASIC';
-            let monsterModel = null;
             
-            // Choose model based on type, with fallback
-            if (this.monsterModels[monsterType]) {
-                monsterModel = this.monsterModels[monsterType];
-            } else if (this.monsterModels[monsterType.toLowerCase()]) {
-                monsterModel = this.monsterModels[monsterType.toLowerCase()];
-            } else {
-                console.warn(`Model for type "${monsterType}" not found, using FALLBACK`);
-                monsterModel = this.monsterModels['FALLBACK'];
+            // Log monster creation - only in verbose mode
+            if (this.DEBUG_MONSTER_VERBOSE) {
+                console.log(`Creating monster ${id} of type ${monsterType}`);
             }
             
-            // Clone the model to avoid reference issues
-            let monsterMesh;
-            
-            try {
-                monsterMesh = monsterModel.clone();
-                // For GLTF models, we need to clone differently
-                if (monsterMesh.isObject3D && !monsterMesh.isMesh) {
-                    monsterMesh = monsterModel.clone(true);
+            // Skip if monster is already known to be dead
+            if (monsterData.isAlive === false || (monsterData.health !== undefined && monsterData.health <= 0)) {
+                if (this.DEBUG_MONSTER_VERBOSE) {
+                    console.log(`Monster ${id} is already dead, not creating visual representation`);
                 }
-            } catch (error) {
-                console.error('Error cloning monster model:', error);
-                // Use fallback geometry
-                const fallbackGeometry = new THREE.BoxGeometry(1, 2, 1);
-                const fallbackMaterial = new THREE.MeshStandardMaterial({ color: 0xFF0000 });
-                monsterMesh = new THREE.Mesh(fallbackGeometry, fallbackMaterial);
+                // Still create a data entry so we can track it
+                const deadMonster = {
+                    id,
+                    type: monsterType,
+                    position: { ...monsterData.position },
+                    health: 0,
+                    maxHealth: monsterData.maxHealth || 100,
+                    isAlive: false
+                };
+                this.monsters.set(id, deadMonster);
+                return deadMonster;
             }
             
-            // Set up monster position
+            // Get model for this monster type, falling back to fallback model if needed
+            let modelTemplate = this.monsterModels[monsterType];
+            if (!modelTemplate) {
+                console.warn(`No model found for monster type ${monsterType}, using fallback`);
+                modelTemplate = this.monsterModels['FALLBACK'];
+            }
+            
+            if (!modelTemplate) {
+                console.error(`No fallback model available, cannot create monster ${id}`);
+                return null;
+            }
+            
+            // Clone the model so we can have multiple instances
+            let monsterMesh;
+            if (modelTemplate.isObject3D) {
+                // Handle GLTF models which are Object3D
+                monsterMesh = modelTemplate.clone(true);
+            } else {
+                // Handle simple geometry models
+                monsterMesh = new THREE.Mesh(
+                    modelTemplate.geometry.clone(),
+                    modelTemplate.material.clone()
+                );
+            }
+            
+            // Set position from server data with height adjustment
             monsterMesh.position.set(
                 monsterData.position.x, 
-                monsterData.position.y + 2.0, // Raise monster 2 units from ground
+                monsterData.position.y + 2.0, // Adding height to raise from ground
                 monsterData.position.z
             );
             
@@ -310,15 +393,30 @@ export class MonsterManager {
                 monsterMesh.rotation.y = monsterData.rotation.y || 0;
             }
             
-            // Adjust scale for cerberus model - using original larger scale
-            const modelScale = 3.0 * (monsterData.scale || 1); // Original scale factor
-            monsterMesh.scale.set(modelScale, modelScale, modelScale);
+            // Set scale for this monster type
+            const scale = monsterData.scale || 1.0;
+            if (monsterType === 'TYPHON') {
+                // Make Typhon larger - use original 3.0 base scale
+                monsterMesh.scale.set(scale * 4.5, scale * 4.5, scale * 4.5); // 3.0 * 1.5 = 4.5
+            } else {
+                // Regular Cerberus - use original 3.0 base scale 
+                monsterMesh.scale.set(scale * 3.0, scale * 3.0, scale * 3.0); // Restore original 3.0 scale
+            }
+            
+            // CRITICAL: Ensure monster is visible
+            monsterMesh.visible = true;
+            if (this.DEBUG_MONSTER_VERBOSE) {
+                console.log(`Setting monster ${id} visibility to true`);
+            }
             
             // Add shadow casting/receiving
             monsterMesh.traverse((child) => {
                 if (child.isMesh) {
                     child.castShadow = true;
                     child.receiveShadow = true;
+                    
+                    // CRITICAL: Ensure all child meshes are visible too
+                    child.visible = true;
                     
                     // Improve material quality for cerberus model
                     if (child.material) {
@@ -366,6 +464,11 @@ export class MonsterManager {
             
             // Add to monsters map
             this.monsters.set(id, monster);
+            
+            // Debug - only in verbose mode
+            if (this.DEBUG_MONSTER_VERBOSE) {
+                console.log(`Monster ${id} successfully created and added to scene. Visibility: ${monsterMesh.visible}`);
+            }
             
             // Update health bar with initial health
             this.updateHealthBar(monster);
@@ -957,6 +1060,15 @@ export class MonsterManager {
         // Skip if not fully initialized
         if (!this.initialized || !this.monsters) return;
         
+        // Debug: Log monster count during update - limit frequency to reduce spam
+        const now = Date.now();
+        const logInterval = 5000; // Log only every 5 seconds
+        
+        if (this.game.DEBUG_MONSTERS && (!this.lastDebugTime || now - this.lastDebugTime > logInterval)) {
+            console.log(`Monster update: ${this.monsters.size} monsters in scene`);
+            this.lastDebugTime = now;
+        }
+        
         // Update monsters
         this.monsters.forEach((monster) => {
             // Skip updates for dead monsters - strict check
@@ -967,6 +1079,19 @@ export class MonsterManager {
                     this.handleMonsterDeath(monster.id);
                 }
                 return;
+            }
+            
+            // CRITICAL: Ensure monster mesh is visible
+            if (monster.mesh && monster.mesh.visible === false) {
+                console.log(`Monster ${monster.id} visibility was false, resetting to true`);
+                monster.mesh.visible = true;
+                
+                // Also ensure all child meshes are visible
+                monster.mesh.traverse(child => {
+                    if (child.isMesh || child.isObject3D) {
+                        child.visible = true;
+                    }
+                });
             }
             
             // Update animations

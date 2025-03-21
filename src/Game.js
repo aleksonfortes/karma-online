@@ -20,6 +20,9 @@ export class Game {
         this.scene = new THREE.Scene();
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
         
+        // Enable debug flags
+        this.DEBUG_MONSTERS = false; // Disable monster debugging by default to reduce console spam
+        
         // Game state
         this.players = new Map();
         this.localPlayer = null;
@@ -337,72 +340,44 @@ export class Game {
                 case 'KeyR':
                     // R key for skill in slot 2
                     if (this.isAlive && this.skillsManager) {
-                        const target = this.targetingManager?.currentTarget;
-                        if (target && target.type === 'monster') {
-                            const monster = this.monsterManager?.getMonsterById(target.id);
-                            if (monster) {
-                                // Use the skill in the R slot on the monster
-                                const skill = this.skillsManager.getSkillBySlot(2); // Slot 2 is R
-                                if (skill) {
-                                    this.skillsManager.useSkillOnMonster(target.id, skill);
-                                }
-                            }
-                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                            this.uiManager.showNotification('No target selected', 'white');
+                        const skillId = this.skillsManager.getSkillBySlot(2); // Slot 2 is R
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to R', 'white');
                         }
                     }
                     break;
                 case 'KeyF':
                     // F key for skill in slot 3
                     if (this.isAlive && this.skillsManager) {
-                        const target = this.targetingManager?.currentTarget;
-                        if (target && target.type === 'monster') {
-                            const monster = this.monsterManager?.getMonsterById(target.id);
-                            if (monster) {
-                                // Use the skill in the F slot on the monster
-                                const skill = this.skillsManager.getSkillBySlot(3); // Slot 3 is F
-                                if (skill) {
-                                    this.skillsManager.useSkillOnMonster(target.id, skill);
-                                }
-                            }
-                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                            this.uiManager.showNotification('No target selected', 'white');
+                        const skillId = this.skillsManager.getSkillBySlot(3); // Slot 3 is F
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to F', 'white');
                         }
                     }
                     break;
                 case 'KeyV':
                     // V key for skill in slot 4
                     if (this.isAlive && this.skillsManager) {
-                        const target = this.targetingManager?.currentTarget;
-                        if (target && target.type === 'monster') {
-                            const monster = this.monsterManager?.getMonsterById(target.id);
-                            if (monster) {
-                                // Use the skill in the V slot on the monster
-                                const skill = this.skillsManager.getSkillBySlot(4); // Slot 4 is V
-                                if (skill) {
-                                    this.skillsManager.useSkillOnMonster(target.id, skill);
-                                }
-                            }
-                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                            this.uiManager.showNotification('No target selected', 'white');
+                        const skillId = this.skillsManager.getSkillBySlot(4); // Slot 4 is V
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to V', 'white');
                         }
                     }
                     break;
                 case 'Digit4':
                     // 4 key for skill in slot 5
                     if (this.isAlive && this.skillsManager) {
-                        const target = this.targetingManager?.currentTarget;
-                        if (target && target.type === 'monster') {
-                            const monster = this.monsterManager?.getMonsterById(target.id);
-                            if (monster) {
-                                // Use the skill in the 4 slot on the monster
-                                const skill = this.skillsManager.getSkillBySlot(5); // Slot 5 is 4
-                                if (skill) {
-                                    this.skillsManager.useSkillOnMonster(target.id, skill);
-                                }
-                            }
-                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                            this.uiManager.showNotification('No target selected', 'white');
+                        const skillId = this.skillsManager.getSkillBySlot(5); // Slot 5 is 4
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to 4', 'white');
                         }
                     }
                     break;
@@ -415,6 +390,54 @@ export class Game {
                 case 'Digit3':
                     // Handle NPC interaction with the number 3 key
                     if (this.isAlive && this.npcManager) this.npcManager.handleInteraction();
+                    break;
+                case 'KeyO':
+                    // O key for gaining XP in dev mode
+                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Gaining XP');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Gaining XP', '#00ff00');
+                        }
+                        // Send request to server for XP gain
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'gain_xp', 
+                            amount: 50 
+                        });
+                    }
+                    // Completely silent in production - no logs, no messages, no network requests
+                    break;
+                case 'KeyK':
+                    // K key for gaining karma in dev mode
+                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Gaining Karma');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Gaining Karma', '#00ff00');
+                        }
+                        // Send request to server for karma gain
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'gain_karma', 
+                            amount: 10 
+                        });
+                    }
+                    // Completely silent in production - no logs, no messages, no network requests
+                    break;
+                case 'KeyJ':
+                    // J key for losing karma in dev mode
+                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Losing Karma');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Losing Karma', '#ff3300');
+                        }
+                        // Send request to server for karma loss
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'lose_karma', 
+                            amount: 10 
+                        });
+                    }
+                    // Completely silent in production - no logs, no messages, no network requests
                     break;
             }
         });
@@ -463,6 +486,10 @@ export class Game {
         console.log('Game loop started');
     }
 
+    /**
+     * Main update function, called every frame
+     * @param {number} delta - Time in seconds since the last frame
+     */
     update(delta) {
         // Skip updates during initialization or when paused
         if (!this.isInitialized || this.isPaused) {
@@ -495,6 +522,18 @@ export class Game {
         this.targetingManager?.update();
         this.monsterManager?.update(delta);
         
+        // Periodic health check to fix common rendering issues
+        if (this.healthCheckCounter === undefined) {
+            this.healthCheckCounter = 0;
+        }
+        
+        // Run health check every 5 seconds (assuming 60fps)
+        this.healthCheckCounter += delta;
+        if (this.healthCheckCounter > 5) {
+            this.healthCheckCounter = 0;
+            this.runHealthCheck();
+        }
+        
         // Continuous collision check - ensure player is never inside a pillar
         if (this.localPlayer && this.environmentManager) {
             // Force check statue collisions every frame
@@ -506,6 +545,39 @@ export class Game {
             // Always apply terrain height after collision checks
             if (this.terrainManager) {
                 this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+            }
+        }
+    }
+
+    /**
+     * Periodic health check to fix common rendering issues
+     */
+    runHealthCheck() {
+        // Check for monster visibility issues
+        if (this.monsterManager && this.monsterManager.monsters) {
+            let fixedCount = 0;
+            
+            this.monsterManager.monsters.forEach((monster) => {
+                // Skip dead monsters
+                if (!monster.isAlive || monster.health <= 0) return;
+                
+                // Check if monster mesh exists and is not visible
+                if (monster.mesh && monster.mesh.visible === false) {
+                    console.log(`Health check: Found invisible monster ${monster.id}, fixing visibility`);
+                    monster.mesh.visible = true;
+                    fixedCount++;
+                    
+                    // Also check child meshes
+                    monster.mesh.traverse(child => {
+                        if ((child.isMesh || child.isObject3D) && child.visible === false) {
+                            child.visible = true;
+                        }
+                    });
+                }
+            });
+            
+            if (fixedCount > 0) {
+                console.log(`Health check fixed visibility for ${fixedCount} monsters`);
             }
         }
     }

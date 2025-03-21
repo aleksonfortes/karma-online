@@ -14,7 +14,7 @@
     "dev": "concurrently \"npm run dev:landing\" \"npm run dev:client\" \"npm run dev:server\"",
     "dev:landing": "vite landing-page",
     "dev:client": "vite",
-    "dev:server": "nodemon server/index.js",
+    "dev:server": "NODE_ENV=development nodemon server/index.js",
     "build": "vite build",
     "build:landing": "vite build landing-page",
     "preview": "vite preview",
