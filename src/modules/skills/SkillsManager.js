@@ -1586,6 +1586,62 @@ export class SkillsManager {
                 path: 'dark', // Requires dark path
                 slot: 1, // Skill slot in the UI
                 icon: '🔮' // Changed from ⚔️ to 🔮 for a ball-like appearance
+            },
+            flow_of_life: {
+                id: 'flow_of_life',
+                name: 'Flow of Life',
+                description: 'Level 2 Light path skill placeholder',
+                cooldown: 3000,
+                range: 5,
+                damage: 30,
+                mana: 20,
+                lastUsed: 0,
+                path: 'light',
+                minLevel: 2,
+                slot: 2,
+                icon: '🌱'
+            },
+            one_with_universe: {
+                id: 'one_with_universe',
+                name: 'One with the Universe',
+                description: 'Level 5 Light path skill placeholder',
+                cooldown: 5000,
+                range: 8,
+                damage: 45,
+                mana: 35,
+                lastUsed: 0,
+                path: 'light',
+                minLevel: 5,
+                slot: 3,
+                icon: '✨'
+            },
+            life_drain: {
+                id: 'life_drain',
+                name: 'Life Drain',
+                description: 'Level 2 Dark path skill placeholder',
+                cooldown: 3000,
+                range: 5,
+                damage: 30,
+                mana: 20,
+                lastUsed: 0,
+                path: 'dark',
+                minLevel: 2,
+                slot: 2,
+                icon: '💀'
+            },
+            curse_of_decay: {
+                id: 'curse_of_decay',
+                name: 'Curse of Decay',
+                description: 'Level 5 Dark path skill placeholder',
+                cooldown: 5000,
+                range: 8,
+                damage: 45,
+                mana: 35,
+                lastUsed: 0,
+                path: 'dark',
+                minLevel: 5,
+                slot: 3,
+                icon: '⚰️'
             }
         };
     }
@@ -1727,5 +1783,59 @@ export class SkillsManager {
         if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
             this.game.uiManager.showNotification('Target is out of range', '#ff3333');
         }
+    }
+
+    /**
+     * Check if a player can learn a skill based on their level and path
+     * @param {string} skillId - The ID of the skill to check
+     * @returns {object} Object with canLearn boolean and message string explaining why
+     */
+    canLearnSkill(skillId) {
+        // Check if skill exists
+        if (!this.skills[skillId]) {
+            return { canLearn: false, message: 'Skill does not exist' };
+        }
+        
+        const skill = this.skills[skillId];
+        
+        // Check if player already has the skill
+        if (this.game.activeSkills.has(skillId)) {
+            return { canLearn: false, message: 'You already know this skill' };
+        }
+        
+        // Check path requirement
+        if (skill.path && this.game.playerStats?.path !== skill.path) {
+            return { canLearn: false, message: `This skill requires the ${skill.path} path` };
+        }
+        
+        // Check level requirement
+        if (skill.minLevel && this.game.playerStats?.level < skill.minLevel) {
+            return { canLearn: false, message: `You need to be level ${skill.minLevel} to learn this skill` };
+        }
+        
+        return { canLearn: true, message: 'You can learn this skill' };
+    }
+
+    /**
+     * Learn a skill and add it to the player's active skills
+     * @param {string} skillId - The ID of the skill to learn
+     * @returns {object} Object with success boolean and message string
+     */
+    learnSkill(skillId) {
+        // Check if player can learn this skill
+        const canLearn = this.canLearnSkill(skillId);
+        if (!canLearn.canLearn) {
+            return { success: false, message: canLearn.message };
+        }
+        
+        // Add the skill to active skills
+        this.addSkill(skillId);
+        
+        // Update the UI
+        if (this.game.uiManager) {
+            this.game.uiManager.updateSkillBar();
+        }
+        
+        return { success: true, message: `You have learned ${this.skills[skillId].name}` };
     }
 }

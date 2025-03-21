@@ -184,6 +184,8 @@ export class NetworkManager {
                 const skills = [];
                 if (data.path === 'light') {
                     skills.push('martial_arts');
+                } else if (data.path === 'dark') {
+                    skills.push('dark_ball');
                 }
                 
                 // Send success response
@@ -192,8 +194,40 @@ export class NetworkManager {
                     path: data.path,
                     skills: skills
                 });
+            });
+
+            // Handle learning skills
+            socket.on('learnSkill', (data) => {
+                console.log(`Player ${socket.id} is trying to learn skill: ${data?.skillId}`);
                 
-                console.log(`Player ${socket.id} successfully chose path: ${data.path}`);
+                // Validate skill data
+                if (!data || !data.skillId) {
+                    this.logSecurityEvent(`Invalid skill learning data from player ${socket.id}`);
+                    socket.emit('skillLearningResult', {
+                        success: false,
+                        message: 'Invalid skill data'
+                    });
+                    return;
+                }
+                
+                // Process the skill learning request
+                const result = this.gameManager.processSkillLearning(socket.id, data.skillId);
+                
+                // Send the result to the player
+                socket.emit('skillLearningResult', result);
+                
+                // If successful, update other players
+                if (result.success) {
+                    // Update player state for real-time sync
+                    const player = this.playerManager.getPlayer(socket.id);
+                    if (player) {
+                        // Broadcast updated player state to other players
+                        this.io.emit('playerUpdate', {
+                            id: socket.id,
+                            skills: player.skills
+                        });
+                    }
+                }
             });
 
             // Handle skill use
