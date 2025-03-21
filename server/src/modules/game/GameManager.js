@@ -131,10 +131,72 @@ export default class GameManager {
         // Update monsters
         this.monsterManager.update(this.playerManager);
         
+        // Regenerate player life and mana
+        this.updatePlayerRegeneration(deltaTime);
+        
         // Broadcast monster states to clients
         const monsterData = this.monsterManager.getAllMonsters();
         if (monsterData.length > 0) {
             this.io.emit('monster_data', monsterData);
+        }
+    }
+    
+    /**
+     * Update player life and mana regeneration
+     * @param {number} deltaTime - Time passed since last update in milliseconds
+     */
+    updatePlayerRegeneration(deltaTime) {
+        // Skip if no players
+        if (!this.playerManager.players || this.playerManager.players.size === 0) {
+            return;
+        }
+        
+        // Calculate regeneration amounts based on time passed
+        // Life: 1 per second, Mana: 3 per second
+        const lifeRegenAmount = (deltaTime / 1000) * 1;
+        const manaRegenAmount = (deltaTime / 1000) * 3;
+        
+        // Track players with updated stats to notify clients
+        const updatedPlayers = [];
+        
+        // Process each player
+        this.playerManager.players.forEach((player, playerId) => {
+            if (!player || player.isDead) return; // Skip dead players
+            
+            let statsChanged = false;
+            
+            // Regenerate life if not at max
+            if (player.life < player.maxLife) {
+                // Add regeneration amount
+                player.life = Math.min(player.maxLife, player.life + lifeRegenAmount);
+                statsChanged = true;
+            }
+            
+            // Regenerate mana if not at max
+            if (player.mana < player.maxMana) {
+                // Add regeneration amount
+                player.mana = Math.min(player.maxMana, player.mana + manaRegenAmount);
+                statsChanged = true;
+            }
+            
+            // If stats changed, add to the updated players list
+            if (statsChanged) {
+                updatedPlayers.push({
+                    id: playerId,
+                    life: Math.floor(player.life * 10) / 10, // Round to 1 decimal place
+                    maxLife: player.maxLife,
+                    mana: Math.floor(player.mana * 10) / 10, // Round to 1 decimal place
+                    maxMana: player.maxMana
+                });
+            }
+        });
+        
+        // Send updates to clients if any players were updated
+        if (updatedPlayers.length > 0) {
+            this.io.emit('statsUpdate', { 
+                players: updatedPlayers,
+                source: 'regeneration'  // Add source for client filtering
+            });
         }
     }
     

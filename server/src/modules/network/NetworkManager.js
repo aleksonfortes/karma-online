@@ -973,7 +973,8 @@ export class NetworkManager {
             // Create a batch update with all player stats
             const batchUpdate = {
                 timestamp: Date.now(),
-                players: []
+                players: [],
+                source: 'periodic' // Add source identification for client filtering
             };
             
             // Add each player's stats to the batch update
