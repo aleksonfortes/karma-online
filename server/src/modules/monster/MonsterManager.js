@@ -1093,6 +1093,24 @@ export class MonsterManager {
         // Calculate final damage with reduction
         const finalDamage = Math.floor(damageAmount * (1 - damageReduction));
         
+        // Check if player is immune to damage (One with the Universe skill)
+        if (player.isImmune) {
+            console.log(`Monster ${monsterId} attack on player ${playerId} was blocked due to immunity!`);
+            
+            // Notify client of blocked damage
+            if (this.gameManager && this.gameManager.io) {
+                this.gameManager.io.to(playerId).emit('monsterDamage', {
+                    targetId: playerId,
+                    monsterId: monsterId,
+                    damage: 0, // Zero damage due to immunity
+                    monsterType: monster.type,
+                    wasBlocked: true
+                });
+            }
+            
+            return; // Skip damage application entirely
+        }
+        
         // Apply damage to player
         player.life -= finalDamage;
         if (player.life < 0) player.life = 0;

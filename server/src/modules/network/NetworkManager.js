@@ -67,6 +67,178 @@ export class NetworkManager {
             // Broadcast new player to others
             this.io.emit('newPlayer', player);
 
+            // Handle dev mode actions
+            socket.on('dev_action', (data) => {
+                // SECURITY NOTE:
+                // Development mode actions are only processed if the server is running in development mode
+                // This provides a server-side authority check that cannot be bypassed by client-side modifications
+                // Even if a user modifies the client code to emit dev_action events, they will be rejected here
+                // The purposefully vague error message prevents users from knowing these commands exist
+                
+                // Only process dev actions if server is in development mode
+                if (process.env.NODE_ENV !== 'development' && process.env.NODE_ENV !== 'test') {
+                    // Potentially manipulated client detected - log more detailed info
+                    const clientInfo = {
+                        ip: socket.handshake.address,
+                        userAgent: socket.handshake.headers['user-agent'] || 'unknown',
+                        action: data?.action || 'unknown',
+                        timestamp: new Date().toISOString()
+                    };
+                    
+                    console.warn(`[SECURITY] Potential client manipulation detected: dev action attempted in production mode`);
+                    console.warn(`[SECURITY] Player ID: ${socket.id}, IP: ${clientInfo.ip}, Action: ${clientInfo.action}`);
+                    
+                    // Add to security logs for potential analysis
+                    this.securityLogs.push({
+                        type: 'dev_action_blocked',
+                        severity: 'medium',
+                        playerId: socket.id,
+                        clientInfo,
+                        data
+                    });
+                    
+                    // Send error message to client
+                    socket.emit('errorMessage', {
+                        type: 'dev_action',
+                        message: 'This action is not available'
+                    });
+                    
+                    return;
+                }
+                
+                console.log(`Processing dev action in ${process.env.NODE_ENV} mode: ${data.action} for player ${socket.id}`);
+                
+                if (!data || !data.action) {
+                    return;
+                }
+                
+                // Get the player
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    console.warn(`Player not found for dev_action from ${socket.id}`);
+                    return;
+                }
+                
+                console.log(`Processing dev action for ${socket.id}: ${data.action}`);
+                
+                // Process different dev actions
+                switch (data.action) {
+                    case 'gain_xp':
+                        // Initialize experience if needed
+                        if (player.experience === undefined) {
+                            player.experience = 0;
+                        }
+                        if (player.level === undefined) {
+                            player.level = 1;
+                        }
+                        
+                        // Add XP
+                        const xpAmount = data.amount || 50;
+                        player.experience += xpAmount;
+                        
+                        // Check for level up
+                        const expToNextLevel = 100 * Math.pow(1.5, player.level - 1);
+                        if (player.experience >= expToNextLevel) {
+                            player.level += 1;
+                            player.experience = 0;
+                            
+                            // Increase max life and mana for level up
+                            player.maxLife = 100 + (player.level - 1) * 10;
+                            player.maxMana = 100 + (player.level - 1) * 10;
+                            
+                            // Heal to full on level up
+                            player.life = player.maxLife;
+                            player.mana = player.maxMana;
+                            
+                            // Send level up notification
+                            socket.emit('levelUp', {
+                                level: player.level,
+                                maxLife: player.maxLife,
+                                maxMana: player.maxMana
+                            });
+                        }
+                        
+                        // Send XP update to client
+                        socket.emit('experienceUpdate', {
+                            experience: player.experience,
+                            level: player.level,
+                            nextLevelXP: expToNextLevel
+                        });
+                        
+                        // Also broadcast updated stats to all clients
+                        this.io.emit('statsUpdate', {
+                            players: [{
+                                id: player.id,
+                                experience: player.experience,
+                                level: player.level,
+                                life: player.life,
+                                maxLife: player.maxLife,
+                                mana: player.mana,
+                                maxMana: player.maxMana,
+                                updateId: `${player.id}-${Date.now()}`
+                            }],
+                            timestamp: Date.now(),
+                            source: 'dev_action'
+                        });
+                        break;
+                        
+                    case 'gain_karma':
+                        // Initialize karma if needed
+                        if (player.karma === undefined) {
+                            player.karma = 50;
+                        }
+                        if (player.maxKarma === undefined) {
+                            player.maxKarma = 100;
+                        }
+                        
+                        // Add karma
+                        const karmaGainAmount = data.amount || 10;
+                        player.karma = Math.min(player.maxKarma, player.karma + karmaGainAmount);
+                        
+                        // Update player effects based on new karma value
+                        this.playerManager.updatePlayerEffects(player);
+                        
+                        // Broadcast the karma update to all clients
+                        this.io.emit('karmaUpdate', {
+                            id: socket.id,
+                            karma: player.karma,
+                            maxKarma: player.maxKarma,
+                            path: player.path,
+                            timestamp: Date.now()
+                        });
+                        break;
+                        
+                    case 'lose_karma':
+                        // Initialize karma if needed
+                        if (player.karma === undefined) {
+                            player.karma = 50;
+                        }
+                        if (player.maxKarma === undefined) {
+                            player.maxKarma = 100;
+                        }
+                        
+                        // Reduce karma
+                        const karmaLossAmount = data.amount || 10;
+                        player.karma = Math.max(0, player.karma - karmaLossAmount);
+                        
+                        // Update player effects based on new karma value
+                        this.playerManager.updatePlayerEffects(player);
+                        
+                        // Broadcast the karma update to all clients
+                        this.io.emit('karmaUpdate', {
+                            id: socket.id,
+                            karma: player.karma,
+                            maxKarma: player.maxKarma,
+                            path: player.path,
+                            timestamp: Date.now()
+                        });
+                        break;
+                        
+                    default:
+                        console.warn(`Unknown dev action: ${data.action}`);
+                }
+            });
+
             // Handle player movement with rate limiting and validation
             socket.on('playerMovement', (data) => {
                 if (!this.validateSession(socket.id)) {
@@ -280,6 +452,25 @@ export class NetworkManager {
                     manaCost = 25;
                 } else if (data.skillName === 'martial_arts') {
                     manaCost = 0; // No mana cost for martial arts
+                } else if (data.skillName === 'flow_of_life') {
+                    manaCost = 30; // Mana cost for flow_of_life
+                } else if (data.skillName === 'life_drain') {
+                    manaCost = 30; // Mana cost for life_drain
+                } else if (data.skillName === 'one_with_universe') {
+                    // One with Universe consumes all mana
+                    manaCost = player.mana; // Will consume all available mana
+                    
+                    // Check if player's mana is at maximum before allowing use
+                    if (player.mana < player.maxMana) {
+                        console.log(`Player ${socket.id} tried to use One with Universe without full mana (${player.mana}/${player.maxMana})`);
+                        socket.emit('errorMessage', {
+                            type: 'combat',
+                            message: 'One with Universe requires maximum mana to use'
+                        });
+                        return;
+                    }
+                } else if (data.skillName === 'embrace_void') {
+                    manaCost = 35; // Mana cost for embrace_void
                 }
                 
                 // Initialize mana if not set
@@ -310,6 +501,80 @@ export class NetworkManager {
                         mana: player.mana,
                         maxMana: player.maxMana
                     });
+                }
+                
+                // Apply special effects for One with the Universe skill - grant immunity
+                if (data.skillName === 'one_with_universe') {
+                    // Grant immunity for 5 seconds
+                    player.isImmune = true;
+                    player.immuneUntil = Date.now() + 5000; // 5 seconds of immunity
+                    
+                    console.log(`Player ${socket.id} activated One with Universe - immune until ${new Date(player.immuneUntil).toISOString()}`);
+                    
+                    // Send notification to the player
+                    socket.emit('notification', {
+                        message: 'You are immune to all damage for 5 seconds!',
+                        type: 'success'
+                    });
+                    
+                    // Schedule immunity removal after duration
+                    setTimeout(() => {
+                        if (player) {
+                            player.isImmune = false;
+                            console.log(`Player ${socket.id} immunity expired`);
+                            
+                            // Notify player that immunity has ended
+                            socket.emit('notification', {
+                                message: 'Your immunity has ended',
+                                type: 'info'
+                            });
+                        }
+                    }, 5000);
+                }
+                
+                // Apply special effects for Embrace Void skill - grant invisibility
+                if (data.skillName === 'embrace_void') {
+                    // Duration from client data or default to 8 seconds
+                    const duration = data.duration || 8000;
+                    
+                    // Set invisibility flag
+                    player.visible = false;
+                    player.invisibleUntil = Date.now() + duration;
+                    
+                    console.log(`Player ${socket.id} activated Embrace Void - invisible until ${new Date(player.invisibleUntil).toISOString()}`);
+                    
+                    // Broadcast player visibility change to all clients
+                    this.io.emit('player_visibility_change', {
+                        playerId: socket.id,
+                        visible: false,
+                        duration: duration
+                    });
+                    
+                    // Send notification to the player
+                    socket.emit('notification', {
+                        message: `You are invisible for ${duration/1000} seconds!`,
+                        type: 'success'
+                    });
+                    
+                    // Schedule invisibility removal after duration
+                    setTimeout(() => {
+                        if (player) {
+                            player.visible = true;
+                            console.log(`Player ${socket.id} invisibility expired`);
+                            
+                            // Broadcast visibility change to all clients
+                            this.io.emit('player_visibility_change', {
+                                playerId: socket.id,
+                                visible: true
+                            });
+                            
+                            // Notify player that invisibility has ended
+                            socket.emit('notification', {
+                                message: 'Your invisibility has ended',
+                                type: 'info'
+                            });
+                        }
+                    }, duration);
                 }
                 
                 // Update skill cooldown
@@ -374,7 +639,7 @@ export class NetworkManager {
                         message: 'Target is out of range'
                     });
                     console.log('Error message sent, returning from useSkill handler');
-                    return;
+                    return; // Important: return here to prevent attack processing
                 }
                 
                 // Ensure target has life values initialized
@@ -396,15 +661,89 @@ export class NetworkManager {
                 // Calculate and apply damage
                 const previousLife = targetPlayer.life;
                 
-                // Server calculates damage instead of trusting client-sent value
-                const damageDealt = this.calculateSkillDamage(data.skillName, player, targetPlayer);
+                // Check if this is a healing skill (negative damage value or isHealing flag)
+                const isHealingSkill = data.damage < 0 || data.isHealing;
                 
-                targetPlayer.life = Math.max(0, targetPlayer.life - damageDealt);
+                // Variable declaration moved to before first use
+                let damageDealt;
                 
-                console.log(`Player ${socket.id} dealt ${damageDealt} damage to ${data.targetId} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                // Check if target is immune to damage (One with the Universe)
+                if (!isHealingSkill && targetPlayer.isImmune) {
+                    console.log(`Target player ${data.targetId} is immune to damage from ${socket.id} using ${data.skillName}`);
+                    
+                    // Set damage to 0 but still process the effect visually with no actual damage
+                    damageDealt = 0;
+                    
+                    // Send notification to the attacker
+                    socket.emit('notification', {
+                        message: 'Target is immune to damage!',
+                        type: 'warning'
+                    });
+                    
+                    // Still create visual effect but no health change
+                    this.io.emit('damageEffect', {
+                        sourceId: socket.id,
+                        targetId: data.targetId,
+                        damage: 0,
+                        skillName: data.skillName,
+                        isHealing: false,
+                        isCritical: false,
+                        wasBlocked: true // Indicate this was a blocked attack
+                    });
+                    
+                    // Skip normal damage processing but return success to the client
+                    socket.emit('skillDamage', {
+                        sourceId: socket.id,
+                        targetId: data.targetId,
+                        damage: 0,
+                        skillName: data.skillName,
+                        isHealing: false,
+                        wasBlocked: true
+                    });
+                    
+                    return;
+                }
                 
-                // Check if target died
-                if (targetPlayer.life <= 0) {
+                // Server calculates damage or healing instead of trusting client-sent value
+                if (isHealingSkill) {
+                    // For healing, we treat it differently - healing targets the player
+                    let healingAmount = 0;
+                    if (data.skillName === 'flow_of_life') {
+                        healingAmount = 20; // Base healing amount
+                    } else if (data.skillName === 'life_drain') {
+                        healingAmount = 15; // Base healing amount for Life Drain
+                        
+                        // Life Drain also heals the caster
+                        if (player.id !== targetPlayer.id) {
+                            player.life = Math.min(player.maxLife, player.life + healingAmount);
+                            
+                            // Also emit healing to the player
+                            this.io.to(socket.id).emit('lifeUpdate', {
+                                id: socket.id,
+                                life: player.life,
+                                maxLife: player.maxLife || 100,
+                                timestamp: Date.now(),
+                                final: true,
+                                isHealing: true
+                            });
+                        }
+                    }
+                    
+                    // Apply healing (positive to increase life)
+                    targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
+                    damageDealt = -healingAmount; // Negative value to indicate healing
+                    
+                    console.log(`Player ${socket.id} healed ${targetPlayer.id} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                } else {
+                    // Regular damage calculation
+                    damageDealt = this.calculateSkillDamage(data.skillName, player, targetPlayer);
+                    targetPlayer.life = Math.max(0, targetPlayer.life - damageDealt);
+                    
+                    console.log(`Player ${socket.id} dealt ${damageDealt} damage to ${data.targetId} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                }
+                
+                // Check if target died (only relevant for damage, not healing)
+                if (!isHealingSkill && targetPlayer.life <= 0) {
                     targetPlayer.isDead = true;
                     console.log(`Player ${data.targetId} was killed by ${socket.id}`);
                     
@@ -423,12 +762,13 @@ export class NetworkManager {
                     this.playerManager.handlePlayerDeath(data.targetId, socket.id);
                 }
                 
-                // Notify target of damage
+                // Notify target of damage or healing
                 this.io.to(data.targetId).emit('skillDamage', {
                     sourceId: socket.id,
                     targetId: data.targetId,
                     damage: damageDealt,
-                    skillName: data.skillName
+                    skillName: data.skillName,
+                    isHealing: isHealingSkill
                 });
                 
                 // Store the last health update time for this player to prevent rapid oscillations
@@ -443,7 +783,8 @@ export class NetworkManager {
                     life: targetPlayer.life,
                     maxLife: targetPlayer.maxLife || 100,
                     timestamp: Date.now(), // Add timestamp for client-side validation
-                    final: true // Mark this as a final update that shouldn't be overridden
+                    final: true, // Mark this as a final update that shouldn't be overridden
+                    isHealing: isHealingSkill
                 });
                 
                 // Broadcast damage effect to all players
@@ -452,6 +793,7 @@ export class NetworkManager {
                     targetId: data.targetId,
                     damage: damageDealt,
                     skillName: data.skillName,
+                    isHealing: isHealingSkill,
                     isCritical: false
                 });
             });
@@ -666,6 +1008,7 @@ export class NetworkManager {
                     });
                     return;
                 }
+                
                 
                 // Apply rate limiting
                 if (!this.rateLimitSkillUsage(socket.id, 'monster')) {
@@ -1414,6 +1757,7 @@ export class NetworkManager {
                 life: player.life,
                 maxLife: player.maxLife,
                 isDead: player.isDead,
+                visible: player.visible !== false, // Include visibility state, default to visible if not specified
                 timestamp: Date.now()
             });
         });

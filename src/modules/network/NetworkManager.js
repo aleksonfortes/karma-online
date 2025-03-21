@@ -1689,6 +1689,63 @@ export class NetworkManager {
                 }
             }
         });
+
+        // Handle player visibility changes (for Embrace Void skill)
+        this.socket.on('player_visibility_change', (data) => {
+            console.log('Received player visibility change:', data);
+            
+            // DEBUG: Log current players before visibility change
+            console.log('Current players before visibility change:', 
+                Array.from(this.game.playerManager.players.keys()).join(', '));
+            
+            // For local player, we don't fully hide the model - we keep it semi-transparent
+            // This way the player can still see where they are
+            if (data.playerId === this.socket.id) {
+                // Just track the state, but don't set visible=false on our own player
+                // The actual opacity/transparency is managed by the skill effect
+                if (this.game.localPlayer && !this.game.localPlayer.userData) {
+                    this.game.localPlayer.userData = {};
+                }
+                // Only track the invisible state - don't change visibility
+                if (this.game.localPlayer && this.game.localPlayer.userData) {
+                    this.game.localPlayer.userData.isInvisible = !data.visible;
+                    console.log(`[LOCAL] Tracking local player invisibility: ${!data.visible}`);
+                }
+                return;
+            }
+            
+            // Handle other players' visibility
+            const playerMesh = this.game.playerManager.players.get(data.playerId);
+            if (!playerMesh) {
+                console.warn(`Player mesh not found for visibility change: ${data.playerId}`);
+                return;
+            }
+            
+            // Update player visibility
+            playerMesh.visible = data.visible;
+            
+            // Store invisibility state for reference
+            if (!playerMesh.userData) playerMesh.userData = {};
+            playerMesh.userData.isInvisible = !data.visible;
+            
+            // Add visual effect for other players becoming invisible
+            if (!data.visible && this.game.skillsManager) {
+                // Create smoke effect at player position
+                const playerPos = playerMesh.position.clone();
+                this.game.skillsManager.createSmokePuff(playerPos, 0x000000, 1.5);
+                
+                console.log(`Made player ${data.playerId} invisible`);
+            }
+            
+            // Add visual effect for other players becoming visible
+            if (data.visible && this.game.skillsManager) {
+                // Create smoke effect at player position
+                const playerPos = playerMesh.position.clone();
+                this.game.skillsManager.createSmokePuff(playerPos, 0x202020, 1);
+                
+                console.log(`Made player ${data.playerId} visible again`);
+            }
+        });
     }
 
     handlePathSelectionResult(result) {
@@ -2286,7 +2343,7 @@ export class NetworkManager {
             return;
         }
         
-        // Game state sync received
+        console.log('Received game state sync from server');
         
         // Store current mana values before processing sync
         const currentMana = this.game.playerStats?.currentMana;
@@ -2837,7 +2894,7 @@ export class NetworkManager {
                 !isFromPeriodicUpdate;
                 
             if (playerData.mana !== undefined && acceptManaUpdate) {
-                // Setting mana from server
+                console.log(`Setting local player mana to ${playerData.mana} from server (source: ${playerData.source || 'unknown'})`);
                 this.game.playerStats.currentMana = playerData.mana;
                 
                 // Sync with userData for consistency
@@ -2846,22 +2903,10 @@ export class NetworkManager {
                         this.game.localPlayer.userData.stats = {};
                     }
                     this.game.localPlayer.userData.stats.mana = playerData.mana;
-                    // Synced with userData
-                }
-            } else if (playerData.mana !== undefined && playerData.mana !== this.game.playerStats.currentMana) {
-                // Setting mana from server
-                this.game.playerStats.currentMana = playerData.mana;
-                
-                // Sync with userData for consistency
-                if (this.game.localPlayer && this.game.localPlayer.userData) {
-                    if (!this.game.localPlayer.userData.stats) {
-                        this.game.localPlayer.userData.stats = {};
-                    }
-                    this.game.localPlayer.userData.stats.mana = playerData.mana;
-                    // Synced with userData
+                    console.log(`Also synced localPlayer.userData.stats.mana=${playerData.mana}`);
                 }
             } else if (playerData.mana !== undefined) {
-                // Mana hasn't changed, so no update needed
+                console.log(`Ignoring server mana update: ${playerData.mana} (current: ${this.game.playerStats.currentMana}, source: ${playerData.source || 'unknown'})`);
             }
             
             // Update max mana if provided

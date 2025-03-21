@@ -1505,17 +1505,17 @@ export class UIManager {
                             alreadyLearned: playerSkills.has('dark_ball')
                         },
                         {
-                            id: 'shadow_strike',
-                            name: 'Shadow Strike',
+                            id: 'life_drain',
+                            name: 'Life Drain',
                             level: 2,
-                            description: 'Quick attack that deals bonus damage and slows enemies',
-                            alreadyLearned: playerSkills.has('shadow_strike')
+                            description: 'Drain life from your target to heal yourself, consuming mana',
+                            alreadyLearned: playerSkills.has('life_drain')
                         },
                         {
                             id: 'embrace_void',
                             name: 'Embrace the Void',
                             level: 5,
-                            description: 'Drains life from enemies to heal yourself',
+                            description: 'Become invisible to players and monsters for 10 seconds or until you attack',
                             alreadyLearned: playerSkills.has('embrace_void')
                         }
                     ];

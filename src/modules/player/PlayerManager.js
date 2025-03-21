@@ -213,9 +213,40 @@ export class PlayerManager {
     }
     
     async createPlayer(id, position = null, rotation = { y: 0 }, isLocal = false) {
+        // Check if player already exists
         if (this.players.has(id)) {
-            console.warn(`Player with ID ${id} already exists.`);
-            return this.players.get(id);
+            console.warn(`Player with ID ${id} already exists. Not creating a duplicate.`);
+            
+            // Return the existing player
+            const existingPlayer = this.players.get(id);
+            
+            // If we're requesting a local player but the existing one isn't marked as local,
+            // we might want to update that flag
+            if (isLocal && existingPlayer.userData && !existingPlayer.userData.isLocal) {
+                console.log(`Updating existing player ${id} to mark as local`);
+                existingPlayer.userData.isLocal = true;
+            }
+            
+            // Update position if specified and significantly different from current position
+            if (position) {
+                const distance = Math.sqrt(
+                    Math.pow(existingPlayer.position.x - position.x, 2) + 
+                    Math.pow(existingPlayer.position.z - position.z, 2)
+                );
+                
+                // Only update if position differs by more than 1 unit
+                if (distance > 1) {
+                    console.log(`Updating existing player ${id} position: [${existingPlayer.position.x.toFixed(2)}, ${existingPlayer.position.z.toFixed(2)}] -> [${position.x.toFixed(2)}, ${position.z.toFixed(2)}]`);
+                    existingPlayer.position.set(position.x, position.y, position.z);
+                }
+            }
+            
+            // Update rotation if needed
+            if (rotation && Math.abs(existingPlayer.rotation.y - rotation.y) > 0.1) {
+                existingPlayer.rotation.y = rotation.y;
+            }
+            
+            return existingPlayer;
         }
         
         // Use default position if none provided
@@ -225,10 +256,18 @@ export class PlayerManager {
         
         const player = await this.createPlayerMesh(id, position, rotation);
         if (player) {
+            // Set isLocal flag in userData
+            if (!player.userData) player.userData = {};
+            player.userData.isLocal = isLocal;
+            
+            // Store the player ID in userData for reference
+            player.userData.playerId = id;
+            
             this.players.set(id, player);
             this.game.scene.add(player);
             if (isLocal) {
                 this.game.localPlayer = player;
+                console.log(`Set local player to ${id}`);
             }
             
             // Create a health bar for the player

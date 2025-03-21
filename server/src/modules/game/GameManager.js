@@ -406,7 +406,8 @@ export default class GameManager {
             one_with_universe: { path: 'light', level: 5 },
             
             // Dark path skills
-            shadow_strike: { path: 'dark', level: 2 },
+            dark_ball: { path: 'dark', level: 1 },
+            life_drain: { path: 'dark', level: 2 },
             embrace_void: { path: 'dark', level: 5 }
         };
         
