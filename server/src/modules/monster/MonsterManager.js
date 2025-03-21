@@ -792,74 +792,143 @@ export class MonsterManager {
                     }
                 }
             } else if (monster.isReturningToSpawn) {
-                // Return to spawn behavior - use monster's own spawn position if available
-                const spawnPosition = monster.spawnPosition || monsterConfig.SPAWN_POSITION;
-                const dx = spawnPosition.x - monster.position.x;
-                const dz = spawnPosition.z - monster.position.z;
-                const distance = Math.sqrt(dx * dx + dz * dz);
+                // Check for players in aggro range even when returning to spawn
+                // NOTE: New code to prioritize attacking nearby players over returning to spawn
+                let closestPlayer = null;
+                let closestDistance = Infinity;
                 
-                // If we're close enough to spawn, stop returning
-                if (distance < 1.0) {
-                    monster.isReturningToSpawn = false;
-                    monster.position.x = spawnPosition.x;
-                    monster.position.z = spawnPosition.z;
-                    // Reset wandering
-                    monster.wanderAngle = Math.random() * Math.PI * 2;
-                    monster.wanderTimer = 0;
-                } else {
-                    // Update monster rotation to face spawn point
+                for (const [playerId, player] of Object.entries(players)) {
+                    // Skip players that are:
+                    // 1. Dead or have no health
+                    // 2. In the temple area
+                    // 3. Invulnerable
+                    // 4. Invisible
+                    if (player.health <= 0 || 
+                        player.life <= 0 || 
+                        player.isDead || 
+                        player.isInvulnerable || 
+                        player.visible === false) {
+                        continue;
+                    }
+                    
+                    // Skip players in temple area
+                    if (player.position && this.isInTemple(player.position)) {
+                        continue;
+                    }
+                    
+                    const dx = player.position.x - monster.position.x;
+                    const dz = player.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    // Account for monster and player collision radius for targeting
+                    const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+                    const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+                    const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
+                    
+                    // Use a smaller aggro radius when returning (2/3 of normal)
+                    const returningAggroRadius = aggroRadius * 0.66;
+                    
+                    if (effectiveDistance < returningAggroRadius && effectiveDistance < closestDistance) {
+                        closestPlayer = player;
+                        closestDistance = effectiveDistance;
+                    }
+                }
+                
+                // If we found a player in range, target them instead of returning
+                if (closestPlayer) {
+                    monster.targetPlayerId = closestPlayer.id;
+                    monster.isReturningToSpawn = false; // Stop returning to spawn
+                    console.log(`Monster ${monster.id} interrupted return to target player: ${closestPlayer.id}`);
+                    
+                    // Calculate direction to target player
+                    const dx = closestPlayer.position.x - monster.position.x;
+                    const dz = closestPlayer.position.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    
+                    // Update monster rotation to face player
                     const angle = Math.atan2(dx, dz);
                     monster.rotation.y = angle;
                     
-                    // Calculate movement
-                    const moveStep = movementSpeed * 1.5 * deltaTime; // Move faster when returning
+                    // If close enough, attack immediately
+                    const attackRange = monsterConfig.ATTACK_RANGE || 2.0;
+                    const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+                    const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+                    if (distance <= attackRange + monsterRadius + playerRadius) {
+                        this.attackPlayer(monster.id, closestPlayer.id, playerManager);
+                    }
                     
-                    // Normalize direction vector
-                    const normalizedDx = dx / distance;
-                    const normalizedDz = dz / distance;
+                    // Skip the rest of the return-to-spawn logic
+                } else {
+                    // If no players in range, continue returning to spawn
+                    // Return to spawn behavior - use monster's own spawn position if available
+                    const spawnPosition = monster.spawnPosition || monsterConfig.SPAWN_POSITION;
+                    const dx = spawnPosition.x - monster.position.x;
+                    const dz = spawnPosition.z - monster.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
                     
-                    // Calculate new position
-                    const newX = monster.position.x + normalizedDx * moveStep;
-                    const newZ = monster.position.z + normalizedDz * moveStep;
-                    
-                    // Check for both temple and monster collisions
-                    const newPosition = { x: newX, y: monster.position.y, z: newZ };
-                    if (!this.isInTemple(newPosition)) {
-                        // Check for monster collisions
-                        if (!this.checkMonsterCollision(monster.id, newPosition)) {
-                            // Only move if no collisions
-                            monster.position.x = newX;
-                            monster.position.z = newZ;
-                        } else {
-                            // Resolve collision and apply the resolved position
-                            const resolvedPosition = this.resolveMonsterCollision(monster.id, newPosition, monster.position);
-                            monster.position.x = resolvedPosition.x;
-                            monster.position.z = resolvedPosition.z;
-                        }
+                    // If we're close enough to spawn, stop returning
+                    if (distance < 1.0) {
+                        monster.isReturningToSpawn = false;
+                        monster.position.x = spawnPosition.x;
+                        monster.position.z = spawnPosition.z;
+                        // Reset wandering
+                        monster.wanderAngle = Math.random() * Math.PI * 2;
+                        monster.wanderTimer = 0;
                     } else {
-                        // Temple collision handling (existing code)
-                        // If new position would be in temple, try circling around the temple
-                        // Calculate perpendicular components to create a circling effect
-                        const perpX = -normalizedDz;
-                        const perpZ = normalizedDx;
+                        // Update monster rotation to face spawn point
+                        const angle = Math.atan2(dx, dz);
+                        monster.rotation.y = angle;
                         
-                        // Try moving along the perpendicular direction
-                        const alternativeX = monster.position.x + perpX * moveStep;
-                        const alternativeZ = monster.position.z + perpZ * moveStep;
+                        // Calculate movement
+                        const moveStep = movementSpeed * 1.5 * deltaTime; // Move faster when returning
                         
-                        if (!this.isInTemple({ x: alternativeX, y: monster.position.y, z: alternativeZ })) {
-                            monster.position.x = alternativeX;
-                            monster.position.z = alternativeZ;
-                        } else {
-                            // If that doesn't work, try the opposite direction
-                            const alternativeX2 = monster.position.x - perpX * moveStep;
-                            const alternativeZ2 = monster.position.z - perpZ * moveStep;
-                            
-                            if (!this.isInTemple({ x: alternativeX2, y: monster.position.y, z: alternativeZ2 })) {
-                                monster.position.x = alternativeX2;
-                                monster.position.z = alternativeZ2;
+                        // Normalize direction vector
+                        const normalizedDx = dx / distance;
+                        const normalizedDz = dz / distance;
+                        
+                        // Calculate new position
+                        const newX = monster.position.x + normalizedDx * moveStep;
+                        const newZ = monster.position.z + normalizedDz * moveStep;
+                        
+                        // Check for both temple and monster collisions
+                        const newPosition = { x: newX, y: monster.position.y, z: newZ };
+                        if (!this.isInTemple(newPosition)) {
+                            // Check for monster collisions
+                            if (!this.checkMonsterCollision(monster.id, newPosition)) {
+                                // Only move if no collisions
+                                monster.position.x = newX;
+                                monster.position.z = newZ;
+                            } else {
+                                // Resolve collision and apply the resolved position
+                                const resolvedPosition = this.resolveMonsterCollision(monster.id, newPosition, monster.position);
+                                monster.position.x = resolvedPosition.x;
+                                monster.position.z = resolvedPosition.z;
                             }
-                            // If all options fail, monster stays in place
+                        } else {
+                            // Temple collision handling (existing code)
+                            // If new position would be in temple, try circling around the temple
+                            // Calculate perpendicular components to create a circling effect
+                            const perpX = -normalizedDz;
+                            const perpZ = normalizedDx;
+                            
+                            // Try moving along the perpendicular direction
+                            const alternativeX = monster.position.x + perpX * moveStep;
+                            const alternativeZ = monster.position.z + perpZ * moveStep;
+                            
+                            if (!this.isInTemple({ x: alternativeX, y: monster.position.y, z: alternativeZ })) {
+                                monster.position.x = alternativeX;
+                                monster.position.z = alternativeZ;
+                            } else {
+                                // If that doesn't work, try the opposite direction
+                                const alternativeX2 = monster.position.x - perpX * moveStep;
+                                const alternativeZ2 = monster.position.z - perpZ * moveStep;
+                                
+                                if (!this.isInTemple({ x: alternativeX2, y: monster.position.y, z: alternativeZ2 })) {
+                                    monster.position.x = alternativeX2;
+                                    monster.position.z = alternativeZ2;
+                                }
+                                // If all options fail, monster stays in place
+                            }
                         }
                     }
                 }
