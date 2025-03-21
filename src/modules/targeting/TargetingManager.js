@@ -325,15 +325,31 @@ export class TargetingManager {
             const monster = object;
             
             if (monster) {
-                // Get monster name (you can customize this as needed)
-                name = `${monster.type || 'Unknown'} Monster`;
+                // Get monster level from its configuration if available
+                if (monster.type && this.game.gameConstants && this.game.gameConstants.MONSTER && 
+                    this.game.gameConstants.MONSTER[monster.type] && 
+                    this.game.gameConstants.MONSTER[monster.type].LEVEL) {
+                    level = this.game.gameConstants.MONSTER[monster.type].LEVEL;
+                }
+                
+                // Format the monster name nicely (same as in setTarget)
+                let name;
+                const monsterTypeName = monster.type || 'Unknown';
+                
+                if (monsterTypeName === 'TYPHON') {
+                    name = 'Typhon';
+                } else if (monsterTypeName === 'BASIC') {
+                    name = 'Cerberus';
+                } else {
+                    // For any other monster types, just use the type name
+                    name = monsterTypeName.charAt(0).toUpperCase() + monsterTypeName.slice(1).toLowerCase();
+                }
                 
                 // Get monster health
                 health = monster.health !== undefined ? monster.health : 100;
                 maxHealth = monster.maxHealth !== undefined ? monster.maxHealth : 100;
-                level = 1; // Monsters don't have levels yet
                 
-                console.log(`Setting monster target: ${name}, Health: ${health}/${maxHealth}`);
+                console.log(`Setting monster target: ${name}, Health: ${health}/${maxHealth}, Level: ${level}`);
             } else {
                 console.warn(`Monster object not found for ID ${id}`);
             }
@@ -438,12 +454,33 @@ export class TargetingManager {
             // Update the target display with current health - do this every validation check
             // to ensure the UI is always in sync with the actual monster health
             if (this.game.uiManager) {
+                // Get monster level from its configuration if available
+                let level = 1;
+                if (monster.type && this.game.gameConstants && this.game.gameConstants.MONSTER && 
+                    this.game.gameConstants.MONSTER[monster.type] && 
+                    this.game.gameConstants.MONSTER[monster.type].LEVEL) {
+                    level = this.game.gameConstants.MONSTER[monster.type].LEVEL;
+                }
+                
+                // Format the monster name nicely (same as in setTarget)
+                let name;
+                const monsterTypeName = monster.type || 'Unknown';
+                
+                if (monsterTypeName === 'TYPHON') {
+                    name = 'Typhon';
+                } else if (monsterTypeName === 'BASIC') {
+                    name = 'Cerberus';
+                } else {
+                    // For any other monster types, just use the type name
+                    name = monsterTypeName.charAt(0).toUpperCase() + monsterTypeName.slice(1).toLowerCase();
+                }
+                
                 this.game.uiManager.updateTargetDisplay(
-                    `${monster.type || 'Unknown'} Monster`,
+                    name,
                     monster.health,
                     monster.maxHealth,
                     'monster',
-                    1
+                    level
                 );
             }
             
