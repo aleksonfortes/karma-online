@@ -1034,6 +1034,7 @@ export class SkillsManager {
         const skill = this.skills[skillId];
         let targetObject = null;
         let targetPosition = null;
+        let monsterType = null;
         
         // Check if this is a monster target
         if (targetId.startsWith('monster-') && this.game.monsterManager) {
@@ -1041,6 +1042,7 @@ export class SkillsManager {
             if (monster && monster.mesh) {
                 targetObject = monster;
                 targetPosition = monster.mesh.position;
+                monsterType = monster.type; // Store monster type for range adjustment
             }
         } else {
             // This is a player target
@@ -1080,10 +1082,26 @@ export class SkillsManager {
         
         const distance = localPlayer.position.distanceTo(targetPosition);
         
-        console.log(`Checking range: Skill=${skillId}, Distance=${distance}, Range=${skill.range}`);
+        // Adjust range for large monsters like Typhon by considering their collision radius
+        let adjustedRange = skill.range;
+        if (monsterType) {
+            // Check if this is Typhon, which has a much larger collision radius
+            if (monsterType === 'TYPHON' && this.game.gameConstants?.MONSTER?.TYPHON?.COLLISION_RADIUS) {
+                const typhonRadius = this.game.gameConstants.MONSTER.TYPHON.COLLISION_RADIUS;
+                // Add collision radius to effective range for big monsters
+                adjustedRange += typhonRadius;
+                console.log(`Adjusting range for Typhon: Base=${skill.range}, Adjusted=${adjustedRange}, Radius=${typhonRadius}`);
+            } else if (targetObject.collisionRadius) {
+                // Use collision radius from monster object if available
+                adjustedRange += targetObject.collisionRadius;
+                console.log(`Adjusting range for monster: Base=${skill.range}, Adjusted=${adjustedRange}, Radius=${targetObject.collisionRadius}`);
+            }
+        }
         
-        // Check if the target is within the skill's range
-        return distance <= skill.range;
+        console.log(`Checking range: Skill=${skillId}, Distance=${distance}, Range=${skill.range}, Adjusted Range=${adjustedRange}`);
+        
+        // Check if the target is within the skill's adjusted range
+        return distance <= adjustedRange;
     }
     
     /**
@@ -1477,12 +1495,27 @@ export class SkillsManager {
         const distance = localPlayer.position.distanceTo(monster.mesh.position);
         
         // Get the skill range from our skill data
-        const skillRange = skill.range;
+        let skillRange = skill.range;
+        
+        // Adjust range for large monsters like Typhon by considering their collision radius
+        if (monster.type) {
+            // Check if this is Typhon, which has a much larger collision radius
+            if (monster.type === 'TYPHON' && this.game.gameConstants?.MONSTER?.TYPHON?.COLLISION_RADIUS) {
+                const typhonRadius = this.game.gameConstants.MONSTER.TYPHON.COLLISION_RADIUS;
+                // Add collision radius to effective range for Typhon
+                skillRange += typhonRadius;
+                console.log(`Adjusting range for Typhon: Base=${skill.range}, Adjusted=${skillRange}, Radius=${typhonRadius}`);
+            } else if (monster.collisionRadius) {
+                // Use collision radius from monster object if available
+                skillRange += monster.collisionRadius;
+                console.log(`Adjusting range for monster: Base=${skill.range}, Adjusted=${skillRange}, Radius=${monster.collisionRadius}`);
+            }
+        }
         
         // Log the actual values to help with debugging
-        console.log(`Monster distance: ${distance.toFixed(2)}, Skill range: ${skillRange}`);
+        console.log(`Monster distance: ${distance.toFixed(2)}, Skill range: ${skill.range}, Adjusted range: ${skillRange}`);
         
-        // Check if the monster is within the skill's range
+        // Check if the monster is within the skill's adjusted range
         return distance <= skillRange;
     }
     
@@ -3295,9 +3328,25 @@ export class SkillsManager {
         // Calculate distance
         const distance = playerPosition.distanceTo(targetPosition);
         
-        // Check if target is in range
-        if (distance > range) {
-            return { success: false, message: `Target out of range (${distance.toFixed(1)} > ${range})` };
+        // Adjust range for large monsters like Typhon by considering their collision radius
+        let adjustedRange = range;
+        if (targetType === 'monster' && targetObject.type) {
+            // Check if this is Typhon, which has a much larger collision radius
+            if (targetObject.type === 'TYPHON' && this.game.gameConstants?.MONSTER?.TYPHON?.COLLISION_RADIUS) {
+                const typhonRadius = this.game.gameConstants.MONSTER.TYPHON.COLLISION_RADIUS;
+                // Add collision radius to effective range for big monsters
+                adjustedRange += typhonRadius;
+                console.log(`Adjusting range for Typhon: Base=${range}, Adjusted=${adjustedRange}, Radius=${typhonRadius}`);
+            } else if (targetObject.collisionRadius) {
+                // Use collision radius from monster object if available
+                adjustedRange += targetObject.collisionRadius;
+                console.log(`Adjusting range for monster: Base=${range}, Adjusted=${adjustedRange}, Radius=${targetObject.collisionRadius}`);
+            }
+        }
+        
+        // Check if target is in range with adjusted range
+        if (distance > adjustedRange) {
+            return { success: false, message: `Target out of range (${distance.toFixed(1)} > ${adjustedRange})` };
         }
         
         return { success: true, message: 'Target in range' };
