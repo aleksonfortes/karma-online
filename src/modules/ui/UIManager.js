@@ -488,9 +488,6 @@ export class UIManager {
         const experienceToNextLevel = playerStats.experienceToNextLevel || 100;
         const level = playerStats.level || 1;
         
-        // Debug log for mana updates - helps identify when changes happen
-        console.log(`UIManager: Updating status bars - Mana: ${Math.floor(currentMana)}/${maxMana} (actual value: ${playerStats.currentMana})`);
-        
         // Update life ring
         if (this.lifeRingFill) {
             // Calculate life percentage
@@ -1501,11 +1498,11 @@ export class UIManager {
                     // Define the dark path skills with their details
                     const darkPathSkills = [
                         {
-                            id: 'martial_arts',
-                            name: 'Martial Arts',
+                            id: 'dark_ball',
+                            name: 'Dark Ball',
                             level: 1,
-                            description: 'Basic combat skill, unlocked by default',
-                            alreadyLearned: playerSkills.has('martial_arts')
+                            description: 'Launch a ball of dark energy at your target from a distance',
+                            alreadyLearned: playerSkills.has('dark_ball')
                         },
                         {
                             id: 'shadow_strike',
@@ -1704,9 +1701,9 @@ export class UIManager {
                                 this.game.playerStats.path = 'dark';
                             }
                             
-                            // Add martial arts skill
+                            // Add dark ball skill
                             this.game.activeSkills = this.game.activeSkills || new Set();
-                            this.game.activeSkills.add('martial_arts');
+                            this.game.activeSkills.add('dark_ball');
                             this.updateSkillBar();
                         }
                         this.hideDialogue();

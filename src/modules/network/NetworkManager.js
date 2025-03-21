@@ -2286,7 +2286,7 @@ export class NetworkManager {
             return;
         }
         
-        console.log('Received game state sync from server');
+        // Game state sync received
         
         // Store current mana values before processing sync
         const currentMana = this.game.playerStats?.currentMana;
@@ -2837,7 +2837,7 @@ export class NetworkManager {
                 !isFromPeriodicUpdate;
                 
             if (playerData.mana !== undefined && acceptManaUpdate) {
-                console.log(`Setting local player mana to ${playerData.mana} from server (source: ${playerData.source || 'unknown'})`);
+                // Setting mana from server
                 this.game.playerStats.currentMana = playerData.mana;
                 
                 // Sync with userData for consistency
@@ -2846,10 +2846,22 @@ export class NetworkManager {
                         this.game.localPlayer.userData.stats = {};
                     }
                     this.game.localPlayer.userData.stats.mana = playerData.mana;
-                    console.log(`Also synced localPlayer.userData.stats.mana=${playerData.mana}`);
+                    // Synced with userData
+                }
+            } else if (playerData.mana !== undefined && playerData.mana !== this.game.playerStats.currentMana) {
+                // Setting mana from server
+                this.game.playerStats.currentMana = playerData.mana;
+                
+                // Sync with userData for consistency
+                if (this.game.localPlayer && this.game.localPlayer.userData) {
+                    if (!this.game.localPlayer.userData.stats) {
+                        this.game.localPlayer.userData.stats = {};
+                    }
+                    this.game.localPlayer.userData.stats.mana = playerData.mana;
+                    // Synced with userData
                 }
             } else if (playerData.mana !== undefined) {
-                console.log(`Ignoring server mana update: ${playerData.mana} (current: ${this.game.playerStats.currentMana}, source: ${playerData.source || 'unknown'})`);
+                // Mana hasn't changed, so no update needed
             }
             
             // Update max mana if provided
