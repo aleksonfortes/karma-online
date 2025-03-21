@@ -84,6 +84,25 @@ const GameConstants = {
             ATTACK_SPEED: 2000,        // Milliseconds between attacks
             ATTACK_ANIMATION_TIME: 500, // Milliseconds for attack animation
             EXPERIENCE_REWARD: 50      // Experience points rewarded when killed
+        },
+        TYPHON: {
+            SPAWN_POSITION: { x: 0, y: 3, z: -80 }, // Raised y position to be above the grass
+            SCALE: 3.0, // Increased scale by 3x
+            COLLISION_RADIUS: 6.0, // Significantly increased collision radius to match the larger size
+            MAX_HEALTH: 2000, // 20x more life than Cerberus
+            RESPAWN_TIME: 30000, // 30 seconds respawn time
+            MOVEMENT_SPEED: 1.5, // Same movement speed
+            AGGRO_RADIUS: 15, // Increased aggro radius
+            MAX_FOLLOW_DISTANCE: 40, // Can follow a bit further
+            // Attack properties
+            ATTACK_DAMAGE: 100, // 10x more damage than Cerberus
+            ATTACK_RANGE: 6.0, // Significantly increased attack range to match the larger size
+            ATTACK_SPEED: 2000, // Same attack speed
+            ATTACK_ANIMATION_TIME: 500, // Same animation time
+            EXPERIENCE_REWARD: 500, // 10x more experience
+            HEALTH_REGEN: true, // Will regenerate health when out of combat
+            HEALTH_REGEN_AMOUNT: 10, // Amount of health regained per second when out of combat
+            HEALTH_REGEN_DELAY: 5000 // 5 seconds delay before health regeneration starts
         }
     },
     
