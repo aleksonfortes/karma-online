@@ -727,202 +727,712 @@ export class UIManager {
         
         // Death message
         const deathMessage = document.createElement('div');
-        deathMessage.textContent = 'YOU DIED';
-        deathMessage.style.color = '#ff0000';
-        deathMessage.style.textShadow = '0 0 10px #ff0000';
-        deathMessage.style.fontFamily = 'Arial, sans-serif';
-        deathMessage.style.fontSize = '72px';
+        deathMessage.style.color = '#ff3019';
+        deathMessage.style.fontSize = '36px';
         deathMessage.style.fontWeight = 'bold';
-        deathMessage.style.marginBottom = '50px';
+        deathMessage.style.textShadow = '0 0 10px #ff3019';
+        deathMessage.style.marginBottom = '20px';
+        deathMessage.textContent = 'YOU DIED';
+        deathScreen.appendChild(deathMessage);
         
-        // Respawn button
-        const respawnButton = document.createElement('button');
-        respawnButton.textContent = 'RESPAWN';
-        respawnButton.style.padding = '15px 30px';
-        respawnButton.style.backgroundColor = '#333333';
-        respawnButton.style.color = '#ffffff';
-        respawnButton.style.border = '2px solid #666666';
-        respawnButton.style.borderRadius = '5px';
-        respawnButton.style.fontFamily = 'Arial, sans-serif';
-        respawnButton.style.fontSize = '24px';
-        respawnButton.style.cursor = 'pointer';
-        respawnButton.style.transition = 'all 0.2s ease';
+        // Countdown timer
+        const countdownTimer = document.createElement('div');
+        countdownTimer.style.color = '#ffffff';
+        countdownTimer.style.fontSize = '18px';
+        countdownTimer.style.marginBottom = '20px';
+        countdownTimer.textContent = 'Respawning in 10 seconds...';
+        deathScreen.appendChild(countdownTimer);
         
-        respawnButton.addEventListener('mouseover', () => {
-            respawnButton.style.backgroundColor = '#555555';
-        });
+        // Store references
+        this.deathScreen = {
+            container: deathScreen,
+            message: deathMessage,
+            timer: countdownTimer
+        };
         
-        respawnButton.addEventListener('mouseout', () => {
-            respawnButton.style.backgroundColor = '#333333';
-        });
-        
-        respawnButton.addEventListener('click', () => {
-            deathOverlay.style.opacity = '0';
-            setTimeout(() => {
-                deathOverlay.remove();
-                if (onRespawn) onRespawn();
-            }, 1000);
-        });
-        
-        deathOverlay.appendChild(deathMessage);
-        deathOverlay.appendChild(respawnButton);
-        document.body.appendChild(deathOverlay);
-        
-        // Fade in
-        setTimeout(() => {
-            deathOverlay.style.opacity = '1';
-        }, 100);
+        // Add to document
+        document.body.appendChild(deathScreen);
     }
     
-    createLevelIndicator() {
-        // Create circular icon with XP ring
-        const iconContainer = document.createElement('div');
-        iconContainer.style.width = '100px'; // Updated from 96px to match other rings
-        iconContainer.style.height = '100px'; // Updated from 96px to match other rings
-        iconContainer.style.position = 'fixed';
-        iconContainer.style.bottom = '20px';
-        iconContainer.style.left = '20px';
-        iconContainer.style.borderRadius = '50%';
-        iconContainer.style.background = 'rgba(0, 0, 0, 0.6)';
-        iconContainer.style.border = '2px solid rgba(147, 255, 223, 0.15)';
-        iconContainer.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
-        iconContainer.style.zIndex = '1000';
-        document.body.appendChild(iconContainer);
-
-        // Create ring fill with golden gradient - more like original game
-        const ringFill = document.createElement('div');
-        ringFill.style.position = 'absolute';
-        ringFill.style.width = '100%';
-        ringFill.style.height = '100%';
-        ringFill.style.borderRadius = '50%';
-        ringFill.style.background = 'radial-gradient(circle, #FFD700, #b8860b)';
-        ringFill.style.opacity = '0.8';
-        ringFill.style.clipPath = 'circle(50% at center)';
+    /**
+     * Hide death screen when player respawns
+     */
+    hideDeathScreen() {
+        console.log('Hiding death screen');
         
-        // Start with a small percentage filled
-        const startPercent = 0;
-        ringFill.style.clipPath = `inset(${100 - startPercent}% 0 0 0)`;
-        ringFill.style.transition = 'clip-path 0.3s ease-out';
-        
-        iconContainer.appendChild(ringFill);
-        this.xpRingFill = ringFill;
-
-        // Create level text
-        const levelText = document.createElement('div');
-        levelText.textContent = this.game.playerStats.level || '1';
-        levelText.style.position = 'absolute';
-        levelText.style.top = '50%';
-        levelText.style.left = '50%';
-        levelText.style.transform = 'translate(-50%, -50%)';
-        levelText.style.color = '#FFD700';  // Golden color
-        levelText.style.fontSize = '24px'; // Changed from 38px to match other rings
-        levelText.style.fontWeight = 'bold';
-        levelText.style.textShadow = '0 0 10px rgba(255, 215, 0, 0.7)';  // Golden glow
-        levelText.style.letterSpacing = '0.5px';
-        levelText.style.userSelect = 'none';
-        levelText.style.zIndex = '10';
-        iconContainer.appendChild(levelText);
-        this.levelText = levelText;
-
-        // Add pulsing animation for the level text
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes levelPulse {
-                0% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
-                50% { text-shadow: 0 0 15px rgba(255, 215, 0, 0.8); }
-                100% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); }
+        if (this.deathScreen) {
+            // Clear any existing countdown
+            if (this.respawnCountdown) {
+                clearInterval(this.respawnCountdown);
+                this.respawnCountdown = null;
             }
-        `;
-        document.head.appendChild(style);
-        levelText.style.animation = 'levelPulse 2s ease-in-out infinite';
-
-        // Add XP tooltip
-        const xpTooltip = document.createElement('div');
-        xpTooltip.style.position = 'absolute';
-        xpTooltip.style.bottom = '120%';
-        xpTooltip.style.left = '50%';
-        xpTooltip.style.transform = 'translateX(-50%)';
-        xpTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        xpTooltip.style.color = '#ffffff';
-        xpTooltip.style.padding = '5px 10px';
-        xpTooltip.style.borderRadius = '4px';
-        xpTooltip.style.fontSize = '12px';
-        xpTooltip.style.fontWeight = '500';
-        xpTooltip.style.whiteSpace = 'nowrap';
-        xpTooltip.style.display = 'none';
-        xpTooltip.style.zIndex = '1101'; // Increased z-index for visibility
-        xpTooltip.textContent = 'Level 1: 0/100 XP';
-        iconContainer.appendChild(xpTooltip); // Attach to container instead of body
-        this.xpTooltip = xpTooltip;
-
-        // Show tooltip on hover with more direct reference
-        iconContainer.onmouseenter = () => {
-            this.xpTooltip.style.display = 'block';
-        };
-        
-        iconContainer.onmouseleave = () => {
-            this.xpTooltip.style.display = 'none';
-        };
-        
-        // Store for reference
-        this.statusElements.iconContainer = iconContainer;
+            
+            // Fade out
+            this.deathScreen.container.style.opacity = '0';
+            
+            // Hide after animation completes
+            setTimeout(() => {
+                this.deathScreen.container.style.display = 'none';
+            }, 500);
+            
+            // Clear any damage effects/indicators that might still be visible
+            this.clearDamageEffects();
+        }
     }
     
+    /**
+     * Clear any damage effects or indicators from the scene
+     */
+    clearDamageEffects() {
+        // Remove any damage effect elements from the DOM
+        const damageElements = document.querySelectorAll('.damage-effect, .damage-indicator');
+        damageElements.forEach(element => {
+            element.remove();
+        });
+        
+        // Also clear any red flash overlay
+        if (this.damageOverlay) {
+            this.damageOverlay.style.opacity = '0';
+            setTimeout(() => {
+                this.damageOverlay.style.display = 'none';
+            }, 300);
+        }
+        
+        // Note: This method only clears visual effects, not actual health data
+        // The server remains the authority for player health values
+    }
+
+    /**
+     * Creates a red flash effect overlay to indicate player damage
+     */
+    flashDamageEffect() {
+        // Create damage overlay if it doesn't exist
+        if (!this.damageOverlay) {
+            this.damageOverlay = document.createElement('div');
+            this.damageOverlay.style.position = 'fixed';
+            this.damageOverlay.style.top = '0';
+            this.damageOverlay.style.left = '0';
+            this.damageOverlay.style.width = '100%';
+            this.damageOverlay.style.height = '100%';
+            this.damageOverlay.style.backgroundColor = 'rgba(255, 0, 0, 0.3)';
+            this.damageOverlay.style.zIndex = '1500';
+            this.damageOverlay.style.pointerEvents = 'none'; // Allow click-through
+            this.damageOverlay.style.transition = 'opacity 0.3s ease-out';
+            this.damageOverlay.style.opacity = '0';
+            document.body.appendChild(this.damageOverlay);
+        }
+        
+        // Make sure it's visible
+        this.damageOverlay.style.display = 'block';
+        
+        // Flash effect
+        this.damageOverlay.style.opacity = '0.5';
+        
+        // Fade out after short delay
+        setTimeout(() => {
+            if (this.damageOverlay) {
+                this.damageOverlay.style.opacity = '0';
+            }
+        }, 200);
+    }
+
+    /**
+     * Update the XP ring with the player's experience
+     * @param {number} experience - Current experience points
+     * @param {number} experienceToNextLevel - Experience needed for next level
+     * @param {number} level - Current player level
+     */
+    updateXPRing(experience, experienceToNextLevel, level) {
+        if (this.xpRingFill && this.xpTooltip) {
+            const baseExp = 100; // Same as GameConstants.EXPERIENCE.BASE_EXPERIENCE
+            const scalingFactor = 1.5; // Same as GameConstants.EXPERIENCE.SCALING_FACTOR
+            
+            // Calculate total experience needed for previous level
+            let expToPreviousLevel = 0;
+            for (let i = 1; i < level; i++) {
+                expToPreviousLevel += baseExp * Math.pow(scalingFactor, i - 1);
+            }
+            
+            // Calculate experience needed for current level
+            const expForCurrentLevel = baseExp * Math.pow(scalingFactor, level - 1);
+            
+            // Calculate progress within the current level
+            const currentLevelProgress = experience - expToPreviousLevel;
+            
+            // Calculate the percentage filled
+            const xpPercent = Math.min(100, (currentLevelProgress / expForCurrentLevel) * 100);
+            
+            // Use clip-path instead of strokeDashoffset for consistent rendering with other rings
+            const emptyPercentage = 100 - xpPercent;
+            this.xpRingFill.style.clipPath = `inset(${emptyPercentage}% 0 0 0)`;
+            
+            if (this.xpTooltip) {
+                this.xpTooltip.textContent = `Level ${level}: ${Math.floor(currentLevelProgress)}/${Math.floor(expForCurrentLevel)} XP`;
+            }
+        }
+        
+        // Update level text if available
+        if (this.levelText) {
+            this.levelText.textContent = level;
+        }
+    }
+
+    /**
+     * Show a message to the user
+     * @param {string} message - The message to display
+     * @param {number} [duration=3000] - How long to show the message in milliseconds
+     */
+    showMessage(message, duration = 3000, color = 'white') {
+        // Use the notification system for consistency
+        this.showNotification(message, color, duration);
+    }
+
+    /**
+     * Create a tooltip for the karma bar
+     * @param {HTMLElement} karmaBar - The karma bar element
+     */
+    createKarmaTooltip(karmaBar) {
+        // Create karma tooltip
+        const karmaTooltip = document.createElement('div');
+        karmaTooltip.className = 'tooltip';
+        karmaTooltip.style.position = 'absolute';
+        karmaTooltip.style.bottom = '25px';
+        karmaTooltip.style.left = '50%';
+        karmaTooltip.style.transform = 'translateX(-50%)';
+        karmaTooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        karmaTooltip.style.color = '#ffffff';
+        karmaTooltip.style.padding = '5px 10px';
+        karmaTooltip.style.borderRadius = '4px';
+        karmaTooltip.style.fontSize = '12px';
+        karmaTooltip.style.whiteSpace = 'nowrap';
+        karmaTooltip.style.display = 'none';
+        karmaTooltip.style.zIndex = '1500';
+        karmaTooltip.textContent = 'Karma: Neutral (50/100)';
+        
+        // Add to document body
+        document.body.appendChild(karmaTooltip);
+        
+        // Store reference
+        this.karmaTooltip = karmaTooltip;
+        
+        // Add hover event listeners
+        karmaBar.addEventListener('mouseenter', () => {
+            const rect = karmaBar.getBoundingClientRect();
+            karmaTooltip.style.left = `${rect.left + rect.width / 2}px`;
+            karmaTooltip.style.bottom = `${window.innerHeight - rect.top + 5}px`;
+            karmaTooltip.style.display = 'block';
+        });
+        
+        karmaBar.addEventListener('mouseleave', () => {
+            karmaTooltip.style.display = 'none';
+        });
+    }
+
+    /**
+     * Shows a notification for experience gained
+     * @param {number} amount - Amount of experience gained
+     * @param {boolean} levelUp - Whether a level up also occurred
+     * @param {number} newLevel - The new level if leveled up
+     */
+    showExperienceGain(amount, levelUp = false, newLevel = null) {
+        // Experience gain notification with animation
+        const xpNotification = document.createElement('div');
+        xpNotification.textContent = `+${amount} XP`;
+        xpNotification.style.position = 'fixed';
+        xpNotification.style.bottom = '130px'; // Position above XP ring
+        xpNotification.style.left = '70px'; // Aligned with XP ring
+        xpNotification.style.color = '#FFD700'; // Golden color
+        xpNotification.style.fontWeight = 'bold';
+        xpNotification.style.fontSize = '20px';
+        xpNotification.style.textShadow = '0 0 5px rgba(255, 215, 0, 0.7)';
+        xpNotification.style.zIndex = '1200';
+        xpNotification.style.opacity = '0';
+        xpNotification.style.transform = 'translateY(0)';
+        xpNotification.style.transition = 'opacity 0.3s ease-in, transform 1s ease-out';
+        document.body.appendChild(xpNotification);
+        
+        // Fade in and float up
+        setTimeout(() => {
+            xpNotification.style.opacity = '1';
+            xpNotification.style.transform = 'translateY(-30px)';
+        }, 50);
+        
+        // Fade out and remove
+        setTimeout(() => {
+            xpNotification.style.opacity = '0';
+            setTimeout(() => xpNotification.remove(), 500);
+        }, 2000);
+        
+        // If level up occurred, show a level up notification
+        if (levelUp && newLevel) {
+            // Main level up notification
+            this.showNotification(`Level up! You are now level ${newLevel}`, 'yellow', 3000);
+            
+            // Add stat improvement notifications
+            setTimeout(() => {
+                this.showNotification(`+${GameConstants.LEVEL_REWARDS.LIFE_PER_LEVEL} Max Life`, '#77ff77', 2500);
+            }, 1000);
+            
+            setTimeout(() => {
+                this.showNotification(`+${GameConstants.LEVEL_REWARDS.MANA_PER_LEVEL} Max Mana`, '#7777ff', 2500);
+            }, 1500);
+            
+            setTimeout(() => {
+                const damageBonus = Math.round(GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL * 100);
+                this.showNotification(`+${damageBonus}% Damage`, '#ff7777', 2500);
+            }, 2000);
+            
+            setTimeout(() => {
+                const reduction = Math.round(GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL * 100);
+                this.showNotification(`+${reduction}% Damage Reduction`, '#aaddff', 2500);
+            }, 2500);
+            
+            // Play level up sound if available
+            if (this.game.soundManager && this.game.soundManager.playSound) {
+                this.game.soundManager.playSound('level_up');
+            }
+        }
+    }
+
+    /**
+     * Update the loading screen message
+     * @param {string} message - The new message to display
+     */
+    updateLoadingScreen(message) {
+        if (this.loadingScreen && this.loadingScreen.messageElement) {
+            this.loadingScreen.messageElement.textContent = message;
+        } else {
+            // If the loading screen doesn't exist yet, create it
+            this.showLoadingScreen(message);
+        }
+    }
+    
+    /**
+     * Show a notification that the game is running in offline mode
+     */
+    showOfflineNotification() {
+        this.showNotification(
+            'Unable to connect to server. Running in offline mode with limited functionality.',
+            '#ff9900',
+            10000
+        );
+        
+        // Also create a persistent offline indicator
+        const offlineIndicator = document.createElement('div');
+        offlineIndicator.className = 'offline-indicator';
+        offlineIndicator.style.position = 'fixed';
+        offlineIndicator.style.top = '10px';
+        offlineIndicator.style.right = '10px';
+        offlineIndicator.style.backgroundColor = '#ff9900';
+        offlineIndicator.style.color = 'white';
+        offlineIndicator.style.padding = '5px 10px';
+        offlineIndicator.style.borderRadius = '4px';
+        offlineIndicator.style.fontSize = '12px';
+        offlineIndicator.style.fontWeight = 'bold';
+        offlineIndicator.style.zIndex = '9999';
+        offlineIndicator.textContent = 'OFFLINE MODE';
+        document.body.appendChild(offlineIndicator);
+        
+        // Pulse the indicator to draw attention
+        let opacity = 1;
+        const pulse = () => {
+            opacity = opacity === 1 ? 0.5 : 1;
+            offlineIndicator.style.opacity = opacity;
+            setTimeout(pulse, 1000);
+        };
+        pulse();
+    }
+
+    /**
+     * Clear all pending and currently displayed notifications
+     */
+    clearAllNotifications() {
+        // Clear queue
+        this.notificationQueue = [];
+        
+        // Clear currently displaying notification
+        if (this.notificationElement) {
+            // Clear any existing timeout
+            if (this.notificationTimeout) {
+                clearTimeout(this.notificationTimeout);
+                this.notificationTimeout = null;
+            }
+            
+            // Hide current notification
+            this.notificationElement.style.opacity = '0';
+            this.currentNotificationMessage = null;
+            this.processingNotification = false;
+        }
+    }
+    
+    /**
+     * Update notification position to be 50px (5cm) below the target bar
+     */
+    updateNotificationPosition() {
+        if (!this.notificationElement) return;
+        
+        const TARGET_OFFSET = 50; // 50px = 5cm at standard DPI
+        
+        if (this.targetDisplay && this.targetDisplay.container) {
+            // Get the target display position and dimensions
+            const targetRect = this.targetDisplay.container.getBoundingClientRect();
+            // Position notification 50px below the bottom of target display
+            const topPosition = targetRect.bottom + TARGET_OFFSET;
+            this.notificationElement.style.top = `${topPosition}px`;
+        } else {
+            // If target display doesn't exist, use a default position
+            this.notificationElement.style.top = '60px';
+        }
+    }
+
+    /**
+     * Handle window resize events to update UI elements
+     */
+    handleResize() {
+        // Update notification position
+        this.updateNotificationPosition();
+        
+        // Update any other UI elements that need repositioning
+        // ...
+    }
+
     showDialogue(npcType) {
         console.log(`Showing dialogue for ${npcType}`);
         
-        // Check if a dialogue is already open
-        if (this.dialogueUI) {
-            this.hideDialogue();
+        // Create or clear the dialogue box
+        let dialogueBox = document.getElementById('dialogue-box');
+        
+        if (!dialogueBox) {
+            dialogueBox = document.createElement('div');
+            dialogueBox.id = 'dialogue-box';
+            dialogueBox.style.position = 'fixed';
+            dialogueBox.style.top = '50%';
+            dialogueBox.style.left = '50%';
+            dialogueBox.style.transform = 'translate(-50%, -50%)';
+            dialogueBox.style.width = '500px';
+            dialogueBox.style.padding = '20px';
+            dialogueBox.style.background = 'rgba(0, 0, 0, 0.8)';
+            dialogueBox.style.border = '2px solid #444';
+            dialogueBox.style.borderRadius = '10px';
+            dialogueBox.style.color = '#fff';
+            dialogueBox.style.fontFamily = 'Arial, sans-serif';
+            dialogueBox.style.zIndex = '1000';
+            dialogueBox.style.display = 'flex';
+            dialogueBox.style.flexDirection = 'column';
+            dialogueBox.style.gap = '15px';
+            document.body.appendChild(dialogueBox);
+            
+            // Add emergency escape key event listener to the document
+            const escKeyHandler = (e) => {
+                if (e.key === 'Escape') {
+                    console.log('Escape key pressed, closing dialogue');
+                    this.hideDialogue();
+                    document.removeEventListener('keydown', escKeyHandler);
+                }
+            };
+            document.addEventListener('keydown', escKeyHandler);
+            
+            // Add emergency click handler
+            dialogueBox.addEventListener('click', (e) => {
+                // Close dialogue when Alt key is pressed during click anywhere in the dialogue
+                if (e.altKey) {
+                    console.log('Alt+Click detected, closing dialogue');
+                    this.hideDialogue();
+                }
+            });
+        } else {
+            // Clear existing content
+            dialogueBox.innerHTML = '';
         }
         
-        // Create dialogue container
-        const dialogueContainer = document.createElement('div');
-        dialogueContainer.style.position = 'fixed';
-        dialogueContainer.style.top = '50px';
-        dialogueContainer.style.left = '50%';
-        dialogueContainer.style.transform = 'translateX(-50%)';
-        dialogueContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.95)';
-        dialogueContainer.style.padding = '25px';
-        dialogueContainer.style.borderRadius = '15px';
-        dialogueContainer.style.color = 'white';
-        dialogueContainer.style.maxWidth = '800px';
-        dialogueContainer.style.width = '90%';
-        dialogueContainer.style.zIndex = '1000';
+        // Store a reference to the dialogue box
+        this.dialogueBox = dialogueBox;
+
+        // Title container
+        const titleContainer = document.createElement('div');
+        titleContainer.style.display = 'flex';
+        titleContainer.style.justifyContent = 'space-between';
+        titleContainer.style.alignItems = 'center';
         
-        // Create title element
-        const titleElement = document.createElement('h2');
-        titleElement.style.margin = '0 0 20px 0';
-        titleElement.style.fontSize = '24px';
+        // Add the NPC title
+        const title = document.createElement('h2');
+        title.style.margin = '0';
+        title.style.color = '#fff';
         
-        // Create content element
+        // Set title based on NPC type
+        if (npcType === 'light_npc') {
+            title.textContent = 'Luminara, Guardian of Light';
+        } else if (npcType === 'dark_npc') {
+            title.textContent = 'Moros, Lord of Darkness';
+        } else {
+            title.textContent = 'NPC';
+        }
+        
+        // Close button (X)
+        const closeButton = document.createElement('button');
+        closeButton.textContent = '×';
+        closeButton.style.background = 'transparent';
+        closeButton.style.border = 'none';
+        closeButton.style.color = '#fff';
+        closeButton.style.fontSize = '24px';
+        closeButton.style.cursor = 'pointer';
+        closeButton.style.padding = '0 5px';
+        closeButton.style.lineHeight = '1';
+        
+        // Use bind to ensure 'this' context is preserved
+        const boundHideDialogue = this.hideDialogue.bind(this);
+        closeButton.addEventListener('click', boundHideDialogue);
+        
+        titleContainer.appendChild(title);
+        titleContainer.appendChild(closeButton);
+        dialogueBox.appendChild(titleContainer);
+        
+        // Content container
         const contentElement = document.createElement('div');
-        contentElement.style.margin = '0 0 20px 0';
-        contentElement.style.fontSize = '18px';
-        contentElement.style.lineHeight = '1.6';
+        contentElement.style.marginBottom = '10px';
+        contentElement.style.lineHeight = '1.5';
+        dialogueBox.appendChild(contentElement);
         
-        // Create buttons container
+        // Buttons container
         const buttonsContainer = document.createElement('div');
         buttonsContainer.style.display = 'flex';
-        buttonsContainer.style.flexDirection = 'column';
+        buttonsContainer.style.justifyContent = 'center';
         buttonsContainer.style.gap = '10px';
+        buttonsContainer.style.flexWrap = 'wrap';
+        dialogueBox.appendChild(buttonsContainer);
         
         // Set dialogue content based on NPC type
-        if (npcType === 'light_npc') {
-            dialogueContainer.style.border = '2px solid #ffcc00';
-            dialogueContainer.style.boxShadow = '0 0 30px rgba(255, 204, 0, 0.4)';
-            titleElement.style.color = '#ffcc00';
-            titleElement.style.textShadow = '0 0 10px rgba(255, 204, 0, 0.5)';
+        if (npcType === 'merchant') {
+            contentElement.textContent = 'Welcome to my shop! What would you like to buy?';
             
-            titleElement.textContent = 'Light Path Master';
+            const buyButton = this.createDialogueButton('Buy Items', () => {
+                contentElement.textContent = 'Here are my wares:';
+                // Show shop inventory
+            });
             
-            // Don't show choice dialogue if player already has a path
-            if (this.game.playerStats && this.game.playerStats.path) {
-                contentElement.textContent = `You have already chosen the path of ${this.game.playerStats.path}. This choice is permanent in this life.`;
+            const sellButton = this.createDialogueButton('Sell Items', () => {
+                contentElement.textContent = 'What would you like to sell?';
+                // Show player inventory
+            });
+            
+            const closeShopButton = this.createDialogueButton('Close', () => this.hideDialogue());
+            
+            buttonsContainer.appendChild(buyButton);
+            buttonsContainer.appendChild(sellButton);
+            buttonsContainer.appendChild(closeShopButton);
+        } else if (npcType === 'light_npc') {
+            // Check if player has already chosen a path
+            const playerPath = this.game.playerStats?.path;
+            
+            if (playerPath === 'light') {
+                contentElement.textContent = 'Welcome back, child of light. Your presence brightens our realm.';
                 
-                // Only show a close button
-                const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
+                const learnSkillsButton = this.createDialogueButton('Learn Skills', () => {
+                    // Clear buttons
+                    buttonsContainer.innerHTML = '';
+                    
+                    // Add skill learning options based on player level
+                    const playerLevel = this.game.playerStats?.level || 1;
+                    const playerSkills = this.game.activeSkills || new Set();
+                    
+                    // Create a skills list container
+                    const skillsContainer = document.createElement('div');
+                    skillsContainer.style.display = 'flex';
+                    skillsContainer.style.flexDirection = 'column';
+                    skillsContainer.style.gap = '15px';
+                    skillsContainer.style.marginTop = '10px';
+                    skillsContainer.style.marginBottom = '15px';
+                    skillsContainer.style.width = '100%';
+                    
+                    contentElement.textContent = 'Select a skill to learn:';
+                    contentElement.appendChild(skillsContainer);
+                    
+                    // Define the light path skills with their details
+                    const lightPathSkills = [
+                        {
+                            id: 'martial_arts',
+                            name: 'Martial Arts',
+                            level: 1,
+                            description: 'Basic combat skill, unlocked by default',
+                            alreadyLearned: playerSkills.has('martial_arts')
+                        },
+                        {
+                            id: 'flow_of_life',
+                            name: 'Flow of Life',
+                            level: 2,
+                            description: 'Healing skill that restores health over time',
+                            alreadyLearned: playerSkills.has('flow_of_life')
+                        },
+                        {
+                            id: 'one_with_universe',
+                            name: 'One with the Universe',
+                            level: 5,
+                            description: 'Powerful defensive skill that reduces damage',
+                            alreadyLearned: playerSkills.has('one_with_universe')
+                        }
+                    ];
+                    
+                    // Create skill cards for each skill
+                    lightPathSkills.forEach(skill => {
+                        const skillCard = document.createElement('div');
+                        skillCard.style.border = '1px solid #444';
+                        skillCard.style.borderRadius = '5px';
+                        skillCard.style.padding = '10px';
+                        skillCard.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+                        skillCard.style.display = 'flex';
+                        skillCard.style.flexDirection = 'column';
+                        skillCard.style.gap = '5px';
+                        
+                        // Determine skill state
+                        const isAvailable = playerLevel >= skill.level;
+                        const isLearned = skill.alreadyLearned;
+                        
+                        // Set card color based on status
+                        if (isLearned) {
+                            skillCard.style.borderColor = '#4CAF50';
+                        } else if (!isAvailable) {
+                            skillCard.style.opacity = '0.5';
+                        } else {
+                            skillCard.style.borderColor = '#ffd700';
+                        }
+                        
+                        // Skill header with name and level
+                        const skillHeader = document.createElement('div');
+                        skillHeader.style.display = 'flex';
+                        skillHeader.style.justifyContent = 'space-between';
+                        skillHeader.style.alignItems = 'center';
+                        
+                        const skillName = document.createElement('div');
+                        skillName.style.fontWeight = 'bold';
+                        skillName.style.color = isAvailable ? '#9dffd1' : '#777';
+                        skillName.textContent = skill.name;
+                        
+                        const skillLevel = document.createElement('div');
+                        skillLevel.style.color = isAvailable ? '#ffd700' : '#777';
+                        skillLevel.style.fontSize = '12px';
+                        skillLevel.textContent = `Level ${skill.level}`;
+                        
+                        skillHeader.appendChild(skillName);
+                        skillHeader.appendChild(skillLevel);
+                        skillCard.appendChild(skillHeader);
+                        
+                        // Skill description
+                        const skillDesc = document.createElement('div');
+                        skillDesc.style.fontSize = '12px';
+                        skillDesc.style.color = isAvailable ? '#ddd' : '#777';
+                        skillDesc.textContent = skill.description;
+                        skillCard.appendChild(skillDesc);
+                        
+                        // Skill status/learn button
+                        const skillAction = document.createElement('button');
+                        skillAction.style.marginTop = '5px';
+                        skillAction.style.padding = '5px 10px';
+                        skillAction.style.border = 'none';
+                        skillAction.style.borderRadius = '3px';
+                        skillAction.style.cursor = isAvailable && !isLearned ? 'pointer' : 'default';
+                        
+                        if (isLearned) {
+                            skillAction.textContent = 'Learned';
+                            skillAction.style.backgroundColor = '#4CAF50';
+                            skillAction.style.color = 'white';
+                        } else if (!isAvailable) {
+                            skillAction.textContent = `Requires Level ${skill.level}`;
+                            skillAction.style.backgroundColor = '#555';
+                            skillAction.style.color = '#999';
+                            skillAction.disabled = true;
+                        } else {
+                            skillAction.textContent = 'Learn Skill';
+                            skillAction.style.backgroundColor = '#ffd700';
+                            skillAction.style.color = 'black';
+                            skillAction.style.fontWeight = 'bold';
+                            
+                            // Add hover effect
+                            skillAction.addEventListener('mouseover', () => {
+                                skillAction.style.backgroundColor = '#ffe44d';
+                            });
+                            
+                            skillAction.addEventListener('mouseout', () => {
+                                skillAction.style.backgroundColor = '#ffd700';
+                            });
+                            
+                            // Add click handler for learning
+                            skillAction.addEventListener('click', () => {
+                                // Disable button while processing
+                                skillAction.disabled = true;
+                                skillAction.textContent = 'Learning...';
+                                
+                                // Request skill learning
+                                if (this.game.networkManager && this.game.networkManager.isConnected) {
+                                    this.game.networkManager.requestLearnSkill(skill.id)
+                                        .then(response => {
+                                            if (response && response.success) {
+                                                // Success - update button
+                                                skillAction.textContent = 'Learned';
+                                                skillAction.style.backgroundColor = '#4CAF50';
+                                                skillAction.style.color = 'white';
+                                                
+                                                // Add to active skills
+                                                this.game.activeSkills.add(skill.id);
+                                                this.updateSkillBar();
+                                                
+                                                // Show success notification
+                                                this.showNotification(`Learned ${skill.name}!`, '#4CAF50');
+                                            } else {
+                                                // Error
+                                                skillAction.disabled = false;
+                                                skillAction.textContent = 'Learn Skill';
+                                                this.showNotification(response.message || 'Failed to learn skill', 'red');
+                                            }
+                                        })
+                                        .catch(error => {
+                                            console.error(error);
+                                            skillAction.disabled = false;
+                                            skillAction.textContent = 'Learn Skill';
+                                            this.showNotification('Error occurred while learning skill', 'red');
+                                        });
+                                } else {
+                                    // Offline mode
+                                    if (this.game.skillsManager) {
+                                        const result = this.game.skillsManager.learnSkill(skill.id);
+                                        if (result.success) {
+                                            skillAction.textContent = 'Learned';
+                                            skillAction.style.backgroundColor = '#4CAF50';
+                                            skillAction.style.color = 'white';
+                                            this.game.activeSkills.add(skill.id);
+                                            this.updateSkillBar();
+                                            this.showNotification(`Learned ${skill.name}!`, '#4CAF50');
+                                        } else {
+                                            skillAction.disabled = false;
+                                            skillAction.textContent = 'Learn Skill';
+                                            this.showNotification(result.message || 'Failed to learn skill', 'red');
+                                        }
+                                    } else {
+                                        skillAction.disabled = false;
+                                        skillAction.textContent = 'Learn Skill';
+                                    }
+                                }
+                            });
+                        }
+                        
+                        skillCard.appendChild(skillAction);
+                        skillsContainer.appendChild(skillCard);
+                    });
+                    
+                    // Add back button
+                    const backButton = this.createDialogueButton('Back', () => this.showDialogue(npcType));
+                    buttonsContainer.appendChild(backButton);
+                });
+                
+                const closeButton = this.createDialogueButton('Farewell', function() {
+                    console.log('Farewell button clicked for Light NPC');
+                    this.hideDialogue();
+                }.bind(this));
+                
+                buttonsContainer.appendChild(learnSkillsButton);
                 buttonsContainer.appendChild(closeButton);
+            } else if (playerPath === 'dark') {
+                contentElement.textContent = 'You have chosen the path of darkness. I have nothing to teach you.';
+                buttonsContainer.appendChild(this.createDialogueButton('Leave', () => this.hideDialogue()));
             } else {
                 contentElement.textContent = 'Welcome, seeker. The Light Path offers balance and harmony.';
                 
@@ -953,32 +1463,232 @@ export class UIManager {
                     buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
                 });
                 
-                const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
+                const closeButton = this.createDialogueButton('Maybe later', function() {
+                    console.log('Maybe later button clicked for light NPC');
+                    this.hideDialogue();
+                }.bind(this));
                 
                 buttonsContainer.appendChild(infoButton);
                 buttonsContainer.appendChild(closeButton);
             }
-        }
-        else if (npcType === 'dark_npc') {
-            dialogueContainer.style.border = '2px solid #6600cc';
-            dialogueContainer.style.boxShadow = '0 0 30px rgba(102, 0, 204, 0.4)';
-            titleElement.style.color = '#6600cc';
-            titleElement.style.textShadow = '0 0 10px rgba(102, 0, 204, 0.5)';
+        } else if (npcType === 'dark_npc') {
+            // Check if player has already chosen a path
+            const playerPath = this.game.playerStats?.path;
             
-            titleElement.textContent = 'Dark Path Master';
-            
-            // Don't show choice dialogue if player already has a path
-            if (this.game.playerStats && this.game.playerStats.path) {
-                contentElement.textContent = `You have already chosen the path of ${this.game.playerStats.path}. This choice is permanent in this life.`;
+            if (playerPath === 'dark') {
+                contentElement.textContent = 'Welcome back, servant of darkness. Your shadow grows deeper.';
                 
-                // Only show a close button
-                const closeButton = this.createDialogueButton('Close', () => this.hideDialogue());
+                const learnSkillsButton = this.createDialogueButton('Learn Skills', () => {
+                    // Clear buttons
+                    buttonsContainer.innerHTML = '';
+                    
+                    // Add skill learning options based on player level
+                    const playerLevel = this.game.playerStats?.level || 1;
+                    const playerSkills = this.game.activeSkills || new Set();
+                    
+                    // Create a skills list container
+                    const skillsContainer = document.createElement('div');
+                    skillsContainer.style.display = 'flex';
+                    skillsContainer.style.flexDirection = 'column';
+                    skillsContainer.style.gap = '15px';
+                    skillsContainer.style.marginTop = '10px';
+                    skillsContainer.style.marginBottom = '15px';
+                    skillsContainer.style.width = '100%';
+                    
+                    contentElement.textContent = 'Select a skill to learn:';
+                    contentElement.appendChild(skillsContainer);
+                    
+                    // Define the dark path skills with their details
+                    const darkPathSkills = [
+                        {
+                            id: 'martial_arts',
+                            name: 'Martial Arts',
+                            level: 1,
+                            description: 'Basic combat skill, unlocked by default',
+                            alreadyLearned: playerSkills.has('martial_arts')
+                        },
+                        {
+                            id: 'shadow_strike',
+                            name: 'Shadow Strike',
+                            level: 2,
+                            description: 'Quick attack that deals bonus damage and slows enemies',
+                            alreadyLearned: playerSkills.has('shadow_strike')
+                        },
+                        {
+                            id: 'embrace_void',
+                            name: 'Embrace the Void',
+                            level: 5,
+                            description: 'Drains life from enemies to heal yourself',
+                            alreadyLearned: playerSkills.has('embrace_void')
+                        }
+                    ];
+                    
+                    // Create skill cards for each skill
+                    darkPathSkills.forEach(skill => {
+                        const skillCard = document.createElement('div');
+                        skillCard.style.border = '1px solid #444';
+                        skillCard.style.borderRadius = '5px';
+                        skillCard.style.padding = '10px';
+                        skillCard.style.backgroundColor = 'rgba(0, 0, 0, 0.4)';
+                        skillCard.style.display = 'flex';
+                        skillCard.style.flexDirection = 'column';
+                        skillCard.style.gap = '5px';
+                        
+                        // Determine skill state
+                        const isAvailable = playerLevel >= skill.level;
+                        const isLearned = skill.alreadyLearned;
+                        
+                        // Set card color based on status
+                        if (isLearned) {
+                            skillCard.style.borderColor = '#4CAF50';
+                        } else if (!isAvailable) {
+                            skillCard.style.opacity = '0.5';
+                        } else {
+                            skillCard.style.borderColor = '#ff6e6e';
+                        }
+                        
+                        // Skill header with name and level
+                        const skillHeader = document.createElement('div');
+                        skillHeader.style.display = 'flex';
+                        skillHeader.style.justifyContent = 'space-between';
+                        skillHeader.style.alignItems = 'center';
+                        
+                        const skillName = document.createElement('div');
+                        skillName.style.fontWeight = 'bold';
+                        skillName.style.color = isAvailable ? '#ff9d9d' : '#777';
+                        skillName.textContent = skill.name;
+                        
+                        const skillLevel = document.createElement('div');
+                        skillLevel.style.color = isAvailable ? '#ff6e6e' : '#777';
+                        skillLevel.style.fontSize = '12px';
+                        skillLevel.textContent = `Level ${skill.level}`;
+                        
+                        skillHeader.appendChild(skillName);
+                        skillHeader.appendChild(skillLevel);
+                        skillCard.appendChild(skillHeader);
+                        
+                        // Skill description
+                        const skillDesc = document.createElement('div');
+                        skillDesc.style.fontSize = '12px';
+                        skillDesc.style.color = isAvailable ? '#ddd' : '#777';
+                        skillDesc.textContent = skill.description;
+                        skillCard.appendChild(skillDesc);
+                        
+                        // Skill status/learn button
+                        const skillAction = document.createElement('button');
+                        skillAction.style.marginTop = '5px';
+                        skillAction.style.padding = '5px 10px';
+                        skillAction.style.border = 'none';
+                        skillAction.style.borderRadius = '3px';
+                        skillAction.style.cursor = isAvailable && !isLearned ? 'pointer' : 'default';
+                        
+                        if (isLearned) {
+                            skillAction.textContent = 'Learned';
+                            skillAction.style.backgroundColor = '#4CAF50';
+                            skillAction.style.color = 'white';
+                        } else if (!isAvailable) {
+                            skillAction.textContent = `Requires Level ${skill.level}`;
+                            skillAction.style.backgroundColor = '#555';
+                            skillAction.style.color = '#999';
+                            skillAction.disabled = true;
+                        } else {
+                            skillAction.textContent = 'Learn Skill';
+                            skillAction.style.backgroundColor = '#ff6e6e';
+                            skillAction.style.color = 'white';
+                            skillAction.style.fontWeight = 'bold';
+                            
+                            // Add hover effect
+                            skillAction.addEventListener('mouseover', () => {
+                                skillAction.style.backgroundColor = '#ff8a8a';
+                            });
+                            
+                            skillAction.addEventListener('mouseout', () => {
+                                skillAction.style.backgroundColor = '#ff6e6e';
+                            });
+                            
+                            // Add click handler for learning
+                            skillAction.addEventListener('click', () => {
+                                // Disable button while processing
+                                skillAction.disabled = true;
+                                skillAction.textContent = 'Learning...';
+                                
+                                // Request skill learning
+                                if (this.game.networkManager && this.game.networkManager.isConnected) {
+                                    this.game.networkManager.requestLearnSkill(skill.id)
+                                        .then(response => {
+                                            if (response && response.success) {
+                                                // Success - update button
+                                                skillAction.textContent = 'Learned';
+                                                skillAction.style.backgroundColor = '#4CAF50';
+                                                skillAction.style.color = 'white';
+                                                
+                                                // Add to active skills
+                                                this.game.activeSkills.add(skill.id);
+                                                this.updateSkillBar();
+                                                
+                                                // Show success notification
+                                                this.showNotification(`Learned ${skill.name}!`, '#4CAF50');
+                                            } else {
+                                                // Error
+                                                skillAction.disabled = false;
+                                                skillAction.textContent = 'Learn Skill';
+                                                this.showNotification(response.message || 'Failed to learn skill', 'red');
+                                            }
+                                        })
+                                        .catch(error => {
+                                            console.error(error);
+                                            skillAction.disabled = false;
+                                            skillAction.textContent = 'Learn Skill';
+                                            this.showNotification('Error occurred while learning skill', 'red');
+                                        });
+                                } else {
+                                    // Offline mode
+                                    if (this.game.skillsManager) {
+                                        const result = this.game.skillsManager.learnSkill(skill.id);
+                                        if (result.success) {
+                                            skillAction.textContent = 'Learned';
+                                            skillAction.style.backgroundColor = '#4CAF50';
+                                            skillAction.style.color = 'white';
+                                            this.game.activeSkills.add(skill.id);
+                                            this.updateSkillBar();
+                                            this.showNotification(`Learned ${skill.name}!`, '#4CAF50');
+                                        } else {
+                                            skillAction.disabled = false;
+                                            skillAction.textContent = 'Learn Skill';
+                                            this.showNotification(result.message || 'Failed to learn skill', 'red');
+                                        }
+                                    } else {
+                                        skillAction.disabled = false;
+                                        skillAction.textContent = 'Learn Skill';
+                                    }
+                                }
+                            });
+                        }
+                        
+                        skillCard.appendChild(skillAction);
+                        skillsContainer.appendChild(skillCard);
+                    });
+                    
+                    // Add back button
+                    const backButton = this.createDialogueButton('Back', () => this.showDialogue(npcType));
+                    buttonsContainer.appendChild(backButton);
+                });
+                
+                const closeButton = this.createDialogueButton('Farewell', function() {
+                    console.log('Farewell button clicked for Dark NPC');
+                    this.hideDialogue();
+                }.bind(this));
+                
+                buttonsContainer.appendChild(learnSkillsButton);
                 buttonsContainer.appendChild(closeButton);
+            } else if (playerPath === 'light') {
+                contentElement.textContent = 'You have chosen the path of light. I have nothing to offer you.';
+                buttonsContainer.appendChild(this.createDialogueButton('Leave', () => this.hideDialogue()));
             } else {
-                contentElement.textContent = 'Power awaits those with the courage to seize it. The Dark Path offers strength beyond measure.';
+                contentElement.textContent = 'The Dark Path beckons, mortal. Power awaits those who dare to seize it.';
                 
                 const infoButton = this.createDialogueButton('Tell me about the Dark Path', () => {
-                    contentElement.textContent = 'The Dark Path grants great power through sacrifice. Follow this path to gain destructive abilities and dominance over others. Your karma decreases as you embrace darkness.';
+                    contentElement.textContent = 'The Dark Path grants immense offensive power and control over your enemies. Follow this path to gain destructive and dominating abilities. Your karma decreases as you embrace darkness.';
                     
                     // Clear buttons and add new ones
                     buttonsContainer.innerHTML = '';
@@ -993,6 +1703,10 @@ export class UIManager {
                             if (this.game.playerStats) {
                                 this.game.playerStats.path = 'dark';
                             }
+                            
+                            // Add martial arts skill
+                            this.game.activeSkills = this.game.activeSkills || new Set();
+                            this.game.activeSkills.add('martial_arts');
                             this.updateSkillBar();
                         }
                         this.hideDialogue();
@@ -1000,42 +1714,15 @@ export class UIManager {
                     buttonsContainer.appendChild(this.createDialogueButton('I need time to decide', () => this.hideDialogue()));
                 });
                 
-                const closeButton = this.createDialogueButton('Maybe later', () => this.hideDialogue());
+                const closeButton = this.createDialogueButton('Maybe later', function() {
+                    console.log('Maybe later button clicked for dark NPC');
+                    this.hideDialogue();
+                }.bind(this));
                 
                 buttonsContainer.appendChild(infoButton);
                 buttonsContainer.appendChild(closeButton);
             }
-        } 
-        else {
-            titleElement.textContent = 'NPC';
-            contentElement.textContent = 'Hello, traveler.';
-            
-            const closeButton = this.createDialogueButton('Goodbye', () => this.hideDialogue());
-            buttonsContainer.appendChild(closeButton);
         }
-        
-        // Add elements to container
-        dialogueContainer.appendChild(titleElement);
-        dialogueContainer.appendChild(contentElement);
-        dialogueContainer.appendChild(buttonsContainer);
-        
-        // Add close X button
-        const closeX = document.createElement('div');
-        closeX.textContent = '✕';
-        closeX.style.position = 'absolute';
-        closeX.style.top = '10px';
-        closeX.style.right = '10px';
-        closeX.style.cursor = 'pointer';
-        closeX.style.fontSize = '18px';
-        closeX.style.color = '#999';
-        closeX.addEventListener('click', () => this.hideDialogue());
-        dialogueContainer.appendChild(closeX);
-        
-        // Add to body
-        document.body.appendChild(dialogueContainer);
-        
-        // Store reference
-        this.dialogueUI = dialogueContainer;
     }
     
     createDialogueButton(text, onClick) {
@@ -1059,17 +1746,38 @@ export class UIManager {
             button.style.backgroundColor = '#333';
         });
         
-        // Click handler
-        button.addEventListener('click', onClick);
+        // Click handler - use bind to ensure 'this' context is preserved
+        if (onClick) {
+            button.addEventListener('click', onClick.bind(this));
+        }
         
         return button;
     }
     
     hideDialogue() {
+        console.log('hideDialogue method called');
+        // Use the stored reference
+        if (this.dialogueBox) {
+            console.log('Removing dialogue box by reference');
+            this.dialogueBox.remove();
+            this.dialogueBox = null;
+        }
+        
+        // Also check by ID for backwards compatibility
+        const dialogueBoxById = document.getElementById('dialogue-box');
+        if (dialogueBoxById) {
+            console.log('Removing dialogue box by ID');
+            dialogueBoxById.remove();
+        }
+        
+        // Also handle the old dialogueUI for backward compatibility
         if (this.dialogueUI) {
+            console.log('Removing old dialogueUI');
             this.dialogueUI.remove();
             this.dialogueUI = null;
         }
+        
+        console.log('Dialogue hidden');
     }
     
     cleanup() {
@@ -2073,5 +2781,136 @@ export class UIManager {
         
         // Update any other UI elements that need repositioning
         // ...
+    }
+
+    /**
+     * Create level indicator with XP ring
+     */
+    createLevelIndicator() {
+        // Create the level indicator container
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.bottom = '20px';
+        container.style.left = '20px';
+        container.style.width = '70px';
+        container.style.height = '70px';
+        container.style.borderRadius = '50%';
+        container.style.background = 'rgba(0, 0, 0, 0.6)';
+        container.style.border = '2px solid rgba(255, 215, 0, 0.15)';
+        container.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+        container.style.display = 'flex';
+        container.style.alignItems = 'center';
+        container.style.justifyContent = 'center';
+        container.style.zIndex = '1000';
+        document.body.appendChild(container);
+        
+        // Create fill container - used for masking
+        const fillContainer = document.createElement('div');
+        fillContainer.style.position = 'absolute';
+        fillContainer.style.top = '0';
+        fillContainer.style.left = '0';
+        fillContainer.style.width = '100%';
+        fillContainer.style.height = '100%';
+        fillContainer.style.borderRadius = '50%';
+        fillContainer.style.overflow = 'hidden';
+        container.appendChild(fillContainer);
+        
+        // Create the XP ring fill
+        const ringFill = document.createElement('div');
+        ringFill.className = 'fill';
+        ringFill.style.position = 'absolute';
+        ringFill.style.top = '0';
+        ringFill.style.left = '0';
+        ringFill.style.width = '100%';
+        ringFill.style.height = '100%';
+        ringFill.style.background = 'radial-gradient(circle, #ffd700, #b8860b)';
+        ringFill.style.opacity = '0.8';
+        ringFill.style.borderRadius = '50%';
+        
+        // Initialize with 0% fill
+        ringFill.style.clipPath = 'inset(100% 0 0 0)';
+        ringFill.style.transition = 'clip-path 0.3s ease-out';
+        
+        fillContainer.appendChild(ringFill);
+        
+        // Level text
+        const levelText = document.createElement('div');
+        levelText.style.color = '#ffd700';
+        levelText.style.fontSize = '24px';
+        levelText.style.fontWeight = 'bold';
+        levelText.style.textShadow = '0 0 5px rgba(255, 215, 0, 0.5)';
+        levelText.style.position = 'relative';
+        levelText.style.zIndex = '3';
+        
+        // Get level from game if available
+        if (this.game?.playerStats?.level) {
+            levelText.textContent = this.game.playerStats.level;
+        } else {
+            levelText.textContent = '1';
+        }
+        
+        // Add pulsing animation to draw attention
+        levelText.style.animation = 'pulse 2s infinite';
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.1); }
+                100% { transform: scale(1); }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        container.appendChild(levelText);
+        
+        // XP tooltip (shows on hover)
+        const tooltip = document.createElement('div');
+        tooltip.className = 'tooltip';
+        tooltip.style.position = 'absolute';
+        tooltip.style.bottom = '80px';
+        tooltip.style.left = '70px';
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        tooltip.style.color = '#ffd700';
+        tooltip.style.padding = '5px 10px';
+        tooltip.style.borderRadius = '4px';
+        tooltip.style.fontSize = '12px';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.display = 'none';
+        tooltip.style.zIndex = '1010';
+        tooltip.style.pointerEvents = 'none';
+        
+        // Get XP data from game if available
+        if (this.game?.playerStats) {
+            const level = this.game.playerStats.level || 1;
+            const experience = this.game.playerStats.experience || 0;
+            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
+            tooltip.textContent = `Level ${level}: ${experience}/${experienceToNextLevel} XP`;
+        } else {
+            tooltip.textContent = 'Level 1: 0/100 XP';
+        }
+        
+        container.appendChild(tooltip);
+        
+        // Show tooltip on hover
+        container.addEventListener('mouseenter', () => {
+            tooltip.style.display = 'block';
+        });
+        
+        container.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+        
+        // Store references for later updates
+        this.xpRingFill = ringFill;
+        this.levelText = levelText;
+        this.xpTooltip = tooltip;
+        
+        // Initial update based on current stats
+        if (this.game?.playerStats) {
+            const experience = this.game.playerStats.experience || 0;
+            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
+            const level = this.game.playerStats.level || 1;
+            this.updateXPRing(experience, experienceToNextLevel, level);
+        }
     }
 } 

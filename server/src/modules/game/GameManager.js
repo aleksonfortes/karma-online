@@ -335,4 +335,105 @@ export default class GameManager {
         this.npcManager.cleanup();
         this.monsterManager.cleanup();
     }
+    
+    /**
+     * Process a player's path choice
+     * @param {string} playerId - The player ID
+     * @param {string} path - The chosen path ('light' or 'dark')
+     * @returns {boolean} - Whether the path choice was successful
+     */
+    processPathChoice(playerId, path) {
+        // Get the player
+        const player = this.playerManager.getPlayer(playerId);
+        if (!player) {
+            console.warn(`Player ${playerId} not found for path choice`);
+            return false;
+        }
+        
+        // Check if player has already chosen a path
+        if (player.path) {
+            console.warn(`Player ${playerId} has already chosen path: ${player.path}`);
+            return false;
+        }
+        
+        // Set the player's path
+        player.path = path;
+        
+        // Give the player the appropriate starter skill
+        player.skills = player.skills || [];
+        if (path === 'light') {
+            player.skills.push('martial_arts');
+        } else if (path === 'dark') {
+            player.skills.push('dark_ball');
+        }
+        
+        console.log(`Player ${playerId} has chosen the ${path} path. Skills: ${player.skills}`);
+        
+        return true;
+    }
+    
+    /**
+     * Process a player's request to learn a new skill
+     * @param {string} playerId - The player ID
+     * @param {string} skillId - The ID of the skill to learn
+     * @returns {object} - The result of the skill learning attempt
+     */
+    processSkillLearning(playerId, skillId) {
+        // Get the player
+        const player = this.playerManager.getPlayer(playerId);
+        if (!player) {
+            return { success: false, message: 'Player not found' };
+        }
+        
+        // Check if player has a path
+        if (!player.path) {
+            return { success: false, message: 'You need to choose a path first' };
+        }
+        
+        // Initialize skills array if it doesn't exist
+        player.skills = player.skills || [];
+        
+        // Check if player already has this skill
+        if (player.skills.includes(skillId)) {
+            return { success: false, message: 'You already know this skill' };
+        }
+        
+        // Define skill requirements
+        const skillRequirements = {
+            // Light path skills
+            martial_arts: { path: 'any', level: 1 }, // Both paths start with martial arts
+            flow_of_life: { path: 'light', level: 2 },
+            one_with_universe: { path: 'light', level: 5 },
+            
+            // Dark path skills
+            shadow_strike: { path: 'dark', level: 2 },
+            embrace_void: { path: 'dark', level: 5 }
+        };
+        
+        // Check if the skill exists in our requirements
+        if (!skillRequirements[skillId]) {
+            return { success: false, message: 'Unknown skill' };
+        }
+        
+        const requirements = skillRequirements[skillId];
+        
+        // Check path requirement
+        if (requirements.path !== 'any' && requirements.path !== player.path) {
+            return { success: false, message: `This skill requires the ${requirements.path} path` };
+        }
+        
+        // Check level requirement
+        if (player.level < requirements.level) {
+            return { success: false, message: `You need to be level ${requirements.level} to learn this skill` };
+        }
+        
+        // Add the skill to the player
+        player.skills.push(skillId);
+        
+        return { 
+            success: true, 
+            message: `Skill learned successfully`, 
+            skillId: skillId 
+        };
+    }
 }

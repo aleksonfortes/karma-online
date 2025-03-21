@@ -153,10 +153,12 @@ export class NetworkManager {
 
     setupSocketHandlers() {
         if (!this.socket) {
-            console.warn('Cannot setup handlers: No socket connection');
-            return false; // Return false to indicate failure
+            console.error('Cannot set up socket handlers: socket not initialized');
+            return;
         }
-
+        
+        // Setup existing socket handlers
+        
         // Clean up previous handlers to prevent duplicates
         if (this._handlersInitialized) {
             console.log('Cleaning up previous socket handlers to prevent duplicates');
@@ -1664,7 +1666,29 @@ export class NetworkManager {
         // Mark handlers as initialized to prevent duplicate events
         this._handlersInitialized = true;
         
-        return true; // Return true to indicate success
+        // Handle skill learning result
+        this.socket.on('skillLearningResult', (result) => {
+            console.log('Received skill learning result:', result);
+            
+            if (result.success) {
+                // Add the new skill
+                if (this.game.skillsManager) {
+                    this.game.skillsManager.addSkill(result.skillId);
+                    console.log(`Skill ${result.skillId} added successfully`);
+                }
+                
+                // Update the UI
+                if (this.game.uiManager) {
+                    this.game.uiManager.updateSkillBar();
+                    this.game.uiManager.showNotification(`You learned ${result.skillId}`, '#00cc00');
+                }
+            } else {
+                // Show error message
+                if (this.game.uiManager) {
+                    this.game.uiManager.showNotification(result.message, '#ff0000');
+                }
+            }
+        });
     }
 
     handlePathSelectionResult(result) {
@@ -2870,5 +2894,56 @@ export class NetworkManager {
         } else if (this.game.uiManager && this.game.uiManager.updateStatusBars) {
             this.game.uiManager.updateStatusBars(this.game.playerStats);
         }
+    }
+
+    /**
+     * Send a request to learn a skill
+     * @param {string} skillId - The ID of the skill to learn
+     * @returns {Promise} Promise that resolves with the skill learning result
+     */
+    requestLearnSkill(skillId) {
+        return new Promise((resolve, reject) => {
+            if (!this.isConnected || !this.socket) {
+                console.error('Cannot request skill learning: not connected to server');
+                reject({ success: false, message: 'Not connected to server' });
+                return;
+            }
+            
+            console.log(`Sending request to learn skill: ${skillId}`);
+            
+            // Set up one-time listener for the response
+            const responseHandler = (response) => {
+                console.log(`Received skill learning response:`, response);
+                resolve(response);
+            };
+            
+            const errorHandler = (error) => {
+                console.error(`Error learning skill:`, error);
+                reject(error);
+            };
+            
+            // Register listeners
+            this.socket.once('skillLearningResult', responseHandler);
+            this.socket.once('errorMessage', errorHandler);
+            
+            // Set timeout to prevent hanging promises
+            const timeout = setTimeout(() => {
+                // Clean up listeners
+                this.socket.off('skillLearningResult', responseHandler);
+                this.socket.off('errorMessage', errorHandler);
+                resolve({ success: false, message: 'Server response timeout' });
+            }, 5000);
+            
+            // Send the request
+            this.socket.emit('learnSkill', { skillId }, (ack) => {
+                // If server supports acknowledgments
+                if (ack && typeof ack === 'object') {
+                    clearTimeout(timeout);
+                    this.socket.off('skillLearningResult', responseHandler);
+                    this.socket.off('errorMessage', errorHandler);
+                    resolve(ack);
+                }
+            });
+        });
     }
 }
