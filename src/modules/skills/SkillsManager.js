@@ -9,6 +9,9 @@ export class SkillsManager {
         
         // Initialize active skills
         this.game.activeSkills = new Set();
+        
+        // Initialize active effects
+        this.game.activeEffects = new Set();
     }
     
     init() {
@@ -26,7 +29,9 @@ export class SkillsManager {
      */
     update(delta) {
         // Update active effects with the elapsed time
-        this.updateActiveEffects(delta);
+        if (this.game.activeEffects) {
+            this.updateActiveEffects(delta);
+        }
     }
     
     /**
@@ -116,9 +121,9 @@ export class SkillsManager {
             // We don't await the result here since this method returns boolean
             this.useMartialArts();
             return true;
-        } else if (skillId === 'dark_strike') {
+        } else if (skillId === 'dark_ball') {
             // We don't await the result here since this method returns boolean
-            this.useDarkStrike();
+            this.useDarkBall();
             return true;
         }
         
@@ -237,18 +242,18 @@ export class SkillsManager {
     }
     
     /**
-     * Use the Dark Strike skill with proper server validation
+     * Use the Dark Ball skill with proper server validation
      */
-    async useDarkStrike() {
+    async useDarkBall() {
         if (!this.game.isAlive) {
             console.log('Cannot use skills while dead');
             return;
         }
 
         // Check if skill is on cooldown
-        if (this.isOnCooldown('dark_strike')) {
-            console.log('Dark Strike is on cooldown');
-            this.showCooldownError('dark_strike');
+        if (this.isOnCooldown('dark_ball')) {
+            console.log('Dark Ball is on cooldown');
+            this.showCooldownError('dark_ball');
             return;
         }
 
@@ -257,7 +262,7 @@ export class SkillsManager {
         if (!isTestEnvironment) {
             const playerPath = this.game.playerStats?.path || null;
             if (playerPath !== 'dark') {
-                console.log(`Cannot use dark_strike - requires dark path (current: ${playerPath || 'none'})`);
+                console.log(`Cannot use dark_ball - requires dark path (current: ${playerPath || 'none'})`);
                 return;
             }
         }
@@ -271,29 +276,83 @@ export class SkillsManager {
             return;
         }
         
-        console.log(`Using Dark Strike on ${targetType} ${targetId}`);
+        // Check if player is in temple safe zone
+        if (!isTestEnvironment && this.game.environmentManager) {
+            // Get player position (try multiple locations)
+            let playerPos = null;
+            
+            if (this.game.localPlayer && this.game.localPlayer.position) {
+                playerPos = this.game.localPlayer.position;
+            } else if (this.game.playerManager && this.game.playerManager.localPlayer && this.game.playerManager.localPlayer.position) {
+                playerPos = this.game.playerManager.localPlayer.position;
+            }
+            
+            if (playerPos && this.game.environmentManager.isInTempleSafeZone(playerPos)) {
+                console.log('Cannot use skills inside temple safe zone');
+                this.showErrorMessage('Skills cannot be used inside temple safe zone');
+                return;
+            }
+            
+            // For player targets, check if target is in temple
+            if (targetType === 'player') {
+                const targetPlayer = this.game.targetingManager.getTargetObject();
+                if (targetPlayer && targetPlayer.position) {
+                    // Check if target is in temple safe zone
+                    if (this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
+                        console.log('Cannot attack target in temple safe zone');
+                        this.showErrorMessage('Cannot attack players in temple safe zone');
+                        return;
+                    }
+                    
+                    // Check if attack crosses temple boundary
+                    if (playerPos && this.game.environmentManager.isAttackBlockedByTemple(playerPos, targetPlayer.position)) {
+                        console.log('Attack blocked by temple safe zone');
+                        this.showErrorMessage('Temple safe zone blocks your attack');
+                        return;
+                    }
+                }
+            }
+        }
+        
+        // Check if the target is in range before proceeding
+        if (!this.isTargetInRange(targetId, 'dark_ball')) {
+            console.log('Target is out of range for Dark Ball');
+            
+            // Get the target object for visual feedback
+            if (targetType === 'player') {
+                const targetObject = this.game.playerManager.getPlayerById(targetId);
+                if (targetObject) this.showRangeIndicator(targetObject);
+            } else if (targetType === 'monster') {
+                const monster = this.game.monsterManager.getMonsterById(targetId);
+                if (monster) this.showRangeIndicator(monster);
+            }
+            
+            return;
+        }
+        
+        console.log(`Using Dark Ball on ${targetType} ${targetId}`);
         
         // Set a temporary cooldown to prevent spam clicking while waiting for server response
-        const tempLastUsed = this.skills['dark_strike'].lastUsed;
-        this.skills['dark_strike'].lastUsed = Date.now();
+        const tempLastUsed = this.skills['dark_ball'].lastUsed;
+        this.skills['dark_ball'].lastUsed = Date.now();
         
         // Track this skill as the last attempted skill for error handling
-        this.lastAttemptedSkill = 'dark_strike';
+        this.lastAttemptedSkill = 'dark_ball';
         
         // Validate the skill use with the server
         const result = await this.game.networkManager.useSkill(
             targetId,
-            'dark_strike',
-            this.skills['dark_strike'].damage
+            'dark_ball',
+            this.skills['dark_ball'].damage
         );
         
         if (!result.success) {
-            console.log('Server rejected Dark Strike skill use');
+            console.log('Server rejected Dark Ball skill use');
             
             // Special error handling based on error type
             if (result.errorType && result.errorType.includes('out of range')) {
                 // Handle out of range errors
-                console.log('Target is out of range for Dark Strike');
+                console.log('Target is out of range for Dark Ball');
                 
                 // Get the target object for visual feedback
                 if (targetType === 'player') {
@@ -305,27 +364,27 @@ export class SkillsManager {
                 }
                 
                 // Don't apply cooldown for range errors
-                this.skills['dark_strike'].lastUsed = tempLastUsed;
+                this.skills['dark_ball'].lastUsed = tempLastUsed;
                 return;
             } else if (result.errorType === 'timeout') {
                 // Handle timeout errors
-                console.log('Server timeout for Dark Strike skill use');
+                console.log('Server timeout for Dark Ball skill use');
                 this.handleServerTimeoutError();
                 
                 // Don't apply cooldown for timeout errors
-                this.skills['dark_strike'].lastUsed = tempLastUsed;
+                this.skills['dark_ball'].lastUsed = tempLastUsed;
                 return;
             }
             
             // If the server rejected the skill, restore the previous cooldown
             // Only for errors that aren't cooldown errors
             if (!result.errorType || !result.errorType.includes('cooldown')) {
-                this.skills['dark_strike'].lastUsed = tempLastUsed;
+                this.skills['dark_ball'].lastUsed = tempLastUsed;
             }
             return;
         }
         
-        console.log('Server confirmed Dark Strike skill use');
+        console.log('Server confirmed Dark Ball skill use');
         
         // Clear the last attempted skill on success
         this.lastAttemptedSkill = null;
@@ -337,7 +396,7 @@ export class SkillsManager {
             if (targetPlayer) {
                 // Get player position for effect origin/destination
                 const localPlayerPosition = this.game.localPlayer.position.clone();
-                this.createDarkStrikeEffect(localPlayerPosition, targetPlayer.position);
+                this.createDarkBallEffect(localPlayerPosition, targetPlayer.position);
             }
         } else if (targetType === 'monster') {
             // Handle monster target
@@ -345,7 +404,7 @@ export class SkillsManager {
             if (monster && monster.mesh) {
                 // Get player position for effect origin
                 const localPlayerPosition = this.game.localPlayer.position.clone();
-                this.createDarkStrikeEffect(localPlayerPosition, monster.mesh.position);
+                this.createDarkBallEffect(localPlayerPosition, monster.mesh.position);
             }
         }
     }
@@ -410,12 +469,12 @@ export class SkillsManager {
     }
     
     /**
-     * Create a dark strike effect from the player to the target
+     * Create a dark ball effect from the player to the target
      * @param {THREE.Vector3} sourcePosition - Position of the source player
      * @param {THREE.Vector3} targetPosition - Position of the target
      * @returns {Object} The created effect object
      */
-    createDarkStrikeEffect(sourcePosition, targetPosition) {
+    createDarkBallEffect(sourcePosition, targetPosition) {
         if (!this.game.scene) return null;
         
         // Clone positions to avoid modifying original vectors
@@ -426,89 +485,82 @@ export class SkillsManager {
         sourcePosClone.y += 1;
         targetPosClone.y += 1;
         
-        // Create the effect
+        // Create the dark ball effect
         const material = new THREE.MeshBasicMaterial({
-            color: 0x660066,
+            color: 0x000000,
             transparent: true,
-            opacity: 0.7
+            opacity: 0.8
         });
+        
+        // Create a sphere for the dark ball
+        const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+        const darkBall = new THREE.Mesh(geometry, material);
+        
+        // Start position at the source
+        darkBall.position.copy(sourcePosClone);
         
         // Direction from source to target
         const direction = new THREE.Vector3().subVectors(targetPosClone, sourcePosClone).normalize();
         
-        // Calculate the length of the beam
+        // Calculate the distance
         const distance = sourcePosClone.distanceTo(targetPosClone);
         
-        // Calculate the mid point for the beam origin
-        const midPoint = new THREE.Vector3().addVectors(
-            sourcePosClone,
-            direction.clone().multiplyScalar(distance * 0.5) // Start from the middle
-        );
-        
-        // Create a cylinder for the beam
-        const geometry = new THREE.CylinderGeometry(0.05, 0.15, distance, 8, 1, false);
-        
-        // Rotate the cylinder to point from source to target
-        geometry.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-        
-        const beam = new THREE.Mesh(geometry, material);
-        
-        // Position the beam at the midpoint between source and target
-        beam.position.copy(midPoint);
-        
-        // Orient the beam to point from source to target
-        beam.lookAt(targetPosClone);
-        
-        // Add the beam to the scene
-        this.game.scene.add(beam);
+        // Add the ball to the scene
+        this.game.scene.add(darkBall);
         
         // Setup animation properties
-        beam.userData = {
+        darkBall.userData = {
             lifetime: 0,
-            maxLifetime: 600, // in milliseconds
-            originalOpacity: 0.7,
+            maxLifetime: 800, // in milliseconds
+            originalOpacity: 0.8,
             sourcePosition: sourcePosClone,
             targetPosition: targetPosClone,
             direction: direction,
-            distance: distance
+            distance: distance,
+            speed: distance / 800 * 16, // Units per frame (assuming 60fps)
+            startTime: Date.now()
         };
         
-        // Add to active effects
-        this.game.activeEffects.add(beam);
+        // Add to active effects, ensure the Set exists
+        if (!this.game.activeEffects) {
+            this.game.activeEffects = new Set();
+        }
+        this.game.activeEffects.add(darkBall);
         
         // Setup the animation
         const animate = () => {
-            if (!beam.userData) return;
+            if (!darkBall.userData) return;
             
-            beam.userData.lifetime += 16; // ~60fps
-            const progress = beam.userData.lifetime / beam.userData.maxLifetime;
+            darkBall.userData.lifetime += 16; // ~60fps
+            const progress = darkBall.userData.lifetime / darkBall.userData.maxLifetime;
             
             if (progress >= 1.0) {
                 // Flash the target
-                const targetPosition = beam.userData.targetPosition;
-                this.createAttackEffect({ position: targetPosition });
+                const targetPosition = darkBall.userData.targetPosition;
+                this.createAttackEffect({ position: targetPosition }, '#000000');
                 
                 // Remove this effect from the scene
-                this.game.scene.remove(beam);
-                this.game.activeEffects.delete(beam);
+                this.game.scene.remove(darkBall);
+                this.game.activeEffects.delete(darkBall);
                 
                 // Dispose of geometries and materials
-                beam.geometry.dispose();
-                beam.material.dispose();
+                darkBall.geometry.dispose();
+                darkBall.material.dispose();
                 
                 return;
             }
             
-            // Animate the beam - make it pulse
-            const pulsePhase = (beam.userData.lifetime / 100) % 1;
-            const pulseScale = 0.8 + 0.4 * Math.sin(pulsePhase * Math.PI * 2);
+            // Move the ball towards the target
+            darkBall.position.addScaledVector(darkBall.userData.direction, darkBall.userData.speed);
             
-            beam.scale.set(pulseScale, 1, pulseScale);
+            // Add subtle pulsing effect
+            const pulsePhase = (darkBall.userData.lifetime / 100) % 1;
+            const pulseScale = 0.9 + 0.2 * Math.sin(pulsePhase * Math.PI * 2);
+            darkBall.scale.set(pulseScale, pulseScale, pulseScale);
             
-            // Also fade out over time
-            if (progress > 0.7) {
-                const fadeProgress = (progress - 0.7) / 0.3; // Remap 0.7-1.0 to 0-1
-                beam.material.opacity = beam.userData.originalOpacity * (1 - fadeProgress);
+            // Add a trail effect
+            if (darkBall.userData.lifetime % 4 === 0) {
+                this.createDarkBallTrail(darkBall.position.clone());
             }
             
             requestAnimationFrame(animate);
@@ -517,7 +569,54 @@ export class SkillsManager {
         // Start animation
         animate();
         
-        return beam;
+        return darkBall;
+    }
+    
+    /**
+     * Create a small trail particle behind the dark ball
+     * @param {THREE.Vector3} position - Position to create the trail particle
+     */
+    createDarkBallTrail(position) {
+        if (!this.game.scene) return;
+        
+        const trailGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const trailMaterial = new THREE.MeshBasicMaterial({
+            color: 0x222222,
+            transparent: true,
+            opacity: 0.5
+        });
+        
+        const trail = new THREE.Mesh(trailGeometry, trailMaterial);
+        trail.position.copy(position);
+        
+        this.game.scene.add(trail);
+        
+        // Setup fade out
+        const startTime = Date.now();
+        const duration = 300; // ms
+        
+        const animate = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = elapsed / duration;
+            
+            if (progress >= 1.0) {
+                this.game.scene.remove(trail);
+                trailGeometry.dispose();
+                trailMaterial.dispose();
+                return;
+            }
+            
+            // Fade out
+            trailMaterial.opacity = 0.5 * (1 - progress);
+            
+            // Slightly expand
+            const scale = 1 + progress * 0.5;
+            trail.scale.set(scale, scale, scale);
+            
+            requestAnimationFrame(animate);
+        };
+        
+        animate();
     }
     
     findTargetsInRange(range) {
@@ -697,8 +796,8 @@ export class SkillsManager {
         if (skill.id === 'martial_arts') {
             this.useMartialArts();
             return true;
-        } else if (skill.id === 'dark_strike') {
-            this.useDarkStrike();
+        } else if (skill.id === 'dark_ball') {
+            this.useDarkBall();
             return true;
         }
         
@@ -963,7 +1062,21 @@ export class SkillsManager {
         }
         
         // Get the distance between the local player and the target
-        const localPlayer = this.game.playerManager.localPlayer;
+        // Try multiple possible locations for the local player
+        let localPlayer = this.game.playerManager?.localPlayer;
+        
+        // Fallback to the game's localPlayer if playerManager's localPlayer is undefined
+        if (!localPlayer || !localPlayer.position) {
+            localPlayer = this.game.localPlayer;
+        }
+        
+        // Final fallback - try to get localPlayer through alternative methods
+        if (!localPlayer || !localPlayer.position) {
+            if (this.game.playerManager && typeof this.game.playerManager.getLocalPlayer === 'function') {
+                localPlayer = this.game.playerManager.getLocalPlayer();
+            }
+        }
+        
         if (!localPlayer || !localPlayer.position) {
             console.warn('Local player position not available');
             return false;
@@ -1001,8 +1114,8 @@ export class SkillsManager {
         
         if (skillId === 'martial_arts') {
             effect = this.createMartialArtsEffect({ position: targetPosition });
-        } else if (skillId === 'dark_strike') {
-            effect = this.createDarkStrikeEffect(sourcePosition, targetPosition);
+        } else if (skillId === 'dark_ball') {
+            effect = this.createDarkBallEffect(sourcePosition, targetPosition);
         } else {
             // Generic effect for other skills
             const material = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
@@ -1025,6 +1138,12 @@ export class SkillsManager {
         // Add to active effects if not already tracked
         if (effect && !this.game.activeSkills.has(effect)) {
             this.game.activeSkills.add(effect);
+        }
+        
+        // Ensure activeEffects exists
+        if (effect && !this.game.activeEffects && typeof effect.userData === 'object') {
+            this.game.activeEffects = new Set();
+            this.game.activeEffects.add(effect);
         }
         
         return effect;
@@ -1192,35 +1311,49 @@ export class SkillsManager {
             return false;
         }
         
-        // Get the local player - try all possible locations
+        // Get the local player - try multiple possible locations
         let localPlayer = this.game.localPlayer;
         
         // Try player manager if available
-        if (!localPlayer && this.game.playerManager) {
-            localPlayer = this.game.playerManager.getLocalPlayer();
+        if (!localPlayer || !localPlayer.position) {
+            if (this.game.playerManager) {
+                localPlayer = this.game.playerManager.localPlayer || this.game.playerManager.getLocalPlayer();
+            }
         }
         
-        if (!localPlayer) {
+        if (!localPlayer || !localPlayer.position) {
             console.warn('Local player not found when using skill on monster');
             return false;
         }
         
-        // Check if monster is in temple safe zone
-        if (!isTestEnvironment && this.game.environmentManager && monster.mesh) {
-            const monsterPos = monster.mesh.position;
-            const playerPos = this.game.localPlayer.position;
+        // Check if player is in temple safe zone
+        if (!isTestEnvironment && this.game.environmentManager) {
+            if (this.game.environmentManager.isInTempleSafeZone(localPlayer.position)) {
+                console.log('Cannot use skills inside the temple safe zone');
+                this.showErrorMessage('Skills cannot be used inside temple safe zone');
+                return false;
+            }
             
             // Check if monster is in temple safe zone
-            if (this.game.environmentManager.isInTempleSafeZone(monsterPos)) {
+            if (monster.mesh && this.game.environmentManager.isInTempleSafeZone(monster.mesh.position)) {
                 console.log('Cannot attack monster in temple safe zone');
+                this.showErrorMessage('Cannot attack monsters in temple safe zone');
                 return false;
             }
             
             // Check if attack crosses temple boundary
-            if (this.game.environmentManager.isAttackBlockedByTemple(playerPos, monsterPos)) {
+            if (monster.mesh && this.game.environmentManager.isAttackBlockedByTemple(localPlayer.position, monster.mesh.position)) {
                 console.log('Attack blocked by temple safe zone');
+                this.showErrorMessage('Temple safe zone blocks your attack');
                 return false;
             }
+        }
+        
+        // Check if monster is within skill range
+        if (!this.isMonsterInRange(monster, skillId)) {
+            console.log(`Monster is out of range for ${skillId}`);
+            this.showRangeIndicator(monster);
+            return false;
         }
         
         // Set skill as used and start cooldown
@@ -1266,7 +1399,7 @@ export class SkillsManager {
         if (playerPath === 'light') {
             return 'martial_arts';
         } else if (playerPath === 'dark') {
-            return 'dark_strike';
+            return 'dark_ball';
         }
         
         // In tests, return a default skill even if no path is chosen
@@ -1293,15 +1426,19 @@ export class SkillsManager {
         
         const skill = this.skills[skillId];
         
-        // Get the local player - try all possible locations
+        // Get the local player - try multiple possible locations
         let localPlayer = this.game.localPlayer;
         
         // Try player manager if available
-        if (!localPlayer && this.game.playerManager) {
-            localPlayer = this.game.playerManager.getLocalPlayer();
+        if (!localPlayer || !localPlayer.position) {
+            if (this.game.playerManager) {
+                localPlayer = this.game.playerManager.localPlayer || 
+                             (typeof this.game.playerManager.getLocalPlayer === 'function' ? 
+                              this.game.playerManager.getLocalPlayer() : null);
+            }
         }
         
-        if (!localPlayer) {
+        if (!localPlayer || !localPlayer.position) {
             console.warn('Local player not found when checking monster range');
             return false;
         }
@@ -1315,7 +1452,7 @@ export class SkillsManager {
         // Get the distance between the local player and the monster
         const distance = localPlayer.position.distanceTo(monster.mesh.position);
         
-        // Get the server-side skill range from our skill data
+        // Get the skill range from our skill data
         const skillRange = skill.range;
         
         // Log the actual values to help with debugging
@@ -1343,18 +1480,18 @@ export class SkillsManager {
                 slot: 1, // Skill slot in the UI
                 icon: '🥋'
             },
-            dark_strike: {
-                id: 'dark_strike',
-                name: 'Dark Strike',
-                description: 'Unleashes dark energy to damage your target.',
+            dark_ball: {
+                id: 'dark_ball',
+                name: 'Dark Ball',
+                description: 'Launches a ball of dark energy at your target from a distance. Deals less damage than melee skills but has greater range.',
                 cooldown: 1500, // Changed from 2000ms to 1500ms to match server cooldown
-                range: 3,
-                damage: 35,
+                range: 7, // Extended range (martial arts is 3)
+                damage: 20, // Reduced from 35 to be less than martial arts (25)
                 mana: 15,
                 lastUsed: 0, // Timestamp of last use
                 path: 'dark', // Requires dark path
                 slot: 1, // Skill slot in the UI
-                icon: '⚔️'
+                icon: '🔮' // Changed from ⚔️ to 🔮 for a ball-like appearance
             }
         };
     }

@@ -25,7 +25,7 @@ const mockGameManager = {
       
       // Add appropriate skills based on path
       if (path === 'dark') {
-        player.stats.skills = ['dark_strike'];
+        player.stats.skills = ['dark_ball'];
       } else if (path === 'light') {
         player.stats.skills = ['martial_arts'];
       }
@@ -329,7 +329,7 @@ describe('PVP and Multiplayer Integration Tests', () => {
       // Client A attacks client B
       clientA.emit('useSkill', {
         targetId: clientBId,
-        skillId: 'dark_strike',
+        skillId: 'dark_ball',
         damage: 25,
         targetType: 'player'
       });

@@ -289,8 +289,8 @@ export class NetworkManager {
                 
                 if (data.skillName === 'martial_arts') {
                     skillRange = 3;
-                } else if (data.skillName === 'dark_strike') {
-                    skillRange = 3;
+                } else if (data.skillName === 'dark_ball') {
+                    skillRange = 6; // Updated from 3 to 6 (2x martial arts range)
                 }
                 
                 if (distance > skillRange) {
@@ -635,13 +635,16 @@ export class NetworkManager {
                 // Get the skill being used
                 const skillId = data.skillId || 'martial_arts';
                 
+                // Make sure we use the skill name from the data if available
+                const skillName = data.skillName || skillId;
+                
                 // Check server-side cooldown
                 const now = Date.now();
-                const lastUsedTime = player.skillCooldowns.get(skillId) || 0;
-                const skillCooldown = this.getSkillCooldown(skillId);
+                const lastUsedTime = player.skillCooldowns.get(skillName) || 0;
+                const skillCooldown = this.getSkillCooldown(skillName);
                 
                 if (lastUsedTime > 0 && now - lastUsedTime < skillCooldown) {
-                    console.log(`Player ${socket.id} tried to use ${skillId} on monster before cooldown finished`);
+                    console.log(`Player ${socket.id} tried to use ${skillName} on monster before cooldown finished`);
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Skill is on cooldown'
@@ -650,7 +653,7 @@ export class NetworkManager {
                 }
                 
                 // Update skill cooldown
-                player.skillCooldowns.set(skillId, now);
+                player.skillCooldowns.set(skillName, now);
                 
                 // Get the monster
                 const monster = this.gameManager.monsterManager.getMonsterById(data.monsterId);
@@ -695,7 +698,7 @@ export class NetworkManager {
                 const distance = this.calculateDistance(playerPos, monsterPos, 'monster', monster);
                 
                 // Get skill range
-                const attackRange = this.getSkillRange(skillId);
+                const attackRange = this.getSkillRange(skillName);
                 
                 // Use a dynamic tolerance based on distance:
                 // - For closer monsters (within range): more lenient
@@ -704,7 +707,7 @@ export class NetworkManager {
                 const rangeTolerance = Math.max(baseTolerance, attackRange * 0.25); // Increased from 20% to 25% of skill range
                 
                 // Log the check for debugging purposes
-                console.log(`Range check for ${socket.id}: distance=${distance.toFixed(2)}, range=${attackRange}, tolerance=${rangeTolerance.toFixed(2)}, monster type=${monster.type}`);
+                console.log(`Range check for ${socket.id}: distance=${distance.toFixed(2)}, range=${attackRange}, tolerance=${rangeTolerance.toFixed(2)}, monster type=${monster.type}, skill=${skillName}`);
 
                 if (distance > attackRange + rangeTolerance) {
                     socket.emit('errorMessage', {
@@ -712,19 +715,19 @@ export class NetworkManager {
                         message: 'Target is out of range'
                     });
                     // Log detailed distance information for debugging
-                    this.log(`Range error: Player ${socket.id} tried to attack monster ${monster.id} but is out of range (distance: ${distance.toFixed(2)}, range: ${attackRange}, tolerance: ${rangeTolerance.toFixed(2)})`);
+                    this.log(`Range error: Player ${socket.id} tried to attack monster ${monster.id} but is out of range (distance: ${distance.toFixed(2)}, range: ${attackRange}, tolerance: ${rangeTolerance.toFixed(2)}, skill: ${skillName})`);
                     return; // Important: return here to prevent attack processing
                 }
                 
                 // Calculate damage from the server side
-                const damage = this.calculateMonsterDamage(skillId, player, monster);
+                const damage = this.calculateMonsterDamage(skillName, player, monster);
                 
                 // Apply damage to monster
                 const previousHealth = monster.health;
                 monster.health = Math.max(0, monster.health - damage);
                 
                 // Log the attack
-                this.log(`Player ${socket.id} used ${skillId} on monster ${monster.id} for ${damage} damage (health: ${monster.health}/${monster.maxHealth || 100})`);
+                this.log(`Player ${socket.id} used ${skillName} on monster ${monster.id} for ${damage} damage (health: ${monster.health}/${monster.maxHealth || 100})`);
                 
                 // Check if monster is dead
                 if (monster.health <= 0) {
@@ -747,7 +750,7 @@ export class NetworkManager {
                     monsterId: monster.id,
                     playerId: socket.id,
                     damage: damage,
-                    skillId: skillId
+                    skillId: skillName
                 });
             });
             
@@ -1096,7 +1099,7 @@ export class NetworkManager {
         switch(skillName) {
             case 'martial_arts':
                 return 1000; // 1 second cooldown
-            case 'dark_strike':
+            case 'dark_ball':
                 return 1500; // 1.5 second cooldown
             default:
                 return 1000; // Default cooldown
@@ -1113,8 +1116,8 @@ export class NetworkManager {
             case 'martial_arts':
                 baseDamage = 25;
                 break;
-            case 'dark_strike':
-                baseDamage = 30;
+            case 'dark_ball':
+                baseDamage = 20; // Reduced from 35 to be less than martial arts
                 break;
             default:
                 baseDamage = 20;
@@ -1131,8 +1134,8 @@ export class NetworkManager {
         let pathBonus = 1.0;
         if (attacker.path === 'light' && skillName === 'martial_arts') {
             pathBonus = 1.2; // 20% bonus for light path using martial arts
-        } else if (attacker.path === 'dark' && skillName === 'dark_strike') {
-            pathBonus = 1.2; // 20% bonus for dark path using dark strike
+        } else if (attacker.path === 'dark' && skillName === 'dark_ball') {
+            pathBonus = 1.2; // 20% bonus for dark path using dark ball
         }
         
         // Apply damage calculation
@@ -1164,8 +1167,8 @@ export class NetworkManager {
         switch(skillId) {
             case 'martial_arts':
                 return 4.5; // Increased from 3 to 4.5 units range
-            case 'dark_strike':
-                return 4.5; // Increased from 3 to 4.5 units range (matching client)
+            case 'dark_ball':
+                return 10.5; // Increased to match the updated 7 units on client (7 * 1.5 server scale)
             default:
                 return 3; // Increased default range from 2 to 3
         }
@@ -1181,8 +1184,8 @@ export class NetworkManager {
             case 'martial_arts':
                 baseDamage = 25;
                 break;
-            case 'dark_strike':
-                baseDamage = 35;
+            case 'dark_ball':
+                baseDamage = 20; // Reduced from 35 to be less than martial arts
                 break;
             default:
                 baseDamage = 20;
@@ -1199,8 +1202,8 @@ export class NetworkManager {
         let pathBonus = 1.0;
         if (player.path === 'light' && skillId === 'martial_arts') {
             pathBonus *= 1.2; // 20% bonus for light path using martial arts
-        } else if (player.path === 'dark' && skillId === 'dark_strike') {
-            pathBonus *= 1.2; // 20% bonus for dark path using dark strike
+        } else if (player.path === 'dark' && skillId === 'dark_ball') {
+            pathBonus *= 1.2; // 20% bonus for dark path using dark ball
         }
         
         // Calculate final damage
