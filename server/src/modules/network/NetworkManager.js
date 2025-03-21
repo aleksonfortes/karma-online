@@ -275,11 +275,11 @@ export class NetworkManager {
                 }
                 
                 // Check if player has enough mana
-                let manaCost = 10; // Default mana cost
+                let manaCost = 0; // Default mana cost (0)
                 if (data.skillName === 'dark_ball') {
                     manaCost = 25;
                 } else if (data.skillName === 'martial_arts') {
-                    manaCost = 10;
+                    manaCost = 0; // No mana cost for martial arts
                 }
                 
                 // Initialize mana if not set
@@ -290,14 +290,26 @@ export class NetworkManager {
                     player.maxMana = 100;
                 }
                 
-                // Check if player has enough mana
-                if (player.mana < manaCost) {
+                // Check if player has enough mana (only for skills with mana cost > 0)
+                if (manaCost > 0 && player.mana < manaCost) {
                     console.log(`Player ${socket.id} tried to use ${data.skillName} without enough mana (${player.mana}/${manaCost})`);
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Not enough mana to use this skill'
                     });
                     return;
+                }
+                
+                // Consume mana if the skill costs mana
+                if (manaCost > 0) {
+                    player.mana -= manaCost;
+                    
+                    // Emit mana update to the player
+                    socket.emit('manaUpdate', {
+                        id: socket.id,
+                        mana: player.mana,
+                        maxMana: player.maxMana
+                    });
                 }
                 
                 // Update skill cooldown
@@ -381,9 +393,6 @@ export class NetworkManager {
                     player.maxLife = 100;
                 }
                 
-                // Consume mana
-                player.mana -= manaCost;
-                
                 // Calculate and apply damage
                 const previousLife = targetPlayer.life;
                 
@@ -435,23 +444,6 @@ export class NetworkManager {
                     maxLife: targetPlayer.maxLife || 100,
                     timestamp: Date.now(), // Add timestamp for client-side validation
                     final: true // Mark this as a final update that shouldn't be overridden
-                });
-                
-                // Broadcast mana update for the player who used the skill
-                this.io.emit('manaUpdate', {
-                    id: socket.id,
-                    mana: player.mana,
-                    maxMana: player.maxMana || 100,
-                    timestamp: Date.now()
-                });
-                
-                // Also broadcast the attacker's stats to ensure everyone has the latest data
-                this.io.emit('lifeUpdate', {
-                    id: socket.id,
-                    life: player.life,
-                    maxLife: player.maxLife || 100,
-                    timestamp: Date.now(), // Add timestamp for client-side validation
-                    final: false // This is not a damage-related update
                 });
                 
                 // Broadcast damage effect to all players
@@ -710,11 +702,11 @@ export class NetworkManager {
                 const skillName = data.skillName || skillId;
                 
                 // Check if player has enough mana
-                let manaCost = 10; // Default mana cost
+                let manaCost = 0; // Default mana cost (0)
                 if (skillName === 'dark_ball') {
                     manaCost = 25;
                 } else if (skillName === 'martial_arts') {
-                    manaCost = 10;
+                    manaCost = 0; // No mana cost for martial arts
                 }
                 
                 // Initialize mana if not set
@@ -725,8 +717,8 @@ export class NetworkManager {
                     player.maxMana = 100;
                 }
                 
-                // Check if player has enough mana
-                if (player.mana < manaCost) {
+                // Check if player has enough mana (only for skills with mana cost > 0)
+                if (manaCost > 0 && player.mana < manaCost) {
                     console.log(`Player ${socket.id} tried to use ${skillName} on monster without enough mana (${player.mana}/${manaCost})`);
                     socket.emit('errorMessage', {
                         type: 'combat',

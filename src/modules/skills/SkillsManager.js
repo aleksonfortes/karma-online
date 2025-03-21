@@ -134,11 +134,8 @@ export class SkillsManager {
      * Use the Martial Arts skill with proper server validation
      */
     async useMartialArts() {
-        // Debug: Log mana values before skill use
+        // Debug: Log states before skill use
         console.log(`MANA DEBUG - Before martial arts: playerStats.currentMana=${this.game.playerStats.currentMana}`);
-        if (this.game.localPlayer?.userData?.stats) {
-            console.log(`MANA DEBUG - userData.stats.mana=${this.game.localPlayer.userData.stats.mana}`);
-        }
         
         if (!this.game.isAlive) {
             console.log('Cannot use skills while dead');
@@ -156,28 +153,6 @@ export class SkillsManager {
             return false;
         }
         
-        const manaCost = 10; // Martial Arts costs 10 mana
-        
-        // Get the current values for checks and logging
-        console.log(`Before mana check: mana=${this.game.playerStats.currentMana}, playerStats=${JSON.stringify(this.game.playerStats)}`);
-        
-        if (this.game.localPlayer && this.game.localPlayer.userData && this.game.localPlayer.userData.stats) {
-            console.log(`Local player userData.stats: mana=${this.game.localPlayer.userData.stats.mana}`);
-        }
-        
-        // Check if player has enough mana
-        if (this.game.playerStats.currentMana < manaCost) {
-            // First check if we have zero mana
-            if (this.game.playerStats.currentMana <= 0) {
-                console.log('You are out of mana!');
-                this.game.uiManager.showNotification('You are out of mana!', 'red');
-            } else {
-                console.log(`Not enough mana to use Martial Arts (${this.game.playerStats.currentMana}/${manaCost})`);
-                this.game.uiManager.showNotification(`Not enough mana (${Math.floor(this.game.playerStats.currentMana)}/${manaCost})`, 'red');
-            }
-            return false;
-        }
-        
         // Check if there is a target in range
         const result = this.canUseSkillOnTarget(
             this.game.localPlayer, 
@@ -191,26 +166,19 @@ export class SkillsManager {
             return false;
         }
         
-        // All checks passed, reduce mana and trigger the attack
-        this.game.playerStats.currentMana -= manaCost;
-        console.log(`After using skill: mana=${this.game.playerStats.currentMana}, cost=${manaCost}`);
-        
-        // Debug: Log mana values after reduction
-        console.log(`MANA DEBUG - After martial arts (mana reduced): playerStats.currentMana=${this.game.playerStats.currentMana}`);
-        
-        // Immediately update the UI to show mana change
-        this.game.uiManager.updateStatusBars(this.game.playerStats);
-        
-        // Update userData to stay in sync
-        if (this.game.localPlayer && this.game.localPlayer.userData) {
-            if (!this.game.localPlayer.userData.stats) {
-                this.game.localPlayer.userData.stats = {};
-            }
-            this.game.localPlayer.userData.stats.mana = this.game.playerStats.currentMana;
-            console.log(`MANA DEBUG - Updated userData.stats.mana=${this.game.localPlayer.userData.stats.mana}`);
+        // Get the target
+        const targetId = this.game.targetingManager.getTargetId();
+        if (!targetId) {
+            console.log('No target selected');
+            return false;
         }
         
-        // Use the skill through the network manager
+        // Apply a temporary cooldown to prevent spam clicking while waiting for the server
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
+        
+        // Request to use the skill through the network manager
+        // Let the server handle mana consumption and validation
         const networkResult = await this.game.networkManager.useSkill(
             targetId,
             'martial_arts',
@@ -224,47 +192,20 @@ export class SkillsManager {
             if (networkResult.errorType === 'out of range') {
                 console.log('Error: Target out of range for Martial Arts');
                 this.game.uiManager.showNotification('Target out of range for Martial Arts', '#ffcc00');
+            } else if (networkResult.errorType === 'cooldown') {
+                console.log('Error: Martial Arts on cooldown');
+                this.showCooldownError('martial_arts');
             }
             
-            // Don't apply cooldown for range errors
-            this.skills['martial_arts'].lastUsed = Date.now();
-            
-            // Restore mana since skill didn't actually execute
-            this.game.playerStats.currentMana += manaCost;
-            console.log(`MANA DEBUG - Restoring mana after error: currentMana=${this.game.playerStats.currentMana}`);
-            
-            // Sync with userData
-            if (this.game.localPlayer && this.game.localPlayer.userData) {
-                if (!this.game.localPlayer.userData.stats) {
-                    this.game.localPlayer.userData.stats = {};
-                }
-                this.game.localPlayer.userData.stats.mana = this.game.playerStats.currentMana;
-            }
-            
-            // Update UI to reflect restored mana
-            if (this.game.uiManager && typeof this.game.uiManager.updateStatusBars === 'function') {
-                this.game.uiManager.updateStatusBars(this.game.playerStats);
-            }
-            
-            return;
+            // Reset the cooldown since the server rejected the skill
+            skill.lastUsed = tempLastUsed;
+            return false;
         }
         
         console.log('Server confirmed Martial Arts skill use');
         
-        // Create appropriate effects based on target type - only if server confirmed success
-        if (targetType === 'player') {
-            // Visual effect for player target
-            const targetPlayer = this.game.targetingManager.getTargetObject();
-            if (targetPlayer) {
-                this.createMartialArtsEffect(targetPlayer);
-            }
-        } else if (targetType === 'monster') {
-            // Handle monster target
-            const monster = this.game.monsterManager.getMonsterById(targetId);
-            if (monster && monster.mesh) {
-                this.createMartialArtsEffect(monster.mesh);
-            }
-        }
+        // Visual effects will be triggered by server events
+        return true;
     }
     
     /**
@@ -277,24 +218,14 @@ export class SkillsManager {
         }
 
         // Check if skill is on cooldown
-        if (this.isOnCooldown('dark_ball')) {
+        const now = Date.now();
+        const skill = this.skills.dark_ball;
+        const cooldownTime = skill.cooldown;
+        
+        if (now - skill.lastUsed < cooldownTime) {
             console.log('Dark Ball is on cooldown');
             this.showCooldownError('dark_ball');
-            return;
-        }
-        
-        // Check if player has enough mana
-        const manaCost = 25;
-        if (this.game.playerStats.currentMana < manaCost) {
-            // Special message when mana is actually 0
-            if (this.game.playerStats.currentMana <= 0) {
-                console.log(`Cannot use Dark Ball: Mana depleted (0/${manaCost})`);
-                this.showErrorMessage(`Cannot use Dark Ball: Mana depleted`);
-            } else {
-                console.log(`Not enough mana to use Dark Ball (${this.game.playerStats.currentMana}/${manaCost})`);
-                this.showErrorMessage(`Not enough mana to use Dark Ball`);
-            }
-            return;
+            return false;
         }
 
         // Check if player has the dark path - but skip in test environment
@@ -303,7 +234,7 @@ export class SkillsManager {
             const playerPath = this.game.playerStats?.path || null;
             if (playerPath !== 'dark') {
                 console.log(`Cannot use dark_ball - requires dark path (current: ${playerPath || 'none'})`);
-                return;
+                return false;
             }
         }
 
@@ -313,7 +244,7 @@ export class SkillsManager {
         
         if (!targetId) {
             console.log('No target selected');
-            return;
+            return false;
         }
         
         // Check if player is in temple safe zone
@@ -330,7 +261,7 @@ export class SkillsManager {
             if (playerPos && this.game.environmentManager.isInTempleSafeZone(playerPos)) {
                 console.log('Cannot use skills inside temple safe zone');
                 this.showErrorMessage('Skills cannot be used inside temple safe zone');
-                return;
+                return false;
             }
             
             // For player targets, check if target is in temple
@@ -341,14 +272,14 @@ export class SkillsManager {
                     if (this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
                         console.log('Cannot attack target in temple safe zone');
                         this.showErrorMessage('Cannot attack players in temple safe zone');
-                        return;
+                        return false;
                     }
                     
                     // Check if attack crosses temple boundary
                     if (playerPos && this.game.environmentManager.isAttackBlockedByTemple(playerPos, targetPlayer.position)) {
                         console.log('Attack blocked by temple safe zone');
                         this.showErrorMessage('Temple safe zone blocks your attack');
-                        return;
+                        return false;
                     }
                 }
             }
@@ -367,27 +298,19 @@ export class SkillsManager {
                 if (monster) this.showRangeIndicator(monster);
             }
             
-            return;
+            return false;
         }
         
         console.log(`Using Dark Ball on ${targetType} ${targetId}`);
         
-        // Consume mana
-        this.game.playerStats.currentMana -= manaCost;
-        
-        // Update UI if available
-        if (this.game.uiManager && typeof this.game.uiManager.updateStatusBars === 'function') {
-            this.game.uiManager.updateStatusBars(this.game.playerStats);
-        }
-        
-        // Set a temporary cooldown to prevent spam clicking while waiting for server response
-        const tempLastUsed = this.skills['dark_ball'].lastUsed;
-        this.skills['dark_ball'].lastUsed = Date.now();
+        // Apply a temporary cooldown to prevent spam clicking while waiting for server response
+        const tempLastUsed = skill.lastUsed;
+        skill.lastUsed = now;
         
         // Track this skill as the last attempted skill for error handling
         this.lastAttemptedSkill = 'dark_ball';
         
-        // Validate the skill use with the server
+        // Let the server handle mana consumption and validation
         const result = await this.game.networkManager.useSkill(
             targetId,
             'dark_ball',
@@ -411,43 +334,34 @@ export class SkillsManager {
                     if (monster) this.showRangeIndicator(monster);
                 }
                 
-                // Don't apply cooldown for range errors
-                this.skills['dark_ball'].lastUsed = tempLastUsed;
-                return;
+                // Reset the cooldown for range errors
+                skill.lastUsed = tempLastUsed;
+                return false;
             } else if (result.errorType === 'timeout') {
                 // Handle timeout errors
                 console.log('Server timeout for Dark Ball skill use');
                 this.handleServerTimeoutError();
                 
-                // Don't apply cooldown for timeout errors
-                this.skills['dark_ball'].lastUsed = tempLastUsed;
-                return;
+                // Reset the cooldown for timeout errors
+                skill.lastUsed = tempLastUsed;
+                return false;
             } else if (result.errorType && result.errorType.includes('mana')) {
                 // Handle mana errors - make sure there's no animation
                 console.log('Not enough mana to use Dark Ball');
                 this.showErrorMessage('Not enough mana to use Dark Ball');
                 
-                // Restore the player's mana that was consumed client-side before the server rejection
-                this.game.playerStats.currentMana += manaCost;
-                
-                // Update UI if available
-                if (this.game.uiManager && typeof this.game.uiManager.updateStatusBars === 'function') {
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
-                }
-                
-                // Don't apply cooldown for mana errors
-                this.skills['dark_ball'].lastUsed = tempLastUsed;
-                return;
+                // Reset the cooldown for mana errors
+                skill.lastUsed = tempLastUsed;
+                return false;
             }
             
             // If the server rejected the skill, restore the previous cooldown
             // Only for errors that aren't cooldown errors
             if (!result.errorType || !result.errorType.includes('cooldown')) {
-                this.skills['dark_ball'].lastUsed = tempLastUsed;
+                skill.lastUsed = tempLastUsed;
             }
             
-            // Return early to prevent creating visual effects
-            return;
+            return false;
         }
         
         console.log('Server confirmed Dark Ball skill use');
@@ -455,24 +369,8 @@ export class SkillsManager {
         // Clear the last attempted skill on success
         this.lastAttemptedSkill = null;
         
-        // Create appropriate effects based on target type - only if server confirmed success
-        if (targetType === 'player') {
-            // Visual effect for player target
-            const targetPlayer = this.game.targetingManager.getTargetObject();
-            if (targetPlayer) {
-                // Get player position for effect origin/destination
-                const localPlayerPosition = this.game.localPlayer.position.clone();
-                this.createDarkBallEffect(localPlayerPosition, targetPlayer.position);
-            }
-        } else if (targetType === 'monster') {
-            // Handle monster target
-            const monster = this.game.monsterManager.getMonsterById(targetId);
-            if (monster && monster.mesh) {
-                // Get player position for effect origin
-                const localPlayerPosition = this.game.localPlayer.position.clone();
-                this.createDarkBallEffect(localPlayerPosition, monster.mesh.position);
-            }
-        }
+        // Visual effects will be triggered by server events
+        return true;
     }
     
     createMartialArtsEffect(targetPlayer) {
@@ -1568,7 +1466,6 @@ export class SkillsManager {
                 cooldown: 1000, // 1 second cooldown
                 range: 3,
                 damage: 25,
-                mana: 10,
                 lastUsed: 0, // Timestamp of last use
                 path: 'light', // Requires light path
                 slot: 1, // Skill slot in the UI
@@ -1615,10 +1512,10 @@ export class SkillsManager {
                 slot: 3,
                 icon: '✨'
             },
-            life_drain: {
-                id: 'life_drain',
-                name: 'Life Drain',
-                description: 'Level 2 Dark path skill placeholder',
+            shadow_strike: {
+                id: 'shadow_strike',
+                name: 'Shadow Strike',
+                description: 'Quick attack that deals bonus damage and slows enemies',
                 cooldown: 3000,
                 range: 5,
                 damage: 30,
