@@ -419,22 +419,28 @@ export class NetworkManager {
                 }
                 
                 // Get the players
-                const player = this.playerManager.getPlayer(socket.id);
+                const attackingPlayer = this.playerManager.getPlayer(socket.id);
                 const targetPlayer = this.playerManager.getPlayer(data.targetId);
                 
-                if (!player || !targetPlayer) {
+                if (!attackingPlayer || !targetPlayer) {
                     console.warn(`Player or target not found: ${socket.id} -> ${data.targetId}`);
                     return;
                 }
 
+                // Don't break invisibility if using the embrace_void skill itself
+                if (data.skillName !== 'embrace_void') {
+                    // Check if player is invisible - using an attack skill breaks invisibility
+                    this.breakInvisibilityIfActive(attackingPlayer, socket);
+                }
+
                 // Initialize skill cooldowns if not existing
-                if (!player.skillCooldowns) {
-                    player.skillCooldowns = new Map();
+                if (!attackingPlayer.skillCooldowns) {
+                    attackingPlayer.skillCooldowns = new Map();
                 }
                 
                 // Check server-side cooldown
                 const now = Date.now();
-                const lastUsedTime = player.skillCooldowns.get(data.skillName) || 0;
+                const lastUsedTime = attackingPlayer.skillCooldowns.get(data.skillName) || 0;
                 const skillCooldown = this.getSkillCooldown(data.skillName);
                 
                 if (lastUsedTime > 0 && now - lastUsedTime < skillCooldown) {
@@ -458,11 +464,11 @@ export class NetworkManager {
                     manaCost = 30; // Mana cost for life_drain
                 } else if (data.skillName === 'one_with_universe') {
                     // One with Universe consumes all mana
-                    manaCost = player.mana; // Will consume all available mana
+                    manaCost = attackingPlayer.mana; // Will consume all available mana
                     
                     // Check if player's mana is at maximum before allowing use
-                    if (player.mana < player.maxMana) {
-                        console.log(`Player ${socket.id} tried to use One with Universe without full mana (${player.mana}/${player.maxMana})`);
+                    if (attackingPlayer.mana < attackingPlayer.maxMana) {
+                        console.log(`Player ${socket.id} tried to use One with Universe without full mana (${attackingPlayer.mana}/${attackingPlayer.maxMana})`);
                         socket.emit('errorMessage', {
                             type: 'combat',
                             message: 'One with Universe requires maximum mana to use'
@@ -474,16 +480,16 @@ export class NetworkManager {
                 }
                 
                 // Initialize mana if not set
-                if (player.mana === undefined) {
-                    player.mana = 100;
+                if (attackingPlayer.mana === undefined) {
+                    attackingPlayer.mana = 100;
                 }
-                if (player.maxMana === undefined) {
-                    player.maxMana = 100;
+                if (attackingPlayer.maxMana === undefined) {
+                    attackingPlayer.maxMana = 100;
                 }
                 
                 // Check if player has enough mana (only for skills with mana cost > 0)
-                if (manaCost > 0 && player.mana < manaCost) {
-                    console.log(`Player ${socket.id} tried to use ${data.skillName} without enough mana (${player.mana}/${manaCost})`);
+                if (manaCost > 0 && attackingPlayer.mana < manaCost) {
+                    console.log(`Player ${socket.id} tried to use ${data.skillName} without enough mana (${attackingPlayer.mana}/${manaCost})`);
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Not enough mana to use this skill'
@@ -493,23 +499,23 @@ export class NetworkManager {
                 
                 // Consume mana if the skill costs mana
                 if (manaCost > 0) {
-                    player.mana -= manaCost;
+                    attackingPlayer.mana -= manaCost;
                     
                     // Emit mana update to the player
                     socket.emit('manaUpdate', {
                         id: socket.id,
-                        mana: player.mana,
-                        maxMana: player.maxMana
+                        mana: attackingPlayer.mana,
+                        maxMana: attackingPlayer.maxMana
                     });
                 }
                 
                 // Apply special effects for One with the Universe skill - grant immunity
                 if (data.skillName === 'one_with_universe') {
                     // Grant immunity for 5 seconds
-                    player.isImmune = true;
-                    player.immuneUntil = Date.now() + 5000; // 5 seconds of immunity
+                    attackingPlayer.isImmune = true;
+                    attackingPlayer.immuneUntil = Date.now() + 5000; // 5 seconds of immunity
                     
-                    console.log(`Player ${socket.id} activated One with Universe - immune until ${new Date(player.immuneUntil).toISOString()}`);
+                    console.log(`Player ${socket.id} activated One with Universe - immune until ${new Date(attackingPlayer.immuneUntil).toISOString()}`);
                     
                     // Send notification to the player
                     socket.emit('notification', {
@@ -519,8 +525,8 @@ export class NetworkManager {
                     
                     // Schedule immunity removal after duration
                     setTimeout(() => {
-                        if (player) {
-                            player.isImmune = false;
+                        if (attackingPlayer) {
+                            attackingPlayer.isImmune = false;
                             console.log(`Player ${socket.id} immunity expired`);
                             
                             // Notify player that immunity has ended
@@ -534,14 +540,14 @@ export class NetworkManager {
                 
                 // Apply special effects for Embrace Void skill - grant invisibility
                 if (data.skillName === 'embrace_void') {
-                    // Duration from client data or default to 8 seconds
-                    const duration = data.duration || 8000;
+                    // Duration from client data or default to 20 seconds (increased from 8 seconds)
+                    const duration = data.duration || 20000;
                     
                     // Set invisibility flag
-                    player.visible = false;
-                    player.invisibleUntil = Date.now() + duration;
+                    attackingPlayer.visible = false;
+                    attackingPlayer.invisibleUntil = Date.now() + duration;
                     
-                    console.log(`Player ${socket.id} activated Embrace Void - invisible until ${new Date(player.invisibleUntil).toISOString()}`);
+                    console.log(`Player ${socket.id} activated Embrace Void - invisible until ${new Date(attackingPlayer.invisibleUntil).toISOString()}`);
                     
                     // Broadcast player visibility change to all clients
                     this.io.emit('player_visibility_change', {
@@ -552,14 +558,15 @@ export class NetworkManager {
                     
                     // Send notification to the player
                     socket.emit('notification', {
-                        message: `You are invisible for ${duration/1000} seconds!`,
+                        message: `You are invisible for ${duration/1000} seconds or until you attack!`,
                         type: 'success'
                     });
                     
-                    // Schedule invisibility removal after duration
-                    setTimeout(() => {
-                        if (player) {
-                            player.visible = true;
+                    // Store timeout ID so we can cancel it if invisibility breaks early
+                    attackingPlayer.invisibilityTimeoutId = setTimeout(() => {
+                        if (attackingPlayer) {
+                            attackingPlayer.visible = true;
+                            delete attackingPlayer.invisibilityTimeoutId;
                             console.log(`Player ${socket.id} invisibility expired`);
                             
                             // Broadcast visibility change to all clients
@@ -578,10 +585,10 @@ export class NetworkManager {
                 }
                 
                 // Update skill cooldown
-                player.skillCooldowns.set(data.skillName, now);
+                attackingPlayer.skillCooldowns.set(data.skillName, now);
                 
                 // Check if player is dead
-                if (player.isDead) {
+                if (attackingPlayer.isDead) {
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Cannot use skills while dead'
@@ -599,7 +606,7 @@ export class NetworkManager {
                 }
                 
                 // Check if player or target is in temple area
-                const isPlayerInTemple = this.isPositionInTemple(player.position);
+                const isPlayerInTemple = this.isPositionInTemple(attackingPlayer.position);
                 const isTargetInTemple = this.isPositionInTemple(targetPlayer.position);
                 
                 // Prevent attacks in temple safe zone
@@ -621,7 +628,7 @@ export class NetworkManager {
                 }
                 
                 // Check if target is in range
-                const distance = this.calculateDistance(player.position, targetPlayer.position);
+                const distance = this.calculateDistance(attackingPlayer.position, targetPlayer.position);
                 let skillRange = 1.5; // Default range
                 
                 if (data.skillName === 'martial_arts') {
@@ -651,11 +658,11 @@ export class NetworkManager {
                 }
                 
                 // Ensure attacker has life values initialized
-                if (player.life === undefined) {
-                    player.life = 100;
+                if (attackingPlayer.life === undefined) {
+                    attackingPlayer.life = 100;
                 }
-                if (player.maxLife === undefined) {
-                    player.maxLife = 100;
+                if (attackingPlayer.maxLife === undefined) {
+                    attackingPlayer.maxLife = 100;
                 }
                 
                 // Calculate and apply damage
@@ -714,14 +721,14 @@ export class NetworkManager {
                         healingAmount = 15; // Base healing amount for Life Drain
                         
                         // Life Drain also heals the caster
-                        if (player.id !== targetPlayer.id) {
-                            player.life = Math.min(player.maxLife, player.life + healingAmount);
+                        if (socket.id !== data.targetId) {
+                            attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
                             
                             // Also emit healing to the player
                             this.io.to(socket.id).emit('lifeUpdate', {
                                 id: socket.id,
-                                life: player.life,
-                                maxLife: player.maxLife || 100,
+                                life: attackingPlayer.life,
+                                maxLife: attackingPlayer.maxLife || 100,
                                 timestamp: Date.now(),
                                 final: true,
                                 isHealing: true
@@ -733,10 +740,10 @@ export class NetworkManager {
                     targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
                     damageDealt = -healingAmount; // Negative value to indicate healing
                     
-                    console.log(`Player ${socket.id} healed ${targetPlayer.id} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                    console.log(`Player ${socket.id} healed ${data.targetId} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
                 } else {
                     // Regular damage calculation
-                    damageDealt = this.calculateSkillDamage(data.skillName, player, targetPlayer);
+                    damageDealt = this.calculateSkillDamage(data.skillName, attackingPlayer, targetPlayer);
                     targetPlayer.life = Math.max(0, targetPlayer.life - damageDealt);
                     
                     console.log(`Player ${socket.id} dealt ${damageDealt} damage to ${data.targetId} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
@@ -796,6 +803,16 @@ export class NetworkManager {
                     isHealing: isHealingSkill,
                     isCritical: false
                 });
+
+                // Get player data
+                const player = this.playerManager.getPlayer(socket.id);
+                if (!player) {
+                    console.log('No player found for socket id:', socket.id);
+                    return;
+                }
+
+                // Check if player is invisible - attacking breaks invisibility
+                this.breakInvisibilityIfActive(player, socket);
             });
             
             // Handle player death notification
@@ -1019,13 +1036,16 @@ export class NetworkManager {
                     return;
                 }
                 
-                const player = this.playerManager.getPlayer(socket.id);
-                if (!player) {
+                const attackingPlayer = this.playerManager.getPlayer(socket.id);
+                if (!attackingPlayer) {
                     return this.logSecurityEvent(`Player not found for attack_monster from ${socket.id}`);
                 }
                 
+                // Break invisibility if player is currently invisible
+                this.breakInvisibilityIfActive(attackingPlayer, socket);
+                
                 // Check if player is dead
-                if (player.isDead) {
+                if (attackingPlayer.isDead) {
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Cannot attack while dead'
@@ -1034,8 +1054,8 @@ export class NetworkManager {
                 }
                 
                 // Initialize skill cooldowns if not existing
-                if (!player.skillCooldowns) {
-                    player.skillCooldowns = new Map();
+                if (!attackingPlayer.skillCooldowns) {
+                    attackingPlayer.skillCooldowns = new Map();
                 }
                 
                 // Get the skill being used
@@ -1053,16 +1073,16 @@ export class NetworkManager {
                 }
                 
                 // Initialize mana if not set
-                if (player.mana === undefined) {
-                    player.mana = 100;
+                if (attackingPlayer.mana === undefined) {
+                    attackingPlayer.mana = 100;
                 }
-                if (player.maxMana === undefined) {
-                    player.maxMana = 100;
+                if (attackingPlayer.maxMana === undefined) {
+                    attackingPlayer.maxMana = 100;
                 }
                 
                 // Check if player has enough mana (only for skills with mana cost > 0)
-                if (manaCost > 0 && player.mana < manaCost) {
-                    console.log(`Player ${socket.id} tried to use ${skillName} on monster without enough mana (${player.mana}/${manaCost})`);
+                if (manaCost > 0 && attackingPlayer.mana < manaCost) {
+                    console.log(`Player ${socket.id} tried to use ${skillName} on monster without enough mana (${attackingPlayer.mana}/${manaCost})`);
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Not enough mana to use this skill'
@@ -1072,7 +1092,7 @@ export class NetworkManager {
                 
                 // Check server-side cooldown
                 const now = Date.now();
-                const lastUsedTime = player.skillCooldowns.get(skillName) || 0;
+                const lastUsedTime = attackingPlayer.skillCooldowns.get(skillName) || 0;
                 const skillCooldown = this.getSkillCooldown(skillName);
                 
                 if (lastUsedTime > 0 && now - lastUsedTime < skillCooldown) {
@@ -1085,7 +1105,7 @@ export class NetworkManager {
                 }
                 
                 // Update skill cooldown
-                player.skillCooldowns.set(skillName, now);
+                attackingPlayer.skillCooldowns.set(skillName, now);
                 
                 // Get the monster
                 const monster = this.gameManager.monsterManager.getMonsterById(data.monsterId);
@@ -1104,7 +1124,7 @@ export class NetworkManager {
                 
                 // Check if monster is in temple area
                 const isMonsterInTemple = this.isPositionInTemple(monster.position);
-                const isPlayerInTemple = this.isPositionInTemple(player.position);
+                const isPlayerInTemple = this.isPositionInTemple(attackingPlayer.position);
                 
                 // Prevent attacks on monsters in temple safe zone
                 if (isMonsterInTemple) {
@@ -1125,7 +1145,7 @@ export class NetworkManager {
                 }
                 
                 // Check if the monster is within range
-                const playerPos = player.position;
+                const playerPos = attackingPlayer.position;
                 const monsterPos = monster.position;
                 const distance = this.calculateDistance(playerPos, monsterPos, 'monster', monster);
                 
@@ -1152,10 +1172,10 @@ export class NetworkManager {
                 }
                 
                 // Consume mana
-                player.mana -= manaCost;
+                attackingPlayer.mana -= manaCost;
                 
                 // Calculate damage from the server side
-                const damage = this.calculateMonsterDamage(skillName, player, monster);
+                const damage = this.calculateMonsterDamage(skillName, attackingPlayer, monster);
                 
                 // Apply damage to monster
                 const previousHealth = monster.health;
@@ -1167,8 +1187,8 @@ export class NetworkManager {
                 // Broadcast mana update for the player who used the skill
                 this.io.emit('manaUpdate', {
                     id: socket.id,
-                    mana: player.mana,
-                    maxMana: player.maxMana || 100,
+                    mana: attackingPlayer.mana,
+                    maxMana: attackingPlayer.maxMana || 100,
                     timestamp: Date.now()
                 });
                 
@@ -1178,7 +1198,7 @@ export class NetworkManager {
                     this.gameManager.handleMonsterDeath(socket.id, monster.id);
                     
                     // Award XP and potentially items
-                    this.rewardPlayerForMonsterKill(player, monster);
+                    this.rewardPlayerForMonsterKill(attackingPlayer, monster);
                 } else {
                     // Broadcast monster health update to all clients
                     this.io.emit('monster_update', {
@@ -1830,6 +1850,37 @@ export class NetworkManager {
         this.synchronizeGameState();
         
         console.log(`Synchronized game state for client ${socketId}`);
+    }
+
+    /**
+     * Break player invisibility if it's currently active
+     * @param {Object} player - The player object
+     * @param {Object} socket - The player's socket
+     */
+    breakInvisibilityIfActive(player, socket) {
+        // Check if player is invisible and has an active invisibility timeout
+        if (player && player.visible === false && player.invisibilityTimeoutId) {
+            console.log(`Breaking invisibility for player ${player.id || socket.id} due to combat action`);
+            
+            // Clear the scheduled invisibility timeout
+            clearTimeout(player.invisibilityTimeoutId);
+            delete player.invisibilityTimeoutId;
+            
+            // Make player visible again
+            player.visible = true;
+            
+            // Broadcast visibility change to all clients
+            this.io.emit('player_visibility_change', {
+                playerId: player.id || socket.id,
+                visible: true
+            });
+            
+            // Notify player that invisibility has ended due to attack
+            socket.emit('notification', {
+                message: 'Your attack has revealed you from the void!',
+                type: 'warning'
+            });
+        }
     }
 }
 

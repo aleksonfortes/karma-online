@@ -1701,15 +1701,27 @@ export class NetworkManager {
             // For local player, we don't fully hide the model - we keep it semi-transparent
             // This way the player can still see where they are
             if (data.playerId === this.socket.id) {
-                // Just track the state, but don't set visible=false on our own player
-                // The actual opacity/transparency is managed by the skill effect
-                if (this.game.localPlayer && !this.game.localPlayer.userData) {
-                    this.game.localPlayer.userData = {};
-                }
-                // Only track the invisible state - don't change visibility
-                if (this.game.localPlayer && this.game.localPlayer.userData) {
+                console.log('[LOCAL] Received visibility change for local player:', !data.visible);
+                
+                // Don't modify local player's visibility directly - it's managed by the skill effect
+                // Just ensure userData exists and flag is set
+                if (this.game.localPlayer) {
+                    if (!this.game.localPlayer.userData) {
+                        this.game.localPlayer.userData = {};
+                    }
+                    
                     this.game.localPlayer.userData.isInvisible = !data.visible;
-                    console.log(`[LOCAL] Tracking local player invisibility: ${!data.visible}`);
+                    
+                    // If becoming invisible, trigger the invisibility effect
+                    if (!data.visible && this.game.skillsManager) {
+                        console.log('Triggering local invisibility effect');
+                        this.game.skillsManager.createEmbraceVoidEffect(data.duration || 10000);
+                    } 
+                    // If becoming visible again and not already handled by skill effect duration
+                    else if (data.visible && this.game.skillsManager && this.game.skillsManager.invisibilityEffectData) {
+                        console.log('Ending local invisibility effect early');
+                        this.game.skillsManager.clearInvisibilityState();
+                    }
                 }
                 return;
             }
@@ -3002,5 +3014,19 @@ export class NetworkManager {
                 }
             });
         });
+    }
+
+    /**
+     * Check if dev mode is available for this user
+     * @returns {boolean} True if dev mode is available, false otherwise
+     */
+    isDevModeAvailable() {
+        // Dev mode should be disabled in production
+        // This is a placeholder for potential future development modes
+        if (process.env.NODE_ENV === 'development' && this.socket) {
+            // Only allow dev mode for specific users or in development
+            return true;
+        }
+        return false;
     }
 }

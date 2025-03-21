@@ -1219,6 +1219,147 @@ export class MonsterManager {
         
         return { success: true, message: "Damage applied successfully", health: monster.health, maxHealth: monster.maxHealth };
     }
+
+    /**
+     * Checks if a monster should target a player
+     * @param {Object} monster - The monster object
+     * @param {string} playerId - The player ID
+     * @param {Object} playerManager - The player manager
+     * @returns {boolean} True if the monster should target the player, false otherwise
+     */
+    shouldTargetPlayer(monster, playerId, playerManager) {
+        // Skip if no player ID or player manager
+        if (!playerId || !playerManager) return false;
+        
+        const player = playerManager.getPlayer(playerId);
+        if (!player) return false;
+        
+        // Don't target if player is:
+        // 1. Dead
+        // 2. Invulnerable
+        // 3. In temple
+        // 4. Invisible
+        if (player.isDead || 
+            player.isInvulnerable || 
+            player.visible === false || 
+            this.isInTemple(player.position)) {
+            console.log(`Monster ${monster.id} cleared target ${monster.targetPlayerId} (player dead, invisible, or missing)`);
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Selects a target for a monster based on proximity and other factors
+     * @param {Object} monster - The monster object
+     * @param {Object} playerManager - The player manager
+     */
+    selectTargetForMonster(monster, playerManager) {
+        if (!monster || !playerManager) return;
+        
+        // Check if monster has a current target that's still valid
+        if (monster.targetPlayerId) {
+            // Validate the current target
+            if (this.shouldTargetPlayer(monster, monster.targetPlayerId, playerManager)) {
+                // Current target is still valid
+                return;
+            }
+            
+            // Current target is no longer valid - clear it
+            monster.targetPlayerId = null;
+        }
+        
+        const monsterConfig = GameConstants.MONSTER[monster.type];
+        const aggroRadius = monsterConfig.AGGRO_RADIUS || 10;
+        
+        // Store players in range along with their distances
+        const playersInRange = [];
+        
+        // Check each player for potential targeting
+        for (const [playerId, player] of playerManager.players) {
+            // Skip if player shouldn't be targeted (dead, invisible, etc)
+            if (!this.shouldTargetPlayer(monster, playerId, playerManager)) {
+                continue;
+            }
+            
+            // Calculate distance to player
+            const dx = player.position.x - monster.position.x;
+            const dz = player.position.z - monster.position.z;
+            const distance = Math.sqrt(dx * dx + dz * dz);
+            
+            // Check if player is within aggro radius
+            if (distance <= aggroRadius) {
+                playersInRange.push({ player, playerId, distance });
+            }
+        }
+        
+        // Sort players by distance (closest first)
+        playersInRange.sort((a, b) => a.distance - b.distance);
+        
+        // Target the closest player if any are in range
+        if (playersInRange.length > 0) {
+            monster.targetPlayerId = playersInRange[0].playerId;
+            console.log(`Monster ${monster.id} targeting player ${monster.targetPlayerId} at distance ${playersInRange[0].distance.toFixed(2)}`);
+        }
+    }
+
+    /**
+     * Makes a monster attack its current target
+     * @param {string} monsterId - The monster ID
+     * @param {string} playerId - The player ID
+     * @param {Object} playerManager - The player manager
+     */
+    makeMonsterAttack(monsterId, playerId, playerManager) {
+        if (!monsterId || !playerId || !playerManager) return;
+        
+        const monster = this.monsters.get(monsterId);
+        if (!monster) return;
+        
+        // First check if player should be targeted at all
+        if (!this.shouldTargetPlayer(monster, playerId, playerManager)) {
+            // Clear the monster's target since this player shouldn't be attacked
+            monster.targetPlayerId = null;
+            monster.isReturningToSpawn = true;
+            return;
+        }
+        
+        const player = playerManager.getPlayer(playerId);
+        if (!player) return;
+        
+        // Double-check distance to target
+        const dx = player.position.x - monster.position.x;
+        const dz = player.position.z - monster.position.z;
+        const distance = Math.sqrt(dx * dx + dz * dz);
+        
+        const monsterConfig = GameConstants.MONSTER[monster.type];
+        const attackRange = monsterConfig.ATTACK_RANGE;
+        
+        // Account for monster and player collision radius in attack range calculation
+        const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
+        const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
+        const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
+        
+        if (effectiveDistance > attackRange) {
+            return; // Too far to attack
+        }
+        
+        // Check if monster is on cooldown
+        const currentTime = Date.now();
+        if (monster.lastAttackTime && currentTime - monster.lastAttackTime < monsterConfig.ATTACK_SPEED) {
+            return; // Still on cooldown
+        }
+        
+        // Set attack animation
+        monster.isAttacking = true;
+        monster.attackAnimationEndTime = currentTime + monsterConfig.ATTACK_ANIMATION_TIME;
+        monster.lastAttackTime = currentTime;
+        
+        // Update last combat time for health regeneration
+        monster.lastCombatTime = currentTime;
+        
+        // Calculate damage with remaining logic as before...
+    }
 }
 
 export default MonsterManager; 

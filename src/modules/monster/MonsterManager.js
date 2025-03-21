@@ -397,7 +397,7 @@ export class MonsterManager {
             const scale = monsterData.scale || 1.0;
             if (monsterType === 'TYPHON') {
                 // Make Typhon larger - use original 3.0 base scale
-                monsterMesh.scale.set(scale * 4.5, scale * 4.5, scale * 4.5); // 3.0 * 1.5 = 4.5
+                monsterMesh.scale.set(scale * 3.0, scale * 3.0, scale * 3.0); // Restore original scale for Typhon
             } else {
                 // Regular Cerberus - use original 3.0 base scale 
                 monsterMesh.scale.set(scale * 3.0, scale * 3.0, scale * 3.0); // Restore original 3.0 scale
