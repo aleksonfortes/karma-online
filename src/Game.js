@@ -334,46 +334,82 @@ export class Game {
                         }
                     }
                     break;
-                case 'KeyE':
-                    // E handles both NPC interaction and skill usage for monsters, like PVP
-                    if (this.isAlive) {
-                        // First check if we're near an NPC - prioritize NPC interaction
-                        if (this.npcManager && this.npcManager.isNearNPC()) {
-                            // Always prioritize NPC interaction if near one, regardless of targeting
-                            this.npcManager.handleInteraction();
-                        } else {
-                            // Only use skills on targets if not near an NPC
-                            const target = this.targetingManager?.currentTarget;
-                            if (target && target.type === 'monster' && this.skillsManager) {
-                                // Check if player has chosen a path - skip in test environment
-                                const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
-                                if (!this.playerStats.path && !isTestEnvironment) {
-                                    console.log('You must choose a path (light or dark) before using skills');
-                                    // Show UI message if UI manager exists
-                                    if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                                        this.uiManager.showNotification('Choose a path (light or dark) first');
-                                    } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
-                                        this.uiManager.showMessage('Choose a path (light or dark) first');
-                                    }
-                                    break;
-                                }
-                                
-                                // Get the monster
-                                const monster = this.monsterManager?.getMonsterById(target.id);
-                                if (monster) {
-                                    // Use the skill in the E slot on the monster
-                                    const eSkill = this.skillsManager.getSkillBySlot(2); // Slot 2 is E
-                                    if (eSkill) {
-                                        this.skillsManager.useSkillOnMonster(target.id, eSkill);
-                                    }
-                                }
-                            } else if (!target && this.skillsManager && this.npcManager) {
-                                // Only show no target selected when not near an NPC and no target
-                                if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
-                                    this.uiManager.showNotification('No target selected', 'white');
+                case 'KeyR':
+                    // R key for skill in slot 2
+                    if (this.isAlive && this.skillsManager) {
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster') {
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Use the skill in the R slot on the monster
+                                const skill = this.skillsManager.getSkillBySlot(2); // Slot 2 is R
+                                if (skill) {
+                                    this.skillsManager.useSkillOnMonster(target.id, skill);
                                 }
                             }
+                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No target selected', 'white');
                         }
+                    }
+                    break;
+                case 'KeyF':
+                    // F key for skill in slot 3
+                    if (this.isAlive && this.skillsManager) {
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster') {
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Use the skill in the F slot on the monster
+                                const skill = this.skillsManager.getSkillBySlot(3); // Slot 3 is F
+                                if (skill) {
+                                    this.skillsManager.useSkillOnMonster(target.id, skill);
+                                }
+                            }
+                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No target selected', 'white');
+                        }
+                    }
+                    break;
+                case 'KeyV':
+                    // V key for skill in slot 4
+                    if (this.isAlive && this.skillsManager) {
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster') {
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Use the skill in the V slot on the monster
+                                const skill = this.skillsManager.getSkillBySlot(4); // Slot 4 is V
+                                if (skill) {
+                                    this.skillsManager.useSkillOnMonster(target.id, skill);
+                                }
+                            }
+                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No target selected', 'white');
+                        }
+                    }
+                    break;
+                case 'Digit4':
+                    // 4 key for skill in slot 5
+                    if (this.isAlive && this.skillsManager) {
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster') {
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Use the skill in the 4 slot on the monster
+                                const skill = this.skillsManager.getSkillBySlot(5); // Slot 5 is 4
+                                if (skill) {
+                                    this.skillsManager.useSkillOnMonster(target.id, skill);
+                                }
+                            }
+                        } else if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No target selected', 'white');
+                        }
+                    }
+                    break;
+                case 'KeyE':
+                    // E key for NPC interaction
+                    if (this.isAlive && this.npcManager && this.npcManager.isNearNPC()) {
+                        this.npcManager.handleInteraction();
                     }
                     break;
                 case 'Digit3':
