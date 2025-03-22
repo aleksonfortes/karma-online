@@ -13,10 +13,20 @@ export class NetworkManager {
     constructor(game) {
         this.game = game;
         this.socket = null;
-        this.connected = false;
-        this.wasDisconnected = false;
-        this.reconnectAttempts = 0;
-        this.lastStateUpdate = 0;
+        this.connectAttempts = 0;
+        this.maxConnectAttempts = 5;
+        this.reconnectAttempt = 0;  // Add this line to properly track reconnection attempts
+        this.pendingUpdates = new Map();
+        this.lastHealthLog = {};
+        this.pendingMonsterData = null;
+        this.monsterManagerCheckInterval = null;
+        this.playerMoveDebounce = {};
+        this.playerDead = false;
+        this.playerRejoiningSafeZone = false;
+        this.lastServerUpdateTime = 0;
+        this.lastKarmaUpdate = 0;
+        this._handlersInitialized = false;
+        this._lastPathChoiceSent = 0;
         
         // Connection state tracking
         this.connectionState = {
@@ -46,17 +56,25 @@ export class NetworkManager {
      */
     connect() {
         try {
-            // Use the server URL from the centralized configuration
-            const SERVER_URL = getServerUrl();
+            // Get the player name from localStorage
+            const playerName = localStorage.getItem('playerName') || 'Player';
             
-            console.log('Connecting to server at:', SERVER_URL);
+            // Get the server URL - either from game instance or fallback
+            const SERVER_URL = this.game.SERVER_URL || getServerUrl();
+            
+            console.log(`Connecting to server at: ${SERVER_URL} with name: ${playerName}`);
+            
+            // Include the player name as a query parameter
             this.socket = io(SERVER_URL, {
                 transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 5,
                 reconnectionDelay: 1000,
                 autoConnect: true,
-                forceNew: true // Each tab is a new player
+                forceNew: true, // Each tab is a new player
+                query: {
+                    playerName: playerName
+                }
             });
             
             // Set up handlers after socket is created
@@ -190,8 +208,8 @@ export class NetworkManager {
             this.connectionState.reconnectAttempts = 0;
             this.reconnectAttempts = 0;
             
-            // Show connection message
-            this.showConnectionStatus('Connected to server!', true);
+            // No longer needed since we always require server connection
+            // this.showConnectionStatus('Connected to server!', true);
             
             // Request state synchronization when connecting
             this.requestStateSync();
@@ -213,8 +231,17 @@ export class NetworkManager {
 
         // Handle disconnection
         this.socket.on('disconnect', (reason) => {
-            console.warn('Disconnected from server. Reason:', reason);
+            console.log('Disconnected from server. Reason:', reason);
             this.connected = false;
+            
+            // Show disconnection message - we keep this as it's useful information
+            this.showConnectionStatus('Server connection lost. Attempting to reconnect...', false);
+            
+            // Only make game unplayable if the game is initialized
+            if (this.game.isInitialized) {
+                this.game.isUnplayable = true;
+                console.warn('Game is now unplayable due to network issues');
+            }
             
             // Disable player controls
             if (this.game.controls) {
@@ -223,9 +250,6 @@ export class NetworkManager {
                 this.game.controls.left = false;
                 this.game.controls.right = false;
             }
-            
-            // Show disconnection message
-            this.showConnectionStatus('Disconnected from server. Attempting to reconnect...');
             
             // Attempt to reconnect after a short delay
             if (!this.connectionState.isReconnecting) {
@@ -247,7 +271,13 @@ export class NetworkManager {
             
             // Create all existing players
             if (gameState.players) {
+                console.log('Processing players from initGameState:');
                 Object.entries(gameState.players).forEach(([id, player]) => {
+                    console.log(`Player ${id} detailed data:`, {
+                        id: player.id,
+                        displayName: player.displayName,
+                        position: player.position
+                    });
                     if (id !== this.socket.id) {
                         // Use async function without waiting for it to complete
                         // This is fine because each player is created independently
@@ -484,6 +514,27 @@ export class NetworkManager {
                         karma: player.karma ?? 50,
                         maxKarma: player.maxKarma ?? 100
                     };
+                    
+                    // Store player ID, displayName and stats in userData
+                    playerMesh.userData.playerId = player.id;
+                    
+                    // Enhanced logging for displayName issue
+                    console.log(`Setting displayName for player ${player.id}:`, {
+                        receivedName: player.displayName,
+                        fallbackName: `Player-${player.id.substring(0, 5)}`,
+                        finalName: player.displayName || `Player-${player.id.substring(0, 5)}`
+                    });
+                    
+                    playerMesh.userData.displayName = player.displayName || `Player-${player.id.substring(0, 5)}`;
+                    
+                    // Additional check to verify displayName was set correctly
+                    console.log(`Verification - displayName in userData:`, {
+                        id: player.id,
+                        displayNameInUserData: playerMesh.userData.displayName,
+                        allUserDataKeys: Object.keys(playerMesh.userData)
+                    });
+                    
+                    playerMesh.userData.stats = stats;
                     
                     // Force creation and update of status bars
                     if (this.game.updatePlayerStatus) {
@@ -2020,28 +2071,25 @@ export class NetworkManager {
         });
     }
 
-    update(delta, isOfflineMode = false) {
-        // In offline mode, skip network operations but update local state
-        if (isOfflineMode) {
-            // Still update any local state needed even in offline mode
-            if (this.game?.localPlayer) {
-                // Update local player position if needed
-                const now = Date.now();
-                if (!this.lastStateUpdate || now - this.lastStateUpdate >= 100) { 
-                    this.lastStateUpdate = now;
-                }
-            }
-            return;
-        }
+    /**
+     * Update function called every frame
+     * @param {number} delta - Time since last frame in seconds
+     */
+    update(delta) {
+        // Check if we've received a server update within a reasonable time
+        // This helps detect silent disconnections
+        const timeSinceLastUpdate = Date.now() - this.lastServerUpdateTime;
         
-        // Skip if not connected or no local player
-        if (!this.socket?.connected || !this.game?.localPlayer) return;
-        
-        // Send player state if player has moved
-        const now = Date.now();
-        if (!this.lastStateUpdate || now - this.lastStateUpdate >= 100) { 
-            this.sendPlayerState();
-            this.lastStateUpdate = now;
+        // Only check for silent disconnections after the player has been active for a while
+        if (this.socket && this.lastServerUpdateTime > 0 && timeSinceLastUpdate > 15000) {
+            // If we haven't received a server update in the last 15 seconds, consider reconnecting
+            console.warn(`No server update received in ${Math.round(timeSinceLastUpdate / 1000)} seconds`);
+            
+            // Try to ping the server to check connection
+            this.socket.emit('ping');
+            
+            // Reset lastServerUpdateTime to avoid repeated reconnection attempts
+            this.lastServerUpdateTime = Date.now();
         }
     }
 
@@ -2092,7 +2140,11 @@ export class NetworkManager {
     }
 
     async createNetworkPlayer(player) {
-        console.log('Creating network player:', player.id);
+        console.log('Creating network player with data:', { 
+            id: player.id,
+            displayName: player.displayName,
+            position: player.position 
+        });
         try {
             const playerMesh = await this.game.playerManager.createPlayer(
                 player.id,
@@ -2116,8 +2168,25 @@ export class NetworkManager {
                     level: player.level ?? 1
                 };
                 
-                // Store player ID and stats
+                // Store player ID, displayName and stats
                 playerMesh.userData.playerId = player.id;
+                
+                // Enhanced logging for displayName issue
+                console.log(`Setting displayName for player ${player.id}:`, {
+                    receivedName: player.displayName,
+                    fallbackName: `Player-${player.id.substring(0, 5)}`,
+                    finalName: player.displayName || `Player-${player.id.substring(0, 5)}`
+                });
+                
+                playerMesh.userData.displayName = player.displayName || `Player-${player.id.substring(0, 5)}`;
+                
+                // Additional check to verify displayName was set correctly
+                console.log(`Verification - displayName in userData:`, {
+                    id: player.id,
+                    displayNameInUserData: playerMesh.userData.displayName,
+                    allUserDataKeys: Object.keys(playerMesh.userData)
+                });
+                
                 playerMesh.userData.stats = stats;
                 
                 // Force creation and update of status bars
@@ -2132,7 +2201,7 @@ export class NetworkManager {
                 
                 this.game.playerManager.players.set(player.id, playerMesh);
                 
-                console.log(`Added network player ${player.id} with health bar`);
+                console.log(`Added network player ${player.id} (${playerMesh.userData.displayName}) with health bar`);
                 
                 // Request a life update for this player to ensure health bar is correct
                 this.socket.emit('requestLifeUpdate', { playerId: player.id });
@@ -2570,39 +2639,95 @@ export class NetworkManager {
      * Attempt to reconnect to the server
      */
     attemptReconnect() {
-        if (this.connectionState.reconnectAttempts >= this.connectionState.maxReconnectAttempts) {
-            console.warn('Maximum reconnection attempts reached');
+        console.log(`Attempting to reconnect (attempt ${this.reconnectAttempt}/5)...`);
+        if (this.reconnectAttempt > 5) {
+            console.error('Maximum reconnection attempts reached');
+            // Always require server connection - no offline mode
+            this.showConnectionError('Could not connect to server. Please refresh the page to try again.');
             return;
         }
         
-        this.connectionState.reconnectAttempts++;
-        console.log(`Attempting to reconnect (attempt ${this.connectionState.reconnectAttempts}/${this.connectionState.maxReconnectAttempts})...`);
-        
         try {
-            // Close existing socket if it exists
-            if (this.socket) {
-                this.socket.close();
-            }
+            this.reconnectAttempt++;
             
-            // Create a new connection
-            const SERVER_URL = getServerUrl();
+            // Get the server URL
+            const SERVER_URL = this.game.SERVER_URL || getServerUrl();
+            console.log(`Using VITE_SOCKET_URL: ${SERVER_URL}`);
+            
+            // Create a new socket connection
             this.socket = io(SERVER_URL, {
                 transports: ['websocket'],
                 reconnection: true,
                 reconnectionAttempts: 5,
-                reconnectionDelay: this.connectionState.reconnectDelay,
-                autoConnect: true,
-                forceNew: true
+                reconnectionDelay: 1000
             });
             
-            // Set up handlers again
             console.log('Setting up socket handlers during reconnection');
-            
-            // Reset handlers flag to ensure clean slate for reconnection
-            this._handlersInitialized = false;
             this.setupSocketHandlers();
         } catch (error) {
             console.error('Error during reconnection attempt:', error);
+            
+            // Try again after a delay (increasing with each attempt)
+            setTimeout(() => this.attemptReconnect(), 2000 * this.reconnectAttempt);
+        }
+    }
+    
+    /**
+     * Show a connection error message
+     * @param {string} message - The error message to display
+     */
+    showConnectionError(message) {
+        if (this.game && this.game.uiManager) {
+            // Show error message
+            this.game.uiManager.showNotification(message, '#ff0000', 0);
+            
+            // Display a modal with retry button
+            const modal = document.createElement('div');
+            modal.style.position = 'fixed';
+            modal.style.top = '0';
+            modal.style.left = '0';
+            modal.style.width = '100%';
+            modal.style.height = '100%';
+            modal.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            modal.style.zIndex = '10000';
+            modal.style.display = 'flex';
+            modal.style.flexDirection = 'column';
+            modal.style.justifyContent = 'center';
+            modal.style.alignItems = 'center';
+            
+            const content = document.createElement('div');
+            content.style.padding = '30px';
+            content.style.backgroundColor = '#333';
+            content.style.borderRadius = '10px';
+            content.style.color = 'white';
+            content.style.textAlign = 'center';
+            content.style.maxWidth = '80%';
+            
+            const title = document.createElement('h2');
+            title.textContent = 'Connection Error';
+            
+            const text = document.createElement('p');
+            text.textContent = message;
+            
+            const button = document.createElement('button');
+            button.textContent = 'Retry Connection';
+            button.style.padding = '10px 20px';
+            button.style.marginTop = '20px';
+            button.style.backgroundColor = '#4CAF50';
+            button.style.border = 'none';
+            button.style.borderRadius = '5px';
+            button.style.color = 'white';
+            button.style.cursor = 'pointer';
+            
+            button.addEventListener('click', () => {
+                location.reload();
+            });
+            
+            content.appendChild(title);
+            content.appendChild(text);
+            content.appendChild(button);
+            modal.appendChild(content);
+            document.body.appendChild(modal);
         }
     }
     

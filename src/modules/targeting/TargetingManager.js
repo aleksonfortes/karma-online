@@ -285,27 +285,26 @@ export class TargetingManager {
         let level = 1;
         
         if (type === 'player') {
-            // Get the player data - use playerManager to get players
-            let targetPlayer = null;
-            if (this.game.playerManager && this.game.playerManager.players) {
-                // Check if players is a Map or Array and use accordingly
-                if (this.game.playerManager.players instanceof Map) {
-                    targetPlayer = this.game.playerManager.players.get(id);
-                } else if (Array.isArray(this.game.playerManager.players)) {
-                    targetPlayer = this.game.playerManager.players.find(p => p.userData && p.userData.id === id);
-                }
-            }
+            // Get the player data directly from the player manager
+            const playerInfo = this.game.playerManager.getPlayerById(id);
             
-            name = targetPlayer?.userData?.displayName || `Player ${id.substring(0, 5)}`;
-            
-            // Get detailed player info from the player manager if available
-            if (this.game.playerManager) {
-                const playerInfo = this.game.playerManager.getPlayerById(id);
-                if (playerInfo) {
-                    health = playerInfo.life || 100;
-                    maxHealth = playerInfo.maxLife || 100;
-                    level = playerInfo.level || 1;
-                }
+            if (playerInfo) {
+                name = playerInfo.displayName || `Player ${id.substring(0, 5)}`;
+                health = playerInfo.life || 100;
+                maxHealth = playerInfo.maxLife || 100;
+                level = playerInfo.level || 1;
+                
+                // Enhanced debug for displayName issue
+                console.log(`Setting player target name:`, {
+                    id: id,
+                    displayName: playerInfo.displayName,
+                    fallbackName: `Player ${id.substring(0, 5)}`,
+                    finalName: name,
+                    playerInfoKeys: Object.keys(playerInfo)
+                });
+            } else {
+                console.warn(`Player info not found for ID ${id}`);
+                name = `Player ${id.substring(0, 5)}`;
             }
             
             // Request latest health data
@@ -499,20 +498,27 @@ export class TargetingManager {
             
             // Update the target display with current player info - do this every validation check
             // to ensure UI is always in sync with actual player health
-            if (this.game.uiManager && playerObject && playerObject.userData && playerObject.userData.stats) {
-                const stats = playerObject.userData.stats;
-                const health = stats.life || 0;
-                const maxHealth = stats.maxLife || 100;
+            if (this.game.uiManager) {
+                // Get health stats from playerObject
+                const health = playerObject.life || 0;
+                const maxHealth = playerObject.maxLife || 100;
                 
-                // Get player name from userData if available
-                const playerName = playerObject.userData.name || `Player ${playerId.substring(0, 6)}`;
+                // Get player name directly from the playerObject
+                const playerName = playerObject.displayName || `Player ${playerId.substring(0, 6)}`;
+                
+                // Add debugging to confirm displayName retrieval
+                console.log(`Updating target display in validate:`, {
+                    displayName: playerObject.displayName,
+                    finalName: playerName,
+                    playerObjectKeys: Object.keys(playerObject)
+                });
                 
                 this.game.uiManager.updateTargetDisplay(
                     playerName,
                     health,
                     maxHealth,
                     'player',
-                    1
+                    playerObject.level || 1
                 );
             }
             

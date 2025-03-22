@@ -1,6 +1,7 @@
 import './styles.css';
 import { Game } from './Game.js';
 import { getServerUrl } from './config.js';
+import { UIManager } from './modules/ui/UIManager.js';
 
 // Create a variable to track initialization attempts
 let initializationAttempts = 0;
@@ -18,10 +19,22 @@ async function initGame() {
     console.log(`Initializing game (attempt ${initializationAttempts}/${MAX_INIT_ATTEMPTS})...`);
     
     try {
-        // Create the game instance with development server URL
-        const serverUrl = getServerUrl();
+        // First create a temporary UI manager just to show the player name screen
+        const tempUIManager = new UIManager();
         
-        window.game = new Game(serverUrl);
+        // Show the player name screen and wait for the name to be submitted
+        tempUIManager.createPlayerNameScreen((playerName) => {
+            console.log(`Player name set to: ${playerName}`);
+            
+            // Now create the game instance with the server URL
+            const serverUrl = getServerUrl();
+            
+            // Create the game instance
+            window.game = new Game(serverUrl);
+            
+            // Store the player name in the game instance for future use
+            window.game.playerName = playerName;
+        });
     } catch (error) {
         console.error('Error initializing game:', error);
         
