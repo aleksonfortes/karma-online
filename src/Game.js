@@ -15,7 +15,7 @@ import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
 
 export class Game {
-    constructor() {
+    constructor(serverUrl) {
         // Initialize Three.js components
         this.scene = new THREE.Scene();
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -31,7 +31,7 @@ export class Game {
         this.isInitialized = false;
         this.isOfflineMode = false;
         this.isPaused = false;
-        this.SERVER_URL = getServerUrl();
+        this.SERVER_URL = serverUrl || getServerUrl();
         this.currentTime = 0;
         
         // Add game constants for use by other modules
@@ -157,10 +157,10 @@ export class Game {
             }
             
             if (!networkInitialized) {
-                // If we can't connect, still try to create the game in offline mode
-                console.warn('Failed to connect to server. Starting in offline mode...');
-                this.isOfflineMode = true;
-                this.uiManager.showOfflineNotification();
+                // Don't proceed if we can't connect to the server
+                console.error('Failed to connect to server. The game requires a server connection to run.');
+                this.handleInitializationError(new Error('Server connection required'));
+                throw new Error('Server connection required');
             }
             
             // Initialize player - this already loads the character model
@@ -238,12 +238,63 @@ export class Game {
         }
     }
 
+    /**
+     * Handle initialization errors
+     * @param {Error} error - The error that occurred
+     */
     handleInitializationError(error) {
         console.error('Game initialization error:', error);
         
-        // Show error message to the user
-        this.uiManager.hideLoadingScreen();
-        this.uiManager.showErrorScreen(`Failed to initialize game: ${error.message}`);
+        // Hide loading screen if it exists
+        if (this.uiManager) {
+            this.uiManager.hideLoadingScreen();
+        }
+        
+        // Show error message
+        const errorContainer = document.createElement('div');
+        errorContainer.style.position = 'fixed';
+        errorContainer.style.top = '0';
+        errorContainer.style.left = '0';
+        errorContainer.style.width = '100%';
+        errorContainer.style.height = '100%';
+        errorContainer.style.display = 'flex';
+        errorContainer.style.flexDirection = 'column';
+        errorContainer.style.alignItems = 'center';
+        errorContainer.style.justifyContent = 'center';
+        errorContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        errorContainer.style.color = '#ff0000';
+        errorContainer.style.fontFamily = 'Arial, sans-serif';
+        errorContainer.style.fontSize = '24px';
+        errorContainer.style.zIndex = '10000';
+        
+        const title = document.createElement('h1');
+        title.textContent = 'Game Initialization Failed';
+        title.style.marginBottom = '20px';
+        
+        const message = document.createElement('p');
+        message.textContent = error.message || 'Failed to connect to server. The game requires a server connection to run.';
+        message.style.marginBottom = '30px';
+        message.style.textAlign = 'center';
+        message.style.maxWidth = '600px';
+        
+        const retryButton = document.createElement('button');
+        retryButton.textContent = 'Retry Connection';
+        retryButton.style.padding = '15px 30px';
+        retryButton.style.fontSize = '18px';
+        retryButton.style.backgroundColor = '#4CAF50';
+        retryButton.style.border = 'none';
+        retryButton.style.borderRadius = '5px';
+        retryButton.style.color = 'white';
+        retryButton.style.cursor = 'pointer';
+        retryButton.addEventListener('click', () => {
+            location.reload();
+        });
+        
+        errorContainer.appendChild(title);
+        errorContainer.appendChild(message);
+        errorContainer.appendChild(retryButton);
+        
+        document.body.appendChild(errorContainer);
     }
 
     handleGameUpdate(data) {
@@ -507,11 +558,8 @@ export class Game {
         }
         
         // Update all managers (safely with optional chaining)
-        if (!this.isOfflineMode && this.networkManager) {
+        if (this.networkManager) {
             this.networkManager.update(delta);
-        } else if (this.networkManager) {
-            // In offline mode, still call some network functions
-            this.networkManager.update(delta, true); // true = offline mode
         }
         
         this.playerManager?.update(delta);

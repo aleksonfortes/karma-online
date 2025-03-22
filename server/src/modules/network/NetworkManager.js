@@ -48,11 +48,14 @@ export class NetworkManager {
         console.log('NetworkManager: Setting up socket handlers');
         
         this.io.on('connection', (socket) => {
-            // Create new player through the player manager
-            const player = this.playerManager.addPlayer(socket.id);
+            // Extract player name from query parameters
+            const playerName = socket.handshake.query.playerName || null;
             
-            // Log player connection with total count
-            console.log(`Player connected: ${socket.id} (Total Players: ${this.playerManager.getPlayerCount()})`);
+            // Create new player through the player manager with the custom name
+            const player = this.playerManager.addPlayer(socket.id, playerName);
+            
+            // Log player connection with total count and name
+            console.log(`Player connected: ${socket.id} (${player.displayName}) - Total Players: ${this.playerManager.getPlayerCount()}`);
             
             // Store the socket
             this.sockets.set(socket.id, { statsInterval: null });

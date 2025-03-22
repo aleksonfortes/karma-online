@@ -38,10 +38,22 @@ export class PlayerManager {
     /**
      * Add a player to the manager
      * @param {string} socketId - The socket ID of the player
+     * @param {string} [playerName] - Optional custom player name
      * @returns {Object} The created player
      */
-    addPlayer(socketId) {
+    addPlayer(socketId, playerName) {
         const player = this.createPlayer(socketId);
+        
+        // Set a custom display name if provided, otherwise use default
+        if (playerName && typeof playerName === 'string') {
+            // Sanitize name and limit length
+            const sanitizedName = playerName.trim().slice(0, 20);
+            if (sanitizedName.length > 0) {
+                player.displayName = sanitizedName;
+                console.log(`Player ${socketId} set custom name: ${sanitizedName}`);
+            }
+        }
+        
         this.players.set(socketId, player);
         return player;
     }

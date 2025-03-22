@@ -42,8 +42,8 @@ export class PlayerManager {
                 console.log('Character model preloaded and cached');
             }
             
-            // Only create local player if it doesn't already exist and we're not in offline mode
-            if (!this.game.localPlayer && this.game.networkManager && !this.game.networkManager.isOfflineMode) {
+            // Create local player if it doesn't already exist
+            if (!this.game.localPlayer && this.game.networkManager) {
                 console.log('PlayerManager: Creating local player');
                 // Let NetworkManager handle local player creation to ensure proper synchronization
                 // The actual player will be created when receiving server position
@@ -293,10 +293,24 @@ export class PlayerManager {
             playerMesh.position.set(position.x, position.y, position.z);
             playerMesh.rotation.y = rotation.y;
             
+            // Get player name from localStorage for local player
+            const isLocalPlayer = id === this.game.networkManager?.socket?.id;
+            let displayName;
+            
+            if (isLocalPlayer) {
+                // For local player, use name from localStorage
+                displayName = localStorage.getItem('playerName') || `Player-${id.substring(0, 5)}`;
+                console.log(`Setting local player displayName: ${displayName}`);
+            } else {
+                // For network players, this will be updated later from server data
+                displayName = `Player-${id.substring(0, 5)}`;
+            }
+            
             // Set player metadata
             playerMesh.userData = {
                 id: id,
-                isLocal: false,
+                isLocal: isLocalPlayer,
+                displayName: displayName,
                 stats: {
                     life: 100,
                     maxLife: 100,
@@ -1029,6 +1043,7 @@ export class PlayerManager {
             type: 'player',
             mesh: playerMesh,
             position: playerMesh.position,
+            displayName: playerMesh.userData?.displayName || `Player-${id.substring(0, 5)}`,
             life: playerMesh.userData?.stats?.life || 100,
             maxLife: playerMesh.userData?.stats?.maxLife || 100,
             level: playerMesh.userData?.level || 1

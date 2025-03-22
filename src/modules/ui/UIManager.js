@@ -2,28 +2,77 @@ import * as THREE from 'three';
 import GameConstants from '../../../server/src/config/GameConstants.js';
 
 export class UIManager {
-    constructor(game) {
+    constructor(game = null) {
+        // Store reference to game
         this.game = game;
-        this.dialogueUI = null;
-        this.activeDialogue = null;
-        this.statusElements = {};
-        this.skillElements = {};
-        this.darknessOverlay = null;
-        this.loadingScreen = null;
-        this.notificationElement = null;
-        this.errorScreen = null;
-        this.targetDisplay = null;
-        this.deathScreen = null;
         
-        // Set up resize handler
-        window.addEventListener('resize', this.handleResize.bind(this));
+        // UI state variables
+        this.skillElements = {};
+        this.statusElements = {};
+        this.notificationQueue = [];
+        this.isProcessingNotifications = false;
+        this.experienceGainTimeouts = [];
+        this.temporaryElements = new Set();
+        
+        // If no game instance is provided, we're being used just for the player name screen
+        if (!game) {
+            console.log('UIManager created in standalone mode for player name screen');
+            return;
+        }
+        
+        // Rest of initialization for game-connected mode
+        this.uiContainer = null;
+        this.uiElements = {
+            healthBar: null,
+            manaBar: null,
+        };
+        
+        // Tooltip mappings for skills
+        this.skillTooltips = {
+            martial_arts: 'Martial Arts: A powerful hand-to-hand combat technique',
+            dark_ball: 'Dark Ball: Launch a ball of dark energy at your target',
+            embrace_void: 'Embrace the Void: Become invisible for a short time',
+            one_with_universe: 'One with the Universe: Become immune to all damage for 5 seconds',
+            flow_of_life: 'Flow of Life: Channel life energy to heal yourself',
+            life_drain: 'Life Drain: Drain life from your target to heal yourself'
+        };
+        
+        console.log('UIManager initialized');
     }
     
-    // Add init method
-    init() {
-        // This method is called during game initialization
-        // We'll create our UI elements when requested, not immediately
-        return Promise.resolve(); // Return promise for async compatibility
+    async init() {
+        // If in standalone mode (no game instance), just return
+        if (!this.game) {
+            console.log('UIManager init skipped - standalone mode');
+            return true;
+        }
+        
+        try {
+            console.log('Initializing UI...');
+            
+            // Create basic UI elements
+            this.createUI();
+            
+            // Add target display overlay
+            this.createTargetDisplay();
+            
+            // Add interaction handler for clicks
+            document.addEventListener('click', (e) => {
+                // Ignore clicks on UI elements
+                if (e.target.closest('.ui-container')) {
+                    return;
+                }
+            });
+            
+            // Set up resize handler
+            window.addEventListener('resize', this.handleResize.bind(this));
+            
+            console.log('UI initialized successfully');
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize UI:', error);
+            return false;
+        }
     }
     
     createUI() {
@@ -1693,7 +1742,7 @@ export class UIManager {
                 contentElement.textContent = 'The Dark Path beckons, mortal. Power awaits those who dare to seize it.';
                 
                 const infoButton = this.createDialogueButton('Tell me about the Dark Path', () => {
-                    contentElement.textContent = 'The Dark Path grants immense offensive power and control over your enemies. Follow this path to gain destructive and dominating abilities. Your karma decreases as you embrace darkness.';
+                    contentElement.textContent = 'The Dark Path grants immense offensive power and control over your enemies. Follow this path to gain destructive and dominating abilities.';
                     
                     // Clear buttons and add new ones
                     buttonsContainer.innerHTML = '';
@@ -2298,13 +2347,42 @@ export class UIManager {
      * @param {number} level - The level of the target (optional)
      */
     updateTargetDisplay(name, health, maxHealth, type, level = 1) {
+        // Add enhanced debugging for target display
+        console.log('UpdateTargetDisplay called with:', {
+          targetName: name,
+          targetHealth: health,
+          targetMaxHealth: maxHealth,
+          targetType: type,
+          targetLevel: level
+        });
+        
         // Create the target display if it doesn't exist
         if (!this.targetDisplay) {
             this.createTargetDisplay();
         }
         
+        if (!name) {
+            if (this.targetDisplay) {
+                this.targetDisplay.container.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Ensure the target display is visible
+        this.targetDisplay.container.style.display = 'block';
+        
+        // Format the player name to remove ID format if present
+        let displayName = name;
+        if (type === 'player' && name.startsWith('Player ')) {
+            // Get the name from localStorage for display consistency
+            const storedName = localStorage.getItem('playerName');
+            if (storedName) {
+                displayName = storedName;
+            }
+        }
+        
         // Update target information
-        this.targetDisplay.name.textContent = name;
+        this.targetDisplay.name.textContent = displayName;
         this.targetDisplay.level.textContent = `Lv. ${level}`;
         
         // Calculate health percentage
@@ -2797,8 +2875,8 @@ export class UIManager {
         container.style.position = 'fixed';
         container.style.bottom = '20px';
         container.style.left = '20px';
-        container.style.width = '70px';
-        container.style.height = '70px';
+        container.style.width = '100px'; // Changed from 70px to match other rings
+        container.style.height = '100px'; // Changed from 70px to match other rings
         container.style.borderRadius = '50%';
         container.style.background = 'rgba(0, 0, 0, 0.6)';
         container.style.border = '2px solid rgba(255, 215, 0, 0.15)';
@@ -2917,5 +2995,239 @@ export class UIManager {
             const level = this.game.playerStats.level || 1;
             this.updateXPRing(experience, experienceToNextLevel, level);
         }
+    }
+
+    /**
+     * Create and display the player name entry screen
+     * @param {Function} onNameSubmit - Callback function when name is submitted
+     */
+    createPlayerNameScreen(onNameSubmit) {
+        // Check if we already have a stored player name
+        const savedName = localStorage.getItem('playerName') || '';
+        
+        // Create container for the name entry screen
+        const nameScreen = document.createElement('div');
+        nameScreen.id = 'player-name-screen';
+        nameScreen.style.position = 'fixed';
+        nameScreen.style.width = '100%';
+        nameScreen.style.height = '100%';
+        nameScreen.style.top = '0';
+        nameScreen.style.left = '0';
+        nameScreen.style.display = 'flex';
+        nameScreen.style.flexDirection = 'column';
+        nameScreen.style.justifyContent = 'center';
+        nameScreen.style.alignItems = 'center';
+        nameScreen.style.backgroundColor = '#0a0a0a';
+        nameScreen.style.color = '#ffffff';
+        nameScreen.style.fontFamily = 'Arial, sans-serif';
+        nameScreen.style.zIndex = '1000';
+        
+        // Create title container
+        const titleContainer = document.createElement('div');
+        titleContainer.style.marginBottom = '30px';
+        titleContainer.style.textAlign = 'center';
+        
+        // Create title
+        const title = document.createElement('h1');
+        title.textContent = 'Karma Online';
+        title.style.fontSize = '4em';
+        title.style.fontWeight = '700';
+        title.style.textShadow = '0 0 30px rgba(255, 255, 255, 0.5)';
+        title.style.color = '#ffffff';
+        title.style.letterSpacing = '2px';
+        title.style.margin = '0';
+        titleContainer.appendChild(title);
+        
+        nameScreen.appendChild(titleContainer);
+        
+        // Create instruction text
+        const instruction = document.createElement('p');
+        instruction.textContent = 'Choose your Player\'s name:';
+        instruction.style.fontSize = '1.2em';
+        instruction.style.fontWeight = '400';
+        instruction.style.opacity = '0.8';
+        instruction.style.letterSpacing = '1px';
+        instruction.style.marginBottom = '30px';
+        instruction.style.textAlign = 'center';
+        nameScreen.appendChild(instruction);
+        
+        // Create form container
+        const formContainer = document.createElement('div');
+        formContainer.style.display = 'flex';
+        formContainer.style.flexDirection = 'column';
+        formContainer.style.alignItems = 'center';
+        formContainer.style.width = '320px';
+        formContainer.style.maxWidth = '90%';
+        
+        // Create input field
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'player-name-input';
+        input.placeholder = 'Enter your name (3-15 characters)';
+        input.value = '';
+        input.maxLength = 15;
+        input.style.width = '100%';
+        input.style.padding = '12px 15px';
+        input.style.marginBottom = '25px';
+        input.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        input.style.border = '1px solid rgba(255, 255, 255, 0.2)';
+        input.style.borderRadius = '4px';
+        input.style.color = '#fff';
+        input.style.fontSize = '1.1em';
+        input.style.boxSizing = 'border-box';
+        input.style.outline = 'none';
+        input.style.transition = 'border-color 0.3s, background-color 0.3s';
+        formContainer.appendChild(input);
+        
+        // Create error message element (hidden by default)
+        const errorMessage = document.createElement('div');
+        errorMessage.style.color = '#ff5555';
+        errorMessage.style.fontSize = '0.9em';
+        errorMessage.style.marginBottom = '15px';
+        errorMessage.style.display = 'none';
+        errorMessage.style.textAlign = 'center';
+        errorMessage.style.width = '100%';
+        formContainer.appendChild(errorMessage);
+        
+        // Add focus effect
+        input.addEventListener('focus', () => {
+            input.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+            input.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
+        });
+        
+        input.addEventListener('blur', () => {
+            input.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+            input.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+        });
+        
+        // Create submit button
+        const button = document.createElement('button');
+        button.textContent = 'JOIN THE GAME';
+        button.style.width = '100%';
+        button.style.padding = '14px 15px';
+        button.style.backgroundColor = '#333';
+        button.style.color = '#fff';
+        button.style.border = 'none';
+        button.style.borderRadius = '4px';
+        button.style.fontSize = '1.1em';
+        button.style.letterSpacing = '2px';
+        button.style.cursor = 'pointer';
+        button.style.transition = 'background-color 0.3s';
+        button.style.textTransform = 'uppercase';
+        formContainer.appendChild(button);
+        
+        // Hover effect
+        button.onmouseover = () => {
+            button.style.backgroundColor = '#444';
+        };
+        button.onmouseout = () => {
+            button.style.backgroundColor = '#333';
+        };
+        
+        // Add the form to the screen
+        nameScreen.appendChild(formContainer);
+        
+        // Add the screen to the document
+        document.body.appendChild(nameScreen);
+        
+        // Focus the input field
+        setTimeout(() => input.focus(), 100);
+        
+        // Validate the name
+        const validateName = (name) => {
+            if (!name || name.trim().length < 3) {
+                errorMessage.textContent = 'Name must be at least 3 characters long';
+                errorMessage.style.display = 'block';
+                return false;
+            }
+            
+            if (name.trim().length > 15) {
+                errorMessage.textContent = 'Name must be 15 characters or less';
+                errorMessage.style.display = 'block';
+                return false;
+            }
+            
+            // Check for invalid characters - only allow letters, numbers, and simple spaces
+            if (!/^[a-zA-Z0-9 ]+$/.test(name)) {
+                errorMessage.textContent = 'Name can only contain letters, numbers, and spaces';
+                errorMessage.style.display = 'block';
+                return false;
+            }
+            
+            // Hide any previous error
+            errorMessage.style.display = 'none';
+            return true;
+        };
+        
+        // Add input validation as the user types
+        input.addEventListener('input', () => {
+            validateName(input.value);
+        });
+        
+        // Handle form submission
+        const handleSubmit = () => {
+            let playerName = input.value.trim();
+            
+            // Validate the name before submission
+            if (!validateName(playerName)) {
+                input.focus();
+                return;
+            }
+            
+            // Store the name in localStorage
+            localStorage.setItem('playerName', playerName);
+            
+            // Remove the name screen
+            document.body.removeChild(nameScreen);
+            
+            // Call the callback
+            if (typeof onNameSubmit === 'function') {
+                onNameSubmit(playerName);
+            }
+        };
+        
+        // Setup event listeners
+        button.addEventListener('click', handleSubmit);
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleSubmit();
+            }
+        });
+    }
+
+    /**
+     * Show a notification that a server connection is required
+     */
+    showConnectionRequiredNotification() {
+        this.showNotification(
+            'A server connection is required to play this game. Please check your internet connection.',
+            '#ff0000',
+            10000
+        );
+        
+        // Create a persistent connection required indicator
+        const connectionIndicator = document.createElement('div');
+        connectionIndicator.className = 'connection-required-indicator';
+        connectionIndicator.style.position = 'fixed';
+        connectionIndicator.style.top = '10px';
+        connectionIndicator.style.right = '10px';
+        connectionIndicator.style.backgroundColor = '#ff0000';
+        connectionIndicator.style.color = 'white';
+        connectionIndicator.style.padding = '5px 10px';
+        connectionIndicator.style.borderRadius = '4px';
+        connectionIndicator.style.fontSize = '12px';
+        connectionIndicator.style.fontWeight = 'bold';
+        connectionIndicator.style.zIndex = '9999';
+        connectionIndicator.textContent = 'CONNECTION REQUIRED';
+        document.body.appendChild(connectionIndicator);
+        
+        // Pulse the indicator to draw attention
+        let opacity = 1;
+        const pulse = () => {
+            opacity = opacity === 1 ? 0.5 : 1;
+            connectionIndicator.style.opacity = opacity;
+            setTimeout(pulse, 1000);
+        };
+        pulse();
     }
 } 
