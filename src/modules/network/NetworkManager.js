@@ -617,9 +617,14 @@ export class NetworkManager {
         // Handle life update
         this.socket.on('lifeUpdate', (data) => {
             // Only log significant health changes (more than 5% change)
+            if (!data || !data.id) {
+                return;
+            }
+
+            // Calculate if this is a significant change (for logging purposes)
             const isSignificantChange = !this.lastHealthLog || 
                 !this.lastHealthLog[data.id] || 
-                Math.abs(this.lastHealthLog[data.id] - data.life) > (data.maxLife * 0.05);
+                Math.abs((this.lastHealthLog[data.id] || 0) - data.life) > (data.maxLife * 0.05);
             
             if (isSignificantChange) {
                 // Store this health value for future comparison
@@ -629,7 +634,24 @@ export class NetworkManager {
                 // Only log significant health changes
                 console.log(`Life update received for ${data.id}: ${data.life}/${data.maxLife}`);
             }
-            
+
+            // Skip if this is a final update and it's for us
+            if (data.id === this.socket.id && data.final === true) {
+                // Process directly through the global handler which will consider source
+                const playerData = {
+                    id: data.id,
+                    life: data.life,
+                    maxLife: data.maxLife,
+                    source: 'life_update',
+                    isHealing: data.isHealing === true,
+                    isPersistent: data.isPersistent === true,
+                    skillName: data.skillName || null // Pass the skill name from the server
+                };
+                
+                this.handlePlayerStatsUpdate(playerData);
+                return;
+            }
+
             try {
                 // Get the player mesh
                 const playerMesh = this.game.playerManager.players.get(data.id);
@@ -713,6 +735,12 @@ export class NetworkManager {
                 // Store previous life value to detect death
                 const previousLife = playerMesh.userData.stats.life || data.maxLife;
                 
+                // Log detailed info for life drain healing to help debugging
+                if (data.isHealing && data.skillName === 'life_drain') {
+                    console.log(`[LIFE DRAIN HEALING] Updating player ${data.id} health: ${previousLife} → ${data.life}`);
+                    console.log(`[LIFE DRAIN HEALING] Update flags: isPersistent=${isPersistent}, isHealing=${isHealing}, skillName=${data.skillName}`);
+                }
+                
                 // Update life values
                 playerMesh.userData.stats.life = data.life;
                 playerMesh.userData.stats.maxLife = data.maxLife;
@@ -724,6 +752,12 @@ export class NetworkManager {
                 
                 // Record when we received this authoritative update
                 playerMesh.userData.lastServerUpdateTime = Date.now();
+                
+                // Add extra flag for life drain healing to ensure client preserves this value
+                if (data.skillName === 'life_drain' && isHealing) {
+                    playerMesh.userData.lastLifeDrainHealTime = Date.now();
+                    playerMesh.userData.lastHealAmount = data.life - previousLife;
+                }
                 
                 // Update the health bar
                 this.game.playerManager.updateHealthBar(playerMesh);
@@ -810,9 +844,15 @@ export class NetworkManager {
                         // Store previous life for detecting healing effects
                         const previousLocalLife = this.game.playerStats.currentLife; 
                         
-                        // Check for persistent healing flag (life drain, etc.)
-                        if (isPersistent && isHealing && data.life > previousLocalLife) {
-                            console.log(`Applying persistent healing: ${previousLocalLife} → ${data.life}`);
+                        // Log more details about life updates for debugging
+                        console.log(`[LOCAL PLAYER LIFE] Update: ${previousLocalLife} → ${data.life} (healing=${isHealing}, drain=${data.skillName === 'life_drain'})`);
+                        
+                        // Check for persistent healing flag (life drain, etc.) or direct life_drain skill healing
+                        const isLifeDrainHealing = data.skillName === 'life_drain' && isHealing;
+                        const hasHealthIncreased = data.life > previousLocalLife;
+                        
+                        if ((isPersistent && isHealing && hasHealthIncreased) || isLifeDrainHealing) {
+                            console.log(`Applying healing: ${previousLocalLife} → ${data.life} (source: ${data.skillName || 'unknown'})`);
                             
                             // Show healing effect if we have a skillsManager
                             if (this.game.skillsManager && this.game.localPlayer) {
@@ -821,8 +861,19 @@ export class NetworkManager {
                                     data.skillName === 'life_drain' ? 0x990000 : 0x00ff00
                                 );
                             }
+                            
+                            // Ensure healing is persistent - store last heal time
+                            this.lastHealTime = Date.now();
+                            this.lastHealAmount = data.life - previousLocalLife;
+                            
+                            // Mark this heal in the local player object too
+                            if (this.game.localPlayer && this.game.localPlayer.userData) {
+                                this.game.localPlayer.userData.lastHealTime = Date.now();
+                                this.game.localPlayer.userData.lastHealAmount = data.life - previousLocalLife;
+                            }
                         }
                         
+                        // Update current life values
                         this.game.playerStats.currentLife = data.life;
                         this.game.playerStats.maxLife = data.maxLife;
                         
@@ -2906,21 +2957,54 @@ export class NetworkManager {
         
         // Handle local player stats
         if (playerId === this.socket.id && this.game.playerStats) {
-            // Update health values normally
-            this.game.playerStats.currentLife = playerData.life;
-            this.game.playerStats.maxLife = playerData.maxLife;
+            // Special check for health updates - only accept health updates in certain situations:
+            // 1. When our current health is undefined (initialization)
+            // 2. When we're dead/respawning
+            // 3. When receiving health from specific events (not periodic updates)
+            // 4. For Life Drain healing
+            const currentLife = this.game.playerStats.currentLife;
+            const newLife = playerData.life;
+            const isFromPeriodicUpdate = !playerData.source || playerData.source === 'periodic';
+            const isFromSpecificEvent = playerData.source === 'life_update' || 
+                                       playerData.source === 'respawn' || 
+                                       playerData.source === 'experience_gain' ||
+                                       playerData.source === 'skill_effect' ||
+                                       playerData.source === 'regeneration';
+            const isFromLifeDrain = playerData.skillName === 'life_drain';
+            const isHealing = newLife > currentLife;
+            
+            const acceptLifeUpdate = 
+                currentLife === undefined || 
+                !this.game.isAlive ||
+                isFromSpecificEvent ||
+                !isFromPeriodicUpdate ||
+                (isHealing && (isFromLifeDrain || playerData.isPersistent));
+                
+            if (playerData.life !== undefined && acceptLifeUpdate) {
+                console.log(`Setting local player health to ${playerData.life} from server (source: ${playerData.source || 'unknown'}, healing: ${isHealing})`);
+                this.game.playerStats.currentLife = playerData.life;
+                
+                // Sync with userData for consistency
+                if (this.game.localPlayer && this.game.localPlayer.userData) {
+                    if (!this.game.localPlayer.userData.stats) {
+                        this.game.localPlayer.userData.stats = {};
+                    }
+                    this.game.localPlayer.userData.stats.life = playerData.life;
+                    
+                    // Also store last healing time and amount if healing
+                    if (isHealing) {
+                        this.game.localPlayer.userData.lastHealTime = Date.now();
+                        this.game.localPlayer.userData.lastHealAmount = newLife - currentLife;
+                    }
+                }
+            } else if (playerData.life !== undefined && playerData.life !== this.game.playerStats.currentLife) {
+                console.log(`Ignoring server health update: ${playerData.life} (current: ${this.game.playerStats.currentLife}, source: ${playerData.source || 'unknown'})`);
+            }
             
             // Only accept mana updates in certain situations:
             // 1. When our current mana is undefined (initialization)
             // 2. When we're dead/respawning
             // 3. When receiving mana from specific events (not periodic updates)
-            const isFromPeriodicUpdate = !playerData.source || playerData.source === 'periodic';
-            const isFromSpecificEvent = playerData.source === 'mana_update' || 
-                                       playerData.source === 'respawn' || 
-                                       playerData.source === 'experience_gain' ||
-                                       playerData.source === 'skill_effect' ||
-                                       playerData.source === 'regeneration';
-            
             const acceptManaUpdate = 
                 this.game.playerStats.currentMana === undefined || 
                 !this.game.isAlive ||
@@ -2943,7 +3027,10 @@ export class NetworkManager {
                 console.log(`Ignoring server mana update: ${playerData.mana} (current: ${this.game.playerStats.currentMana}, source: ${playerData.source || 'unknown'})`);
             }
             
-            // Update max mana if provided
+            // Update max life and mana if provided
+            if (playerData.maxLife !== undefined) {
+                this.game.playerStats.maxLife = playerData.maxLife;
+            }
             if (playerData.maxMana !== undefined) {
                 this.game.playerStats.maxMana = playerData.maxMana;
             }

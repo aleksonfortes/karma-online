@@ -1021,40 +1021,21 @@ export class MonsterManager {
         const player = playerManager.getPlayer(playerId);
         if (!player) return;
         
-        // Comprehensive check to prevent attacks on:
-        // 1. Dead players (isDead flag)
-        // 2. Players with no health
-        // 3. Invulnerable players
-        // 4. Invisible players
-        // 5. Players in temple
-        if (player.isDead || 
-            player.isInvulnerable || 
-            player.life <= 0 || 
-            player.health <= 0 || 
-            player.visible === false) {
-            console.log(`Monster ${monsterId} cannot attack player ${playerId} (player is dead, invisible, or invulnerable)`);
-            
-            // Clear the monster's target since this player shouldn't be attacked
-            monster.targetPlayerId = null;
-            monster.isReturningToSpawn = true;
-            return;
-        }
+        // Skip if monster or player is dead
+        if (monster.health <= 0 || player.isDead) return;
         
-        // Check if player is in temple area (safe zone)
-        if (player.position && this.isInTemple(player.position)) {
-            console.log(`Monster ${monsterId} cannot attack player ${playerId} (player is in temple)`);
-            monster.targetPlayerId = null;
-            monster.isReturningToSpawn = true;
-            return;
-        }
+        // Get monster configuration
+        const monsterConfig = GameConstants.MONSTER[monster.type || 'BASIC'];
+        if (!monsterConfig) return;
         
-        // Check if monster is in attack range
-        const dx = player.position.x - monster.position.x;
-        const dz = player.position.z - monster.position.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
+        // Calculate distance between player and monster
+        const distance = this.calculateDistance(
+            monster.position,
+            player.position
+        );
         
-        const monsterConfig = GameConstants.MONSTER[monster.type];
-        const attackRange = monsterConfig.ATTACK_RANGE;
+        // Get attack range - account for collision radius (makes closer monsters more likely to hit)
+        const attackRange = monsterConfig.ATTACK_RANGE || 2.0;
         
         // Account for monster and player collision radius in attack range calculation
         const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
@@ -1082,16 +1063,55 @@ export class MonsterManager {
         // Calculate damage
         const damageAmount = monsterConfig.ATTACK_DAMAGE;
         
+        // Apply monster level bonus if applicable
+        const monsterLevel = monster.level || 1;
+        let monsterLevelBonus = 1.0;
+        if (monsterLevel > 1) {
+            // Apply square root scaling for more balanced progression
+            monsterLevelBonus = 1 + (Math.sqrt(monsterLevel - 1) * 0.15);
+        }
+        
+        // Apply level-adjusted base damage
+        const levelScaledDamage = Math.floor(damageAmount * monsterLevelBonus);
+        
         // Apply player's level-based damage reduction
         const playerLevel = player.level || 1;
-        const maxDamageReduction = 0.3; // Cap at 30% damage reduction
-        const damageReduction = Math.min(
+        
+        // Apply direct level difference scaling first (new)
+        // This significantly reduces monster damage when attacking higher level players
+        let levelDifferenceModifier = 1.0;
+        if (playerLevel > monsterLevel) {
+            // For each level the player is above the monster, reduce damage by 6%
+            const levelDifference = playerLevel - monsterLevel;
+            levelDifferenceModifier = Math.max(0.4, 1 - (levelDifference * 0.06));
+        }
+        
+        // Apply level difference to the scaled damage
+        const levelAdjustedDamage = Math.floor(levelScaledDamage * levelDifferenceModifier);
+        
+        const maxDamageReduction = 0.4; // Cap at 40% damage reduction (increased from 30%)
+        
+        // Calculate base damage reduction from player level
+        const levelDamageReduction = Math.min(
             maxDamageReduction, 
             (playerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL
         );
         
+        // Apply square root scaling to defense for a smoother progression curve
+        const defenseBonus = 1 + (Math.sqrt(playerLevel - 1) * 0.15); // Increased from 0.1 to 0.15
+        
+        // Combined reduction factor, capped at 60% maximum (increased from 50%)
+        const combinedReduction = Math.min(0.6, levelDamageReduction * defenseBonus);
+        
         // Calculate final damage with reduction
-        const finalDamage = Math.floor(damageAmount * (1 - damageReduction));
+        const finalDamage = Math.floor(levelAdjustedDamage * (1 - combinedReduction));
+        
+        // Log damage calculation for debugging
+        console.log(`Monster ${monster.type} (Lvl ${monsterLevel}) attacked player (Lvl ${playerLevel}) for ${finalDamage} damage ` +
+                   `(original: ${levelScaledDamage}, level diff: ${levelDifferenceModifier.toFixed(2)}x, ` +
+                   `adjusted: ${levelAdjustedDamage}, ` +
+                   `base reduction: ${(levelDamageReduction * 100).toFixed(0)}%, ` +
+                   `defense bonus: ${defenseBonus.toFixed(2)}x, total reduction: ${(combinedReduction * 100).toFixed(0)}%)`);
         
         // Check if player is immune to damage (One with the Universe skill)
         if (player.isImmune) {
@@ -1133,7 +1153,7 @@ export class MonsterManager {
             });
         }
         
-        console.log(`Monster ${monsterId} attacked player ${playerId} for ${finalDamage} damage (original: ${damageAmount}, reduction: ${Math.round(damageReduction * 100)}%)`);
+        console.log(`Monster ${monsterId} attacked player ${playerId} for ${finalDamage} damage (original: ${levelScaledDamage}, reduction: ${Math.round(combinedReduction * 100)}%)`);
         
         // Check if player died
         if (player.life <= 0 && !player.isDead) {
@@ -1153,6 +1173,20 @@ export class MonsterManager {
         
         this.respawnTimers.clear();
         this.monsters.clear();
+    }
+    
+    /**
+     * Calculate distance between two positions
+     * @param {Object} pos1 - First position with x,z coordinates
+     * @param {Object} pos2 - Second position with x,z coordinates
+     * @returns {number} The distance between the positions
+     */
+    calculateDistance(pos1, pos2) {
+        if (!pos1 || !pos2) return Number.MAX_VALUE; // Return a large value if positions are invalid
+        
+        const dx = pos1.x - pos2.x;
+        const dz = pos1.z - pos2.z;
+        return Math.sqrt(dx * dx + dz * dz);
     }
     
     /**
@@ -1302,63 +1336,6 @@ export class MonsterManager {
             monster.targetPlayerId = playersInRange[0].playerId;
             console.log(`Monster ${monster.id} targeting player ${monster.targetPlayerId} at distance ${playersInRange[0].distance.toFixed(2)}`);
         }
-    }
-
-    /**
-     * Makes a monster attack its current target
-     * @param {string} monsterId - The monster ID
-     * @param {string} playerId - The player ID
-     * @param {Object} playerManager - The player manager
-     */
-    makeMonsterAttack(monsterId, playerId, playerManager) {
-        if (!monsterId || !playerId || !playerManager) return;
-        
-        const monster = this.monsters.get(monsterId);
-        if (!monster) return;
-        
-        // First check if player should be targeted at all
-        if (!this.shouldTargetPlayer(monster, playerId, playerManager)) {
-            // Clear the monster's target since this player shouldn't be attacked
-            monster.targetPlayerId = null;
-            monster.isReturningToSpawn = true;
-            return;
-        }
-        
-        const player = playerManager.getPlayer(playerId);
-        if (!player) return;
-        
-        // Double-check distance to target
-        const dx = player.position.x - monster.position.x;
-        const dz = player.position.z - monster.position.z;
-        const distance = Math.sqrt(dx * dx + dz * dz);
-        
-        const monsterConfig = GameConstants.MONSTER[monster.type];
-        const attackRange = monsterConfig.ATTACK_RANGE;
-        
-        // Account for monster and player collision radius in attack range calculation
-        const playerRadius = GameConstants.PLAYER.COLLISION_RADIUS || 0.5;
-        const monsterRadius = monster.collisionRadius || monsterConfig.COLLISION_RADIUS || 1.0;
-        const effectiveDistance = Math.max(0, distance - monsterRadius - playerRadius);
-        
-        if (effectiveDistance > attackRange) {
-            return; // Too far to attack
-        }
-        
-        // Check if monster is on cooldown
-        const currentTime = Date.now();
-        if (monster.lastAttackTime && currentTime - monster.lastAttackTime < monsterConfig.ATTACK_SPEED) {
-            return; // Still on cooldown
-        }
-        
-        // Set attack animation
-        monster.isAttacking = true;
-        monster.attackAnimationEndTime = currentTime + monsterConfig.ATTACK_ANIMATION_TIME;
-        monster.lastAttackTime = currentTime;
-        
-        // Update last combat time for health regeneration
-        monster.lastCombatTime = currentTime;
-        
-        // Calculate damage with remaining logic as before...
     }
 }
 
