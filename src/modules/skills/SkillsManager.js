@@ -1145,6 +1145,10 @@ export class SkillsManager {
                     this.game.playerStats.currentMana + '/' + manaCost + ')');
                 return;
             }
+        } else if (skillId === 'life_drain') {
+            // Create life drain effect
+            this.createLifeDrainEffect(targetPosition);
+            return;
         }
         
         // Call the appropriate method based on skill ID
@@ -1157,7 +1161,10 @@ export class SkillsManager {
                 this.createDarkBallEffect(sourcePosition, targetPosition);
                 break;
             default:
-                console.warn(`No effect implementation for skill: ${skillId}`);
+                // No longer log this warning since we handle life_drain above
+                if (skillId !== 'life_drain') {
+                    console.warn(`No effect implementation for skill: ${skillId}`);
+                }
         }
     }
     
@@ -1702,8 +1709,12 @@ export class SkillsManager {
         const remainingTime = this.getRemainingCooldown(skillId);
         const remainingSeconds = (remainingTime / 1000).toFixed(1);
         
-        // Show cooldown message
-        this.showErrorMessage(`Skill is on cooldown (${remainingSeconds}s remaining)`);
+        // Use timestamp to prevent spam
+        if (!this._lastCooldownMessage || Date.now() - this._lastCooldownMessage > 1000) {
+            // Show cooldown message (only once per second max)
+            this.showErrorMessage(`Skill is on cooldown (${remainingSeconds}s remaining)`);
+            this._lastCooldownMessage = Date.now();
+        }
     }
 
     /**
@@ -1711,6 +1722,23 @@ export class SkillsManager {
      * @param {string} message - The error message to show
      */
     showErrorMessage(message) {
+        // Use timestamp to prevent spam
+        const now = Date.now();
+        
+        // Create the messages set if it doesn't exist
+        if (!this._errorMessages) {
+            this._errorMessages = new Map();
+        }
+        
+        // Check if this exact message was shown recently
+        if (this._errorMessages.has(message) && now - this._errorMessages.get(message) < 2000) {
+            // Don't show the same message again within 2 seconds
+            return;
+        }
+        
+        // Record this message and timestamp
+        this._errorMessages.set(message, now);
+        
         // Use UI notification if available
         if (this.game.uiManager && typeof this.game.uiManager.showNotification === 'function') {
             this.game.uiManager.showNotification(message, '#ff3333');
@@ -1981,7 +2009,6 @@ export class SkillsManager {
      */
     async useLifeDrain() {
         if (!this.game.isAlive) {
-            console.log('Cannot use skills while dead');
             return false;
         }
 
@@ -1991,8 +2018,16 @@ export class SkillsManager {
         const cooldownTime = skill.cooldown;
         
         if (now - skill.lastUsed < cooldownTime) {
-            console.log('Life Drain is on cooldown');
             this.showCooldownError('life_drain');
+            return false;
+        }
+
+        // Check if player has enough mana
+        const manaCost = skill.mana || 30; // Default to 30 if not set
+        const currentMana = this.game.playerStats?.currentMana || 0;
+        
+        if (currentMana < manaCost) {
+            this.showErrorMessage(`Not enough mana (${currentMana}/${manaCost})`);
             return false;
         }
 
@@ -2001,7 +2036,7 @@ export class SkillsManager {
         if (!isTestEnvironment) {
             const playerPath = this.game.playerStats?.path || null;
             if (playerPath !== 'dark') {
-                console.log(`Cannot use life_drain - requires dark path (current: ${playerPath || 'none'})`);
+                this.showErrorMessage(`Requires dark path`);
                 return false;
             }
         }
@@ -2011,15 +2046,12 @@ export class SkillsManager {
         const targetType = this.game.targetingManager.getTargetType();
         
         if (!targetId) {
-            console.log('No target selected for Life Drain');
             this.showErrorMessage('You need a target for Life Drain');
             return false;
         }
 
         // Check if the target is in range
         if (!this.isTargetInRange(targetId, 'life_drain')) {
-            console.log('Target is out of range for Life Drain');
-            
             // Get the target object for visual feedback
             if (targetType === 'player') {
                 const targetObject = this.game.playerManager.getPlayerById(targetId);
@@ -2036,299 +2068,88 @@ export class SkillsManager {
         const tempLastUsed = skill.lastUsed;
         skill.lastUsed = now;
 
-        // Let the server handle mana consumption and validation
-        const result = await this.game.networkManager.useSkill(
-            targetId,
-            'life_drain',
-            skill.damage, // Damage to target
-            { healing: skill.healing } // Additional data for healing amount
-        );
-        
-        if (!result.success) {
-            console.log('Server rejected Life Drain skill use');
-            
-            // Special error handling based on error type
-            if (result.errorType && result.errorType.includes('out of range')) {
-                console.log('Target is out of range for Life Drain');
-                
-                // Get the target object for visual feedback
-                if (targetType === 'player') {
-                    const targetObject = this.game.playerManager.getPlayerById(targetId);
-                    if (targetObject) this.showRangeIndicator(targetObject);
-                } else if (targetType === 'monster') {
-                    const monster = this.game.monsterManager.getMonsterById(targetId);
-                    if (monster) this.showRangeIndicator(monster);
-                }
-                
-                // Reset the cooldown for range errors
-                skill.lastUsed = tempLastUsed;
-                return false;
-            } else if (result.errorType === 'timeout') {
-                console.log('Server timeout for Life Drain skill use');
-                this.handleServerTimeoutError();
-                
-                // Reset the cooldown for timeout errors
-                skill.lastUsed = tempLastUsed;
-                return false;
-            } else if (result.errorType && result.errorType.includes('mana')) {
-                console.log('Not enough mana to use Life Drain');
-                this.showErrorMessage('Not enough mana to use Life Drain');
-                
-                // Reset the cooldown for mana errors
-                skill.lastUsed = tempLastUsed;
-                return false;
-            }
-            
-            // If the server rejected the skill, restore the previous cooldown
-            // Only for errors that aren't cooldown errors
-            if (!result.errorType || !result.errorType.includes('cooldown')) {
-                skill.lastUsed = tempLastUsed;
-            }
-            
-            return false;
-        }
-        
-        console.log('Server confirmed Life Drain skill use');
-        
-        // Create visual effect
-        this.createLifeDrainEffect(targetId);
-        
-        return true;
-    }
-    
-    /**
-     * Create a life drain visual effect between the player and target
-     * @param {string} targetId - The ID of the target
-     */
-    createLifeDrainEffect(targetId) {
-        if (!this.game.scene || !this.game.localPlayer) return;
-        
-        // Get target position
-        let targetPosition = null;
+        // Get target object for visual effect
         let targetObject = null;
-        
-        // Get target based on type
-        if (targetId.startsWith('monster-')) {
-            // Monster target
-            const monster = this.game.monsterManager.getMonsterById(targetId);
-            if (monster && monster.mesh) {
-                targetObject = monster;
-                targetPosition = monster.mesh.position.clone();
+        if (targetType === 'monster') {
+            targetObject = this.game.monsterManager.getMonsterById(targetId);
+        } else {
+            targetObject = this.game.playerManager.getPlayerById(targetId);
+        }
+
+        // Create visual feedback - play attack animation
+        if (this.game.playerManager && this.game.playerManager.setPlayerAnimationState) {
+            this.game.playerManager.setPlayerAnimationState('attack');
+        }
+
+        // Apply different handling based on target type
+        if (targetType === 'monster') {
+            // For monster targets, use the attack_monster event
+            if (this.game.networkManager && this.game.networkManager.socket) {
+                this.game.networkManager.socket.emit('attack_monster', {
+                    monsterId: targetId,
+                    skillId: 'life_drain',
+                    skillName: 'life_drain'
+                });
+                
+                // Create visual drain effect
+                this.createLifeDrainEffect(targetId);
+                return true;
+            } else {
+                // Reset cooldown if we can't send the request
+                skill.lastUsed = tempLastUsed;
+                return false;
             }
         } else {
-            // Player target
-            const targetPlayer = this.game.playerManager.getPlayerById(targetId);
-            if (targetPlayer) {
-                targetObject = targetPlayer;
-                targetPosition = targetPlayer.position.clone();
-            }
-        }
-        
-        if (!targetPosition) {
-            console.warn('Cannot create Life Drain effect: Target position not found');
-            return;
-        }
-        
-        // Get player position
-        const playerPosition = this.game.localPlayer.position.clone();
-        
-        // Adjust positions to be at upper body level
-        playerPosition.y += 1;
-        targetPosition.y += 1;
-        
-        // Create particle geometries and materials
-        const particleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
-        const particleMaterial = new THREE.MeshBasicMaterial({
-            color: 0xaa0000,
-            transparent: true,
-            opacity: 0.8
-        });
-        
-        // Number of particles
-        const numParticles = 20;
-        const particles = [];
-        
-        // Create directional vector from target to player (life flowing to player)
-        const direction = new THREE.Vector3().subVectors(playerPosition, targetPosition).normalize();
-        
-        // Calculate distance
-        const distance = targetPosition.distanceTo(playerPosition);
-        
-        // Create particles
-        for (let i = 0; i < numParticles; i++) {
-            const particle = new THREE.Mesh(particleGeometry, particleMaterial.clone());
-            
-            // Position particles along the path from target to player (initial positions)
-            const offset = (i / numParticles) * 0.9; // Don't start at exact target position
-            particle.position.lerpVectors(targetPosition, playerPosition, offset);
-            
-            // Add random offset for more organic feel
-            particle.position.x += (Math.random() - 0.5) * 0.2;
-            particle.position.y += (Math.random() - 0.5) * 0.2;
-            particle.position.z += (Math.random() - 0.5) * 0.2;
-            
-            // Store particle data for animation
-            particle.userData = {
-                speed: 0.05 + Math.random() * 0.05,
-                progressOnLine: offset,
-                initialOffset: new THREE.Vector3(
-                    particle.position.x - targetPosition.x - direction.x * offset * distance,
-                    particle.position.y - targetPosition.y - direction.y * offset * distance,
-                    particle.position.z - targetPosition.z - direction.z * offset * distance
-                )
-            };
-            
-            // Add to scene
-            this.game.scene.add(particle);
-            particles.push(particle);
-        }
-        
-        // Define animation
-        const animate = () => {
-            let allParticlesRemoved = true;
-            
-            for (const particle of particles) {
-                if (!particle || !particle.parent) continue;
-                
-                allParticlesRemoved = false;
-                
-                // Update progress along line
-                particle.userData.progressOnLine += particle.userData.speed / distance;
-                
-                // When particle reaches player, reset to start at target for continuous effect
-                if (particle.userData.progressOnLine >= 1.0) {
-                    particle.userData.progressOnLine = 0;
+            // For player targets, use the normal useSkill event
+            const result = await this.game.networkManager.useSkill(
+                targetId,
+                'life_drain',
+                skill.damage,
+                { 
+                    healing: skill.healing,
+                    targetType: 'player' // Add explicit target type to help server processing
                 }
-                
-                // Update position with progress and maintain initial offset
-                const newBasePos = new THREE.Vector3().lerpVectors(
-                    targetPosition, 
-                    playerPosition,
-                    particle.userData.progressOnLine
-                );
-                
-                particle.position.copy(newBasePos);
-                
-                // Add oscillation effect
-                const oscillation = Math.sin(particle.userData.progressOnLine * Math.PI * 4) * 0.05;
-                particle.position.y += oscillation;
-                
-                // Scale particle based on progress (smaller near start, larger near player)
-                const scaleMultiplier = 0.7 + particle.userData.progressOnLine * 0.6;
-                particle.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
-            }
-            
-            if (!allParticlesRemoved) {
-                requestAnimationFrame(animate);
-            } else {
-                // Cleanup geometry when all particles are gone
-                particleGeometry.dispose();
-            }
-        };
-        
-        // Start animation
-        animate();
-        
-        // Create final healing effect at player after a delay
-        setTimeout(() => {
-            this.createHealingEffect(playerPosition, 0x990000);
-        }, 800);
-        
-        // Create damage effect at target
-        this.createAttackEffect(targetPosition, '#aa0000');
-        
-        // After 2 seconds, remove all particles
-        setTimeout(() => {
-            for (const particle of particles) {
-                if (particle && particle.parent) {
-                    this.game.scene.remove(particle);
-                    particle.material.dispose();
-                }
-            }
-        }, 2000);
-    }
-    
-    /**
-     * Create a healing effect at the specified position
-     * @param {THREE.Vector3} position - Position to create the effect
-     * @param {number} color - Color of the healing effect
-     */
-    createHealingEffect(position, color = 0x00ff00) {
-        if (!this.game.scene) return;
-        
-        const particleCount = 8;
-        const particles = [];
-        
-        // Create particle geometry and materials
-        const geometry = new THREE.SphereGeometry(0.1, 8, 8);
-        
-        // Create particles in a circle
-        for (let i = 0; i < particleCount; i++) {
-            const material = new THREE.MeshBasicMaterial({
-                color: color,
-                transparent: true,
-                opacity: 0.7
-            });
-            
-            const particle = new THREE.Mesh(geometry, material);
-            
-            // Position in a circle
-            const angle = (i / particleCount) * Math.PI * 2;
-            const radius = 0.3;
-            
-            particle.position.set(
-                position.x + Math.cos(angle) * radius,
-                position.y,
-                position.z + Math.sin(angle) * radius
             );
             
-            // Add to scene
-            this.game.scene.add(particle);
-            particles.push(particle);
-        }
-        
-        // Define animation
-        let time = 0;
-        const animate = () => {
-            time += 0.1;
-            
-            for (let i = 0; i < particles.length; i++) {
-                const particle = particles[i];
-                
-                // Expand circle
-                const angle = (i / particleCount) * Math.PI * 2;
-                const radius = 0.3 + time * 0.2;
-                
-                particle.position.x = position.x + Math.cos(angle) * radius;
-                particle.position.z = position.z + Math.sin(angle) * radius;
-                
-                // Rise
-                particle.position.y = position.y + time * 0.1;
-                
-                // Fade out
-                particle.material.opacity = Math.max(0, 0.7 - time / 3);
-                
-                // Scale down
-                const scale = Math.max(0.1, 1 - time / 4);
-                particle.scale.set(scale, scale, scale);
-            }
-            
-            if (time < 3) {
-                requestAnimationFrame(animate);
-            } else {
-                // Remove particles when animation is complete
-                for (const particle of particles) {
-                    this.game.scene.remove(particle);
-                    particle.material.dispose();
+            if (!result.success) {
+                // Special error handling based on error type
+                if (result.errorType && result.errorType.includes('out of range')) {
+                    if (targetType === 'player') {
+                        const targetObject = this.game.playerManager.getPlayerById(targetId);
+                        if (targetObject) this.showRangeIndicator(targetObject);
+                    }
+                    
+                    // Reset the cooldown for range errors
+                    skill.lastUsed = tempLastUsed;
+                    return false;
+                } else if (result.errorType === 'timeout') {
+                    this.handleServerTimeoutError();
+                    
+                    // Reset the cooldown for timeout errors
+                    skill.lastUsed = tempLastUsed;
+                    return false;
+                } else if (result.errorType && result.errorType.includes('mana')) {
+                    this.showErrorMessage('Not enough mana to use Life Drain');
+                    
+                    // Reset the cooldown for mana errors
+                    skill.lastUsed = tempLastUsed;
+                    return false;
                 }
                 
-                // Dispose geometry
-                geometry.dispose();
+                // If the server rejected the skill, restore the previous cooldown
+                // Only for errors that aren't cooldown errors
+                if (!result.errorType || !result.errorType.includes('cooldown')) {
+                    skill.lastUsed = tempLastUsed;
+                }
+                
+                return false;
             }
-        };
-        
-        // Start animation
-        animate();
+            
+            // Create visual effect
+            this.createLifeDrainEffect(targetId);
+            
+            return true;
+        }
     }
 
     /**
@@ -3397,5 +3218,245 @@ export class SkillsManager {
         }
         
         return { success: true, message: 'Target in range' };
+    }
+    
+    /**
+     * Create a life drain visual effect between the player and target
+     * @param {string} targetId - The ID of the target
+     */
+    createLifeDrainEffect(targetId) {
+        if (!this.game.scene || !this.game.localPlayer) return;
+        
+        // Debug logging for the effect (executed once per effect creation)
+        console.log(`Creating life drain effect between player and target ${targetId}`);
+        
+        // Get target position
+        let targetPosition = null;
+        let targetObject = null;
+        
+        // Get target based on type
+        if (targetId.startsWith('monster-')) {
+            // Monster target
+            const monster = this.game.monsterManager.getMonsterById(targetId);
+            if (monster && monster.mesh) {
+                targetObject = monster;
+                targetPosition = monster.mesh.position.clone();
+                console.log(`Life Drain: Found monster target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+            }
+        } else {
+            // Player target
+            const targetPlayer = this.game.playerManager.getPlayerById(targetId);
+            if (targetPlayer) {
+                targetObject = targetPlayer;
+                targetPosition = targetPlayer.position.clone();
+                console.log(`Life Drain: Found player target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+            }
+        }
+        
+        if (!targetPosition) {
+            console.warn(`Life Drain: Target position not found for ${targetId}`);
+            return;
+        }
+        
+        // Get player position
+        const playerPosition = this.game.localPlayer.position.clone();
+        
+        // Adjust positions to be at upper body level
+        playerPosition.y += 1;
+        targetPosition.y += 1;
+        
+        // Create particle geometries and materials
+        const particleGeometry = new THREE.SphereGeometry(0.08, 8, 8);
+        const particleMaterial = new THREE.MeshBasicMaterial({
+            color: 0xaa0000,
+            transparent: true,
+            opacity: 0.8
+        });
+        
+        // Number of particles
+        const numParticles = 20;
+        const particles = [];
+        
+        // Create directional vector from target to player (life flowing to player)
+        const direction = new THREE.Vector3().subVectors(playerPosition, targetPosition).normalize();
+        
+        // Calculate distance
+        const distance = targetPosition.distanceTo(playerPosition);
+        
+        // Create particles
+        for (let i = 0; i < numParticles; i++) {
+            const particle = new THREE.Mesh(particleGeometry, particleMaterial.clone());
+            
+            // Position particles along the path from target to player (initial positions)
+            const offset = (i / numParticles) * 0.9; // Don't start at exact target position
+            particle.position.lerpVectors(targetPosition, playerPosition, offset);
+            
+            // Add random offset for more organic feel
+            particle.position.x += (Math.random() - 0.5) * 0.2;
+            particle.position.y += (Math.random() - 0.5) * 0.2;
+            particle.position.z += (Math.random() - 0.5) * 0.2;
+            
+            // Store particle data for animation
+            particle.userData = {
+                speed: 0.05 + Math.random() * 0.05,
+                progressOnLine: offset,
+                initialOffset: new THREE.Vector3(
+                    particle.position.x - targetPosition.x - direction.x * offset * distance,
+                    particle.position.y - targetPosition.y - direction.y * offset * distance,
+                    particle.position.z - targetPosition.z - direction.z * offset * distance
+                )
+            };
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+        }
+        
+        // Define animation
+        const animate = () => {
+            let allParticlesRemoved = true;
+            
+            for (const particle of particles) {
+                if (!particle || !particle.parent) continue;
+                
+                allParticlesRemoved = false;
+                
+                // Update progress along line
+                particle.userData.progressOnLine += particle.userData.speed / distance;
+                
+                // When particle reaches player, reset to start at target for continuous effect
+                if (particle.userData.progressOnLine >= 1.0) {
+                    particle.userData.progressOnLine = 0;
+                }
+                
+                // Update position with progress and maintain initial offset
+                const newBasePos = new THREE.Vector3().lerpVectors(
+                    targetPosition, 
+                    playerPosition,
+                    particle.userData.progressOnLine
+                );
+                
+                particle.position.copy(newBasePos);
+                
+                // Add oscillation effect
+                const oscillation = Math.sin(particle.userData.progressOnLine * Math.PI * 4) * 0.05;
+                particle.position.y += oscillation;
+                
+                // Scale particle based on progress (smaller near start, larger near player)
+                const scaleMultiplier = 0.7 + particle.userData.progressOnLine * 0.6;
+                particle.scale.set(scaleMultiplier, scaleMultiplier, scaleMultiplier);
+            }
+            
+            if (!allParticlesRemoved) {
+                requestAnimationFrame(animate);
+            } else {
+                // Cleanup geometry when all particles are gone
+                particleGeometry.dispose();
+            }
+        };
+        
+        // Start animation
+        animate();
+        
+        // Create final healing effect at player after a delay
+        setTimeout(() => {
+            this.createHealingEffect(playerPosition, 0x990000);
+        }, 800);
+        
+        // Create damage effect at target
+        this.createAttackEffect(targetPosition, '#aa0000');
+        
+        // After 2 seconds, remove all particles
+        setTimeout(() => {
+            for (const particle of particles) {
+                if (particle && particle.parent) {
+                    this.game.scene.remove(particle);
+                    particle.material.dispose();
+                }
+            }
+        }, 2000);
+    }
+    
+    /**
+     * Create a healing effect at the specified position
+     * @param {THREE.Vector3} position - Position to create the effect
+     * @param {number} color - Color of the healing effect
+     */
+    createHealingEffect(position, color = 0x00ff00) {
+        if (!this.game.scene) return;
+        
+        const particleCount = 8;
+        const particles = [];
+        
+        // Create particle geometry and materials
+        const geometry = new THREE.SphereGeometry(0.1, 8, 8);
+        
+        // Create particles in a circle
+        for (let i = 0; i < particleCount; i++) {
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.7
+            });
+            
+            const particle = new THREE.Mesh(geometry, material);
+            
+            // Position in a circle
+            const angle = (i / particleCount) * Math.PI * 2;
+            const radius = 0.3;
+            
+            particle.position.set(
+                position.x + Math.cos(angle) * radius,
+                position.y,
+                position.z + Math.sin(angle) * radius
+            );
+            
+            // Add to scene
+            this.game.scene.add(particle);
+            particles.push(particle);
+        }
+        
+        // Define animation
+        let time = 0;
+        const animate = () => {
+            time += 0.1;
+            
+            for (let i = 0; i < particles.length; i++) {
+                const particle = particles[i];
+                
+                // Expand circle
+                const angle = (i / particleCount) * Math.PI * 2;
+                const radius = 0.3 + time * 0.2;
+                
+                particle.position.x = position.x + Math.cos(angle) * radius;
+                particle.position.z = position.z + Math.sin(angle) * radius;
+                
+                // Rise
+                particle.position.y = position.y + time * 0.1;
+                
+                // Fade out
+                particle.material.opacity = Math.max(0, 0.7 - time / 3);
+                
+                // Scale down
+                const scale = Math.max(0.1, 1 - time / 4);
+                particle.scale.set(scale, scale, scale);
+            }
+            
+            if (time < 3) {
+                requestAnimationFrame(animate);
+            } else {
+                // Remove particles when animation is complete
+                for (const particle of particles) {
+                    this.game.scene.remove(particle);
+                    particle.material.dispose();
+                }
+                
+                // Dispose geometry
+                geometry.dispose();
+            }
+        };
+        
+        // Start animation
+        animate();
     }
 }

@@ -406,7 +406,20 @@ export class NetworkManager {
             socket.on('useSkill', (data) => {
                 if (!data || !data.targetId || !data.skillName) {
                     console.warn(`Invalid skill data from ${socket.id}: ${JSON.stringify(data)}`);
+                    
+                    // Return an error response to client
+                    socket.emit('skillResponse', {
+                        skillName: data?.skillName || 'unknown',
+                        success: false,
+                        errorType: 'invalid_data',
+                        message: 'Invalid skill data'
+                    });
                     return;
+                }
+                
+                // Special debug logging for Life Drain
+                if (data.skillName === 'life_drain') {
+                    console.log(`[LIFE DRAIN DEBUG] Received life_drain request from ${socket.id} to target ${data.targetId}`);
                 }
                 
                 // Apply rate limiting
@@ -414,6 +427,14 @@ export class NetworkManager {
                     socket.emit('errorMessage', {
                         type: 'combat',
                         message: 'Using skills too rapidly, please slow down'
+                    });
+                    
+                    // Also send skill response
+                    socket.emit('skillResponse', {
+                        skillName: data.skillName,
+                        success: false,
+                        errorType: 'rate_limit',
+                        message: 'Using skills too rapidly'
                     });
                     return;
                 }
@@ -459,7 +480,52 @@ export class NetworkManager {
                 } else if (data.skillName === 'martial_arts') {
                     manaCost = 0; // No mana cost for martial arts
                 } else if (data.skillName === 'flow_of_life') {
+                    // Flow of Life is always self-targeted
+                    if (socket.id !== data.targetId) {
+                        // If target isn't self, automatically adjust to self-target
+                        data.targetId = socket.id;
+                        console.log(`Flow of Life redirected to self-target for player ${socket.id}`);
+                    }
+                    
+                    // Apply mana cost
                     manaCost = 30; // Mana cost for flow_of_life
+                    
+                    // Apply healing amount
+                    const healingAmount = 20; // Base healing amount
+                    
+                    // Apply healing directly to the caster
+                    attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
+                    
+                    // Emit healing notification
+                    socket.emit('notification', {
+                        message: `You have healed yourself for ${healingAmount} health.`,
+                        type: 'success'
+                    });
+                    
+                    // Log the healing
+                    console.log(`Player ${socket.id} used Flow of Life to heal for ${healingAmount}. Health: ${attackingPlayer.life}/${attackingPlayer.maxLife}`);
+                    
+                    // Emit healing effect for the player
+                    this.io.emit('damageEffect', {
+                        sourceId: socket.id,
+                        targetId: socket.id,
+                        damage: -healingAmount, // Negative damage indicates healing
+                        skillName: data.skillName,
+                        isHealing: true
+                    });
+                    
+                    // Emit life update to all players
+                    this.io.emit('lifeUpdate', {
+                        id: socket.id,
+                        life: attackingPlayer.life,
+                        maxLife: attackingPlayer.maxLife || 100,
+                        timestamp: Date.now(),
+                        final: true,
+                        isHealing: true
+                    });
+                    
+                    // Skip normal damage/healing processing
+                    return;
                 } else if (data.skillName === 'life_drain') {
                     manaCost = 30; // Mana cost for life_drain
                 } else if (data.skillName === 'one_with_universe') {
@@ -511,6 +577,16 @@ export class NetworkManager {
                 
                 // Apply special effects for One with the Universe skill - grant immunity
                 if (data.skillName === 'one_with_universe') {
+                    // Ensure mana cost is properly deducted
+                    attackingPlayer.mana = 0; // Consume all mana
+                    
+                    // Emit updated mana to player
+                    socket.emit('manaUpdate', {
+                        id: socket.id,
+                        mana: 0,
+                        maxMana: attackingPlayer.maxMana
+                    });
+                    
                     // Grant immunity for 5 seconds
                     attackingPlayer.isImmune = true;
                     attackingPlayer.immuneUntil = Date.now() + 5000; // 5 seconds of immunity
@@ -628,17 +704,22 @@ export class NetworkManager {
                 }
                 
                 // Check if target is in range
-                const distance = this.calculateDistance(attackingPlayer.position, targetPlayer.position);
+                const distance = this.calculateDistance(attackingPlayer.position, targetPlayer.position, 'player');
                 let skillRange = 1.5; // Default range
                 
                 if (data.skillName === 'martial_arts') {
                     skillRange = 3;
                 } else if (data.skillName === 'dark_ball') {
                     skillRange = 6; // Updated from 3 to 6 (2x martial arts range)
+                } else if (data.skillName === 'life_drain') {
+                    skillRange = 4.5; // Increased to match client-side range of 3
                 }
                 
-                if (distance > skillRange) {
-                    console.log(`Player ${socket.id} tried to attack ${data.targetId} but is out of range (${distance} > ${skillRange})`);
+                // Add a tolerance buffer to account for client-server differences
+                const rangeTolerance = skillRange * 0.25; // 25% tolerance
+                
+                if (distance > skillRange + rangeTolerance) {
+                    console.log(`Player ${socket.id} tried to attack ${data.targetId} with ${data.skillName} but is out of range (${distance.toFixed(2)} > ${skillRange})`);
                     // Send error message to client about range
                     console.log(`Sending out of range error to client: ${socket.id}`);
                     socket.emit('errorMessage', {
@@ -663,6 +744,13 @@ export class NetworkManager {
                 }
                 if (attackingPlayer.maxLife === undefined) {
                     attackingPlayer.maxLife = 100;
+                }
+                
+                // Special case: If using embrace_void on self, skip damage calculation entirely
+                if (data.skillName === 'embrace_void' && socket.id === data.targetId) {
+                    // No damage or additional processing needed for embrace_void
+                    // The invisibility effect is already applied above
+                    return;
                 }
                 
                 // Calculate and apply damage
@@ -715,32 +803,113 @@ export class NetworkManager {
                 if (isHealingSkill) {
                     // For healing, we treat it differently - healing targets the player
                     let healingAmount = 0;
+                    
                     if (data.skillName === 'flow_of_life') {
                         healingAmount = 20; // Base healing amount
+                        
+                        // Apply healing (positive to increase life)
+                        targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
+                        damageDealt = -healingAmount; // Negative value to indicate healing
+                        
+                        console.log(`Player ${socket.id} healed ${data.targetId} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
                     } else if (data.skillName === 'life_drain') {
+                        // Life Drain is special - it's marked as a healing skill but actually damages the target and heals the caster
                         healingAmount = 15; // Base healing amount for Life Drain
                         
-                        // Life Drain also heals the caster
+                        // Only process if draining someone else, not self
                         if (socket.id !== data.targetId) {
+                            console.log(`[LIFE DRAIN] Processing life drain from ${socket.id} to ${data.targetId}`);
+                            
+                            // Calculate damage to target
+                            let drainDamage = this.calculateSkillDamage('life_drain', attackingPlayer, targetPlayer);
+                            console.log(`[LIFE DRAIN] Calculated damage: ${drainDamage}`);
+                            
+                            // Apply damage to target
+                            targetPlayer.life = Math.max(0, targetPlayer.life - drainDamage);
+                            
+                            // Heal the caster
                             attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
                             
-                            // Also emit healing to the player
-                            this.io.to(socket.id).emit('lifeUpdate', {
+                            // Log both effects
+                            console.log(`[LIFE DRAIN] Player ${socket.id} drained ${drainDamage} health from ${data.targetId} using life_drain. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                            console.log(`[LIFE DRAIN] Player ${socket.id} healed for ${healingAmount} using life_drain. Player health: ${attackingPlayer.life}/${attackingPlayer.maxLife}`);
+                            
+                            // Emit healing to the player (attacker) - Send a more authoritative update with 'final' flag
+                            this.io.emit('lifeUpdate', {
                                 id: socket.id,
                                 life: attackingPlayer.life,
                                 maxLife: attackingPlayer.maxLife || 100,
                                 timestamp: Date.now(),
                                 final: true,
-                                isHealing: true
+                                isHealing: true,
+                                isPersistent: true // Add flag to ensure client preserves this value
                             });
+                            
+                            // Also send a healing notification directly to the player
+                            socket.emit('skillDamage', {
+                                sourceId: socket.id,
+                                targetId: socket.id, // Self-target for healing part
+                                damage: -healingAmount, // Negative indicates healing
+                                skillName: 'life_drain',
+                                isHealing: true,
+                                isDrain: true
+                            });
+                            
+                            // Set damageDealt to the positive damage value (for notifications to target)
+                            damageDealt = drainDamage;
+                            
+                            // Special case: emit drain effect to all clients
+                            this.io.emit('damageEffect', {
+                                sourceId: socket.id,
+                                targetId: data.targetId,
+                                damage: drainDamage,
+                                skillName: data.skillName,
+                                isHealing: false,
+                                isDrain: true
+                            });
+                            
+                            // Life drain was successful - now emit updates for all clients about target's health
+                            this.io.emit('lifeUpdate', {
+                                id: data.targetId,
+                                life: targetPlayer.life,
+                                maxLife: targetPlayer.maxLife || 100,
+                                timestamp: Date.now(),
+                                final: true,
+                                isHealing: false
+                            });
+                            
+                            // Send confirmation to the requesting client
+                            socket.emit('skillResponse', {
+                                skillName: 'life_drain',
+                                success: true,
+                                targetId: data.targetId,
+                                damage: drainDamage,
+                                healing: healingAmount,
+                                timestamp: Date.now()
+                            });
+                            
+                            // Log confirmation for debugging
+                            console.log(`[LIFE DRAIN] Sent skill confirmation to ${socket.id} for life_drain against player ${data.targetId}`);
+                            
+                            // Also notify the target of the damage
+                            this.io.to(data.targetId).emit('skillDamage', {
+                                sourceId: socket.id,
+                                targetId: data.targetId,
+                                damage: drainDamage,
+                                skillName: data.skillName,
+                                isHealing: false,
+                                isDrain: true
+                            });
+                            
+                            console.log(`[LIFE DRAIN] Completed life drain processing for ${socket.id}`);
+                            return; // End processing for this skill
+                        } else {
+                            // If targeting self, just apply healing
+                            targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
+                            damageDealt = -healingAmount; // Negative value to indicate healing
+                            console.log(`Player ${socket.id} healed self for ${healingAmount} using ${data.skillName}. Health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
                         }
                     }
-                    
-                    // Apply healing (positive to increase life)
-                    targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
-                    damageDealt = -healingAmount; // Negative value to indicate healing
-                    
-                    console.log(`Player ${socket.id} healed ${data.targetId} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
                 } else {
                     // Regular damage calculation
                     damageDealt = this.calculateSkillDamage(data.skillName, attackingPlayer, targetPlayer);
@@ -813,6 +982,16 @@ export class NetworkManager {
 
                 // Check if player is invisible - attacking breaks invisibility
                 this.breakInvisibilityIfActive(player, socket);
+
+                // Make sure to send a response for the Life Drain skill specifically
+                if (data.skillName === 'life_drain') {
+                    socket.emit('skillResponse', {
+                        skillName: 'life_drain',
+                        success: true,
+                        targetId: data.targetId
+                    });
+                    console.log(`[LIFE DRAIN DEBUG] Sent success response to client for life_drain skill`);
+                }
             });
             
             // Handle player death notification
@@ -1016,6 +1195,11 @@ export class NetworkManager {
                     return this.logSecurityEvent(`Invalid attack_monster data from ${socket.id}`);
                 }
                 
+                // Special debug for Life Drain
+                if (data.skillId === 'life_drain' || data.skillName === 'life_drain') {
+                    console.log(`[LIFE DRAIN-MONSTER DEBUG] Received life_drain monster attack from ${socket.id} to monster ${data.monsterId}`);
+                }
+                
                 // Check if monster manager exists
                 if (!this.gameManager || !this.gameManager.monsterManager) {
                     console.warn(`Monster manager not initialized for attack from ${socket.id}`);
@@ -1070,6 +1254,8 @@ export class NetworkManager {
                     manaCost = 25;
                 } else if (skillName === 'martial_arts') {
                     manaCost = 0; // No mana cost for martial arts
+                } else if (skillName === 'life_drain') {
+                    manaCost = 30; // Mana cost for life_drain
                 }
                 
                 // Initialize mana if not set
@@ -1181,6 +1367,59 @@ export class NetworkManager {
                 const previousHealth = monster.health;
                 monster.health = Math.max(0, monster.health - damage);
                 
+                // Add debug logging for life drain
+                if (skillName === 'life_drain') {
+                    console.log(`[LIFE DRAIN-MONSTER] HEALTH: Monster ${monster.id} damaged: ${previousHealth} -> ${monster.health} (damage: ${damage})`);
+                }
+                
+                // Special handling for life_drain - heal the player
+                if (skillName === 'life_drain') {
+                    console.log(`[LIFE DRAIN-MONSTER] Starting life drain processing from ${socket.id} to monster ${monster.id}`);
+                    
+                    // Define healing amount (same as base damage)
+                    const healingAmount = 15;
+                    
+                    // Apply healing to player
+                    const previousLife = attackingPlayer.life;
+                    attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
+                    
+                    // Log the healing
+                    console.log(`[LIFE DRAIN-MONSTER] Player ${socket.id} healed for ${healingAmount} using life_drain on monster ${monster.id}. Health: ${previousLife} -> ${attackingPlayer.life}`);
+                    
+                    // Emit healing effect to player
+                    socket.emit('skillDamage', {
+                        sourceId: socket.id,
+                        targetId: socket.id,
+                        damage: -healingAmount, // Negative value indicates healing
+                        skillName: 'life_drain',
+                        isHealing: true,
+                        isDrain: true
+                    });
+                    
+                    // Broadcast life update to all players - ensure it's persistent
+                    this.io.emit('lifeUpdate', {
+                        id: socket.id,
+                        life: attackingPlayer.life,
+                        maxLife: attackingPlayer.maxLife || 100,
+                        timestamp: Date.now(),
+                        final: true,
+                        isHealing: true,
+                        isPersistent: true, // Add flag to ensure client preserves this value
+                        skillName: 'life_drain' // Include skill name to help client colorize the effect
+                    });
+                    
+                    // Also emit a special drain effect for clients that support it
+                    this.io.emit('monsterDamageEffect', {
+                        monsterId: monster.id,
+                        playerId: socket.id,
+                        damage: damage,
+                        skillId: skillName,
+                        isDrain: true // Flag this as a drain effect
+                    });
+                    
+                    console.log(`[LIFE DRAIN-MONSTER] Completed life drain against monster ${monster.id}`);
+                }
+                
                 // Log the attack
                 this.log(`Player ${socket.id} used ${skillName} on monster ${monster.id} for ${damage} damage (health: ${monster.health}/${monster.maxHealth || 100})`);
                 
@@ -1215,6 +1454,19 @@ export class NetworkManager {
                     damage: damage,
                     skillId: skillName
                 });
+
+                // Send confirmation response for specific skill types
+                if (skillName === 'life_drain') {
+                    socket.emit('skillResponse', {
+                        skillName: 'life_drain',
+                        success: true,
+                        targetId: data.monsterId,
+                        isMonster: true,
+                        damage: damage,
+                        healing: 15 // Match the healing amount
+                    });
+                    console.log(`[LIFE DRAIN-MONSTER DEBUG] Sent skill response for life_drain to ${socket.id}`);
+                }
             });
             
             // Handle player respawn request
@@ -1526,6 +1778,10 @@ export class NetworkManager {
             const adjustedDistance = basicDistance - (entityData.collisionRadius || 0);
             // Return the adjusted distance, but never less than 0
             return Math.max(0, adjustedDistance);
+        } else if (entityType === 'player') {
+            // Add a small buffer for player targets to account for player collision radius
+            // This helps prevent edge cases where client and server disagree on distance
+            return Math.max(0, basicDistance - 0.75); // 0.75 units buffer for player targets
         }
         
         return basicDistance;
@@ -1567,6 +1823,14 @@ export class NetworkManager {
                 return 1000; // 1 second cooldown
             case 'dark_ball':
                 return 1500; // 1.5 second cooldown
+            case 'flow_of_life':
+                return 10000; // 10 second cooldown
+            case 'life_drain':
+                return 2000; // 2 second cooldown (reduced from 3s to make it more usable)
+            case 'one_with_universe':
+                return 60000; // 60 second cooldown
+            case 'embrace_void':
+                return 60000; // 60 second cooldown
             default:
                 return 1000; // Default cooldown
         }
@@ -1585,8 +1849,25 @@ export class NetworkManager {
             case 'dark_ball':
                 baseDamage = 20; // Reduced from 35 to be less than martial arts
                 break;
+            case 'life_drain':
+                baseDamage = 15; // Same as healing amount
+                break;
+            case 'one_with_universe':
+                baseDamage = 0; // No damage
+                break;
+            case 'flow_of_life':
+                baseDamage = 0; // No damage
+                break;
+            case 'embrace_void':
+                baseDamage = 0; // No damage
+                break;
             default:
                 baseDamage = 20;
+        }
+        
+        // If base damage is 0, return early (no damage skills)
+        if (baseDamage === 0) {
+            return 0;
         }
         
         // Add randomness to damage (±20%)
@@ -1602,6 +1883,8 @@ export class NetworkManager {
             pathBonus = 1.2; // 20% bonus for light path using martial arts
         } else if (attacker.path === 'dark' && skillName === 'dark_ball') {
             pathBonus = 1.2; // 20% bonus for dark path using dark ball
+        } else if (attacker.path === 'dark' && skillName === 'life_drain') {
+            pathBonus = 1.3; // 30% bonus for dark path using life drain on monsters
         }
         
         // Apply damage calculation
@@ -1635,6 +1918,14 @@ export class NetworkManager {
                 return 4.5; // Increased from 3 to 4.5 units range
             case 'dark_ball':
                 return 10.5; // Increased to match the updated 7 units on client (7 * 1.5 server scale)
+            case 'flow_of_life':
+                return 7.5; // 5 units on client
+            case 'life_drain':
+                return 6.0; // Fix for life drain - reduced from 9 to 6 units to match client range of 3-4
+            case 'one_with_universe':
+                return 0; // Self-cast only
+            case 'embrace_void':
+                return 0; // Self-cast only
             default:
                 return 3; // Increased default range from 2 to 3
         }
@@ -1653,6 +1944,9 @@ export class NetworkManager {
             case 'dark_ball':
                 baseDamage = 20; // Reduced from 35 to be less than martial arts
                 break;
+            case 'life_drain':
+                baseDamage = 25; // Increased from 15 to 25 for monster targets
+                break;
             default:
                 baseDamage = 20;
         }
@@ -1670,6 +1964,8 @@ export class NetworkManager {
             pathBonus *= 1.2; // 20% bonus for light path using martial arts
         } else if (player.path === 'dark' && skillId === 'dark_ball') {
             pathBonus *= 1.2; // 20% bonus for dark path using dark ball
+        } else if (player.path === 'dark' && skillId === 'life_drain') {
+            pathBonus *= 1.3; // 30% bonus for dark path using life drain on monsters
         }
         
         // Calculate final damage
