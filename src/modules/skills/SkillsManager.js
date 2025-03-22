@@ -2735,6 +2735,25 @@ export class SkillsManager {
             });
         }
         
+        // Hide any karma aura effects directly on the player mesh
+        if (playerMesh.children) {
+            playerMesh.traverse(child => {
+                // Check if this is a sphere geometry that might be a karma aura
+                if (child.geometry && child.geometry.type === 'SphereGeometry' && 
+                    child.geometry.parameters && child.geometry.parameters.radius >= 1.5) {
+                    // This is likely an aura effect - hide it temporarily
+                    if (child.material) {
+                        child.userData = child.userData || {};
+                        child.userData._invisibleState = {
+                            visible: child.visible,
+                            opacity: child.material.opacity
+                        };
+                        child.visible = false;
+                    }
+                }
+            });
+        }
+        
         // Create a dark smoke effect around the player
         const smokeParticleCount = 30;
         const smokeParticles = [];
@@ -3229,31 +3248,59 @@ export class SkillsManager {
         if (playerMesh.material) {
             // Single material case
             playerMesh.material.opacity = this.invisibilityEffectData.originalOpacities[0] || 1;
+            playerMesh.material.transparent = playerMesh.material.opacity < 1;
             playerMesh.material.needsUpdate = true;
             materialIndex++;
-        } else if (playerMesh.children) {
-            // Restore materials for child meshes
-            playerMesh.traverse(child => {
-                if (child.isMesh && child.material) {
-                    if (Array.isArray(child.material)) {
-                        // Multiple materials
-                        child.material.forEach(mat => {
-                            if (materialIndex < this.invisibilityEffectData.originalOpacities.length) {
-                                mat.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
-                                mat.needsUpdate = true;
-                                materialIndex++;
-                            }
-                        });
-                    } else {
-                        // Single material
+        }
+        
+        // Restore materials for child meshes
+        playerMesh.traverse(child => {
+            if (child.isMesh && child.material) {
+                if (Array.isArray(child.material)) {
+                    // Multiple materials
+                    child.material.forEach(mat => {
                         if (materialIndex < this.invisibilityEffectData.originalOpacities.length) {
-                            child.material.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
-                            child.material.needsUpdate = true;
+                            mat.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
+                            mat.transparent = mat.opacity < 1;
+                            mat.needsUpdate = true;
                             materialIndex++;
                         }
+                    });
+                } else {
+                    // Single material
+                    if (materialIndex < this.invisibilityEffectData.originalOpacities.length) {
+                        child.material.opacity = this.invisibilityEffectData.originalOpacities[materialIndex] || 1;
+                        child.material.transparent = child.material.opacity < 1;
+                        child.material.needsUpdate = true;
+                        materialIndex++;
                     }
                 }
-            });
+            }
+        });
+        
+        // Find and hide any active aura effects when invisibility ends
+        if (this.game.karmaManager) {
+            // If on dark path, the sphere is likely visible - find and hide it temporarily
+            // Only affect local visibility (not network visibility)
+            const karmaValue = playerMesh.userData?.stats?.karma || 50;
+            if (karmaValue < 40) {  // Dark path
+                playerMesh.traverse(child => {
+                    if (child.geometry && child.geometry.type === 'SphereGeometry' &&
+                        child.material && child.material.color && 
+                        child.material.color.r > 0.5 && child.material.color.g < 0.3) {
+                        // This is likely the red dark aura - hide it temporarily after invisibility
+                        // Just for the local view to prevent seeing the red ball
+                        child.visible = false;
+                        
+                        // Restore visibility after a brief delay using setTimeout
+                        setTimeout(() => {
+                            if (child && child.material) {
+                                child.visible = true;
+                            }
+                        }, 100);
+                    }
+                });
+            }
         }
         
         // Remove smoke particles
