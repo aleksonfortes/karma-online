@@ -673,7 +673,13 @@ export class NetworkManager {
                 // This ensures we don't override damage animations too quickly
                 const now = Date.now();
                 const lastDamageTime = playerMesh.userData.lastDamageTime || 0;
-                if (now - lastDamageTime < 700) {
+                
+                // Skip animation delays for persistent healing (life drain, etc.)
+                const isPersistent = data.isPersistent === true;
+                const isHealing = data.isHealing === true;
+                
+                // Only apply animation delay if it's not a persistent healing update
+                if (!isPersistent && now - lastDamageTime < 700) {
                     if (isSignificantChange) {
                         console.log(`Delaying life update for ${data.id} - too soon after damage effect (${now - lastDamageTime}ms)`);
                     }
@@ -801,6 +807,22 @@ export class NetworkManager {
                 // If this is our player, update the UI
                 if (data.id === this.socket.id) {
                     if (this.game.playerStats) {
+                        // Store previous life for detecting healing effects
+                        const previousLocalLife = this.game.playerStats.currentLife; 
+                        
+                        // Check for persistent healing flag (life drain, etc.)
+                        if (isPersistent && isHealing && data.life > previousLocalLife) {
+                            console.log(`Applying persistent healing: ${previousLocalLife} → ${data.life}`);
+                            
+                            // Show healing effect if we have a skillsManager
+                            if (this.game.skillsManager && this.game.localPlayer) {
+                                this.game.skillsManager.createHealingEffect(
+                                    this.game.localPlayer.position.clone(),
+                                    data.skillName === 'life_drain' ? 0x990000 : 0x00ff00
+                                );
+                            }
+                        }
+                        
                         this.game.playerStats.currentLife = data.life;
                         this.game.playerStats.maxLife = data.maxLife;
                         
@@ -1462,9 +1484,9 @@ export class NetworkManager {
             
             // Check if player is in temple safe zone - no damage in temple
             if (this.game.environmentManager && 
-                this.game.localPlayer && 
                 this.game.environmentManager.isInTempleSafeZone && 
-                this.game.environmentManager.isInTempleSafeZone(this.game.localPlayer.position)) {
+                targetPlayer.position && 
+                this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
                 console.log('Player in temple safe zone - ignoring monster damage');
                 return; // Don't apply damage when in temple
             }
