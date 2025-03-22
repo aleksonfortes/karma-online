@@ -931,6 +931,25 @@ export class SkillsManager {
                 console.log(`Skill damage confirmed: ${data.damage} to ${data.targetId}`);
                 // Clear the last attempted skill after successful use
                 this.lastAttemptedSkill = null;
+                
+                // Handle healing effects (for Life Drain and other healing skills)
+                if (data.isHealing && data.targetId === this.game.networkManager.socket.id) {
+                    // This is a healing effect targeting the local player
+                    console.log(`Received healing effect: ${Math.abs(data.damage)} from ${data.skillName}`);
+                    
+                    // Create healing visual effect for the player
+                    if (this.game.localPlayer) {
+                        // Use red healing effect for life drain
+                        const healColor = data.skillName === 'life_drain' || data.isDrain 
+                            ? 0x990000  // Red for life drain
+                            : 0x00ff00; // Green for other healing
+                            
+                        this.createHealingEffect(
+                            this.game.localPlayer.position.clone(),
+                            healColor
+                        );
+                    }
+                }
             }
         });
     }
@@ -1105,7 +1124,7 @@ export class SkillsManager {
     }
     
     /**
-     * Create a skill effect
+     * Create a skill effect between source and target
      * @param {string} skillId - The ID of the skill to create an effect for
      * @param {THREE.Vector3} sourcePosition - The position of the source
      * @param {THREE.Vector3} targetPosition - The position of the target
@@ -1146,8 +1165,33 @@ export class SkillsManager {
                 return;
             }
         } else if (skillId === 'life_drain') {
-            // Create life drain effect
-            this.createLifeDrainEffect(targetPosition);
+            // For Life Drain, we need to identify the target player if possible
+            // This is used when the effect is triggered from server events (damageEffect)
+            let targetId = null;
+            
+            // Try to find the target player based on position
+            if (targetPosition && this.game.playerManager) {
+                // First, check if this position belongs to a player
+                for (const [playerId, player] of this.game.playerManager.players.entries()) {
+                    if (player && player.position && 
+                        player.position.distanceTo(targetPosition) < 0.5) {
+                        // Found a player at this position - use their ID
+                        targetId = playerId;
+                        break;
+                    }
+                }
+                
+                // If we couldn't find a player, just pass the position
+                if (!targetId) {
+                    this.createLifeDrainEffect(targetPosition);
+                } else {
+                    // If we found a player ID, use that instead
+                    this.createLifeDrainEffect(targetId);
+                }
+            } else {
+                // Fallback to just using the position
+                this.createLifeDrainEffect(targetPosition);
+            }
             return;
         }
         
@@ -1555,7 +1599,7 @@ export class SkillsManager {
                 lastUsed: 0, // Timestamp of last use
                 path: 'dark', // Requires dark path
                 slot: 1, // Skill slot in the UI
-                icon: '🔮'
+                icon: '⚫' // Changed from 🔮 to a black circle to represent a dark ball
             },
             flow_of_life: {
                 id: 'flow_of_life',
@@ -1570,7 +1614,7 @@ export class SkillsManager {
                 path: 'light',
                 minLevel: 2,
                 slot: 2,
-                icon: '🌱'
+                icon: '✨' // Changed from 🌱 to ✨ to be more cosmic/universe related
             },
             one_with_universe: {
                 id: 'one_with_universe',
@@ -1585,7 +1629,7 @@ export class SkillsManager {
                 path: 'light',
                 minLevel: 5,
                 slot: 3,
-                icon: '✨'
+                icon: '🛡️' // Changed from ✨ to 🛡️ to represent protection/immunity
             },
             life_drain: {
                 id: 'life_drain',
@@ -1600,7 +1644,7 @@ export class SkillsManager {
                 path: 'dark',
                 minLevel: 2,
                 slot: 2,
-                icon: '💀'
+                icon: '🩸' // Changed from 💀 to 🩸 (blood drop) to better represent life draining
             },
             embrace_void: {
                 id: 'embrace_void',
@@ -1615,7 +1659,7 @@ export class SkillsManager {
                 path: 'dark',
                 minLevel: 5,
                 slot: 3,
-                icon: '⚰️'
+                icon: '👻' // Changed from ⚰️ to 👻 to better represent invisibility
             }
         };
     }
@@ -2091,7 +2135,7 @@ export class SkillsManager {
                     skillName: 'life_drain'
                 });
                 
-                // Create visual drain effect
+                // Create visual drain effect for monsters (PvE)
                 this.createLifeDrainEffect(targetId);
                 return true;
             } else {
@@ -2145,8 +2189,9 @@ export class SkillsManager {
                 return false;
             }
             
-            // Create visual effect
-            this.createLifeDrainEffect(targetId);
+            // For PvP targets, we don't create the visual effect here.
+            // The effect will be created when handling the server's damageEffect event
+            // to avoid duplicating visual effects.
             
             return true;
         }
@@ -3222,7 +3267,7 @@ export class SkillsManager {
     
     /**
      * Create a life drain visual effect between the player and target
-     * @param {string} targetId - The ID of the target
+     * @param {string|Object} targetId - The ID of the target or target object
      */
     createLifeDrainEffect(targetId) {
         if (!this.game.scene || !this.game.localPlayer) return;
@@ -3234,22 +3279,36 @@ export class SkillsManager {
         let targetPosition = null;
         let targetObject = null;
         
-        // Get target based on type
-        if (targetId.startsWith('monster-')) {
-            // Monster target
-            const monster = this.game.monsterManager.getMonsterById(targetId);
-            if (monster && monster.mesh) {
-                targetObject = monster;
-                targetPosition = monster.mesh.position.clone();
-                console.log(`Life Drain: Found monster target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+        // Handle case where targetId is an object instead of a string
+        if (typeof targetId === 'object' && targetId !== null) {
+            // If targetId is actually the target object or position
+            if (targetId.position) {
+                targetPosition = targetId.position.clone();
+                targetObject = targetId;
+                console.log(`Life Drain: Found target object with position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+            } else if (targetId.x !== undefined && targetId.y !== undefined && targetId.z !== undefined) {
+                // It's a position vector
+                targetPosition = new THREE.Vector3(targetId.x, targetId.y, targetId.z);
+                console.log(`Life Drain: Using provided position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
             }
-        } else {
-            // Player target
-            const targetPlayer = this.game.playerManager.getPlayerById(targetId);
-            if (targetPlayer) {
-                targetObject = targetPlayer;
-                targetPosition = targetPlayer.position.clone();
-                console.log(`Life Drain: Found player target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+        } else if (typeof targetId === 'string') {
+            // Original string ID-based lookup
+            if (targetId.startsWith('monster-')) {
+                // Monster target
+                const monster = this.game.monsterManager.getMonsterById(targetId);
+                if (monster && monster.mesh) {
+                    targetObject = monster;
+                    targetPosition = monster.mesh.position.clone();
+                    console.log(`Life Drain: Found monster target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+                }
+            } else {
+                // Player target
+                const targetPlayer = this.game.playerManager.getPlayerById(targetId);
+                if (targetPlayer) {
+                    targetObject = targetPlayer;
+                    targetPosition = targetPlayer.position.clone();
+                    console.log(`Life Drain: Found player target at position ${targetPosition.x.toFixed(2)}, ${targetPosition.y.toFixed(2)}, ${targetPosition.z.toFixed(2)}`);
+                }
             }
         }
         

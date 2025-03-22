@@ -118,8 +118,8 @@ const GameConstants = {
     LEVEL_REWARDS: {
         LIFE_PER_LEVEL: 10,       // Health points gained per level
         MANA_PER_LEVEL: 5,        // Mana points gained per level
-        DAMAGE_BONUS_PER_LEVEL: 0.02, // 2% increased damage per level
-        DAMAGE_REDUCTION_PER_LEVEL: 0.01 // 1% reduced damage taken per level (max 30%)
+        DAMAGE_BONUS_PER_LEVEL: 0.05, // 5% increased damage per level (increased from 2%)
+        DAMAGE_REDUCTION_PER_LEVEL: 0.03 // 3% reduced damage taken per level (max 30%) (increased from 2%)
     }
 };
 

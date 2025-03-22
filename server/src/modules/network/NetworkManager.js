@@ -490,10 +490,20 @@ export class NetworkManager {
                     // Apply mana cost
                     manaCost = 30; // Mana cost for flow_of_life
                     
-                    // Apply healing amount
-                    const healingAmount = 20; // Base healing amount
+                    // Define base healing amount
+                    const baseHealingAmount = 20;
+                    
+                    // Calculate healing amount based on player's level
+                    const playerLevel = attackingPlayer.level || 1;
+                    // Apply level scaling to healing
+                    const levelMultiplier = 1 + (Math.sqrt(playerLevel - 1) * 0.25); // Slightly higher scaling than Life Drain
+                    // Apply path bonus if light path
+                    const pathHealingBonus = attackingPlayer.path === 'light' ? 1.3 : 1.0;
+                    // Calculate final healing amount
+                    const healingAmount = Math.floor(baseHealingAmount * levelMultiplier * pathHealingBonus);
                     
                     // Apply healing directly to the caster
+                    const previousLife = attackingPlayer.life;
                     attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
                     
                     // Emit healing notification
@@ -503,7 +513,7 @@ export class NetworkManager {
                     });
                     
                     // Log the healing
-                    console.log(`Player ${socket.id} used Flow of Life to heal for ${healingAmount}. Health: ${attackingPlayer.life}/${attackingPlayer.maxLife}`);
+                    console.log(`Player ${socket.id} (Lvl ${playerLevel}) used Flow of Life to heal for ${healingAmount}. Health: ${previousLife} -> ${attackingPlayer.life}. LevelMult: ${levelMultiplier.toFixed(2)}x, PathBonus: ${pathHealingBonus.toFixed(2)}x`);
                     
                     // Emit healing effect for the player
                     this.io.emit('damageEffect', {
@@ -805,16 +815,27 @@ export class NetworkManager {
                     let healingAmount = 0;
                     
                     if (data.skillName === 'flow_of_life') {
-                        healingAmount = 20; // Base healing amount
+                        // Define base healing amount
+                        const baseHealingAmount = 20;
+                        
+                        // Calculate healing amount based on player's level
+                        const playerLevel = targetPlayer.level || 1;
+                        // Apply level scaling to healing
+                        const levelMultiplier = 1 + (Math.sqrt(playerLevel - 1) * 0.25); // Slightly higher scaling than Life Drain
+                        // Apply path bonus if light path
+                        const pathHealingBonus = targetPlayer.path === 'light' ? 1.3 : 1.0;
+                        // Calculate final healing amount
+                        const healingAmount = Math.floor(baseHealingAmount * levelMultiplier * pathHealingBonus);
                         
                         // Apply healing (positive to increase life)
+                        const previousLife = targetPlayer.life;
                         targetPlayer.life = Math.min(targetPlayer.maxLife, targetPlayer.life + healingAmount);
                         damageDealt = -healingAmount; // Negative value to indicate healing
                         
-                        console.log(`Player ${socket.id} healed ${data.targetId} for ${healingAmount} using ${data.skillName}. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
+                        console.log(`Player ${socket.id} healed ${data.targetId} for ${healingAmount} using ${data.skillName}. Health: ${previousLife} -> ${targetPlayer.life}. LevelMult: ${levelMultiplier.toFixed(2)}x, PathBonus: ${pathHealingBonus.toFixed(2)}x`);
                     } else if (data.skillName === 'life_drain') {
                         // Life Drain is special - it's marked as a healing skill but actually damages the target and heals the caster
-                        healingAmount = 15; // Base healing amount for Life Drain
+                        const baseHealingAmount = 15; // Base healing amount for Life Drain
                         
                         // Only process if draining someone else, not self
                         if (socket.id !== data.targetId) {
@@ -827,12 +848,22 @@ export class NetworkManager {
                             // Apply damage to target
                             targetPlayer.life = Math.max(0, targetPlayer.life - drainDamage);
                             
+                            // Calculate healing amount based on attacker's level
+                            const attackerLevel = attackingPlayer.level || 1;
+                            // Apply level scaling to healing similar to damage
+                            const levelMultiplier = 1 + (Math.sqrt(attackerLevel - 1) * 0.2);
+                            // Apply path bonus if dark path
+                            const pathHealingBonus = attackingPlayer.path === 'dark' ? 1.3 : 1.0;
+                            // Calculate final healing amount
+                            const healingAmount = Math.floor(baseHealingAmount * levelMultiplier * pathHealingBonus);
+                            
                             // Heal the caster
+                            const previousLife = attackingPlayer.life; // Store previous for logging
                             attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
                             
-                            // Log both effects
+                            // Log both effects with detailed information
                             console.log(`[LIFE DRAIN] Player ${socket.id} drained ${drainDamage} health from ${data.targetId} using life_drain. Target health: ${targetPlayer.life}/${targetPlayer.maxLife}`);
-                            console.log(`[LIFE DRAIN] Player ${socket.id} healed for ${healingAmount} using life_drain. Player health: ${attackingPlayer.life}/${attackingPlayer.maxLife}`);
+                            console.log(`[LIFE DRAIN] Player ${socket.id} (Lvl ${attackerLevel}) healed for ${healingAmount} (${previousLife} → ${attackingPlayer.life}) using life_drain. LevelMult: ${levelMultiplier.toFixed(2)}x, PathBonus: ${pathHealingBonus.toFixed(2)}x`);
                             
                             // Emit healing to the player (attacker) - Send a more authoritative update with 'final' flag
                             this.io.emit('lifeUpdate', {
@@ -842,7 +873,8 @@ export class NetworkManager {
                                 timestamp: Date.now(),
                                 final: true,
                                 isHealing: true,
-                                isPersistent: true // Add flag to ensure client preserves this value
+                                isPersistent: true, // Add flag to ensure client preserves this value
+                                skillName: 'life_drain' // Include skill name to help client identify the source
                             });
                             
                             // Also send a healing notification directly to the player
@@ -1376,15 +1408,24 @@ export class NetworkManager {
                 if (skillName === 'life_drain') {
                     console.log(`[LIFE DRAIN-MONSTER] Starting life drain processing from ${socket.id} to monster ${monster.id}`);
                     
-                    // Define healing amount (same as base damage)
-                    const healingAmount = 15;
+                    // Define base healing amount
+                    const baseHealingAmount = 15;
+                    
+                    // Calculate healing amount based on player's level
+                    const playerLevel = attackingPlayer.level || 1;
+                    // Apply level scaling to healing similar to damage
+                    const levelMultiplier = 1 + (Math.sqrt(playerLevel - 1) * 0.2);
+                    // Apply path bonus if dark path
+                    const pathHealingBonus = attackingPlayer.path === 'dark' ? 1.3 : 1.0;
+                    // Calculate final healing amount
+                    const healingAmount = Math.floor(baseHealingAmount * levelMultiplier * pathHealingBonus);
                     
                     // Apply healing to player
                     const previousLife = attackingPlayer.life;
                     attackingPlayer.life = Math.min(attackingPlayer.maxLife, attackingPlayer.life + healingAmount);
                     
                     // Log the healing
-                    console.log(`[LIFE DRAIN-MONSTER] Player ${socket.id} healed for ${healingAmount} using life_drain on monster ${monster.id}. Health: ${previousLife} -> ${attackingPlayer.life}`);
+                    console.log(`[LIFE DRAIN-MONSTER] Player ${socket.id} (Lvl ${playerLevel}) healed for ${healingAmount} using life_drain on monster ${monster.id}. Health: ${previousLife} -> ${attackingPlayer.life}. LevelMult: ${levelMultiplier.toFixed(2)}x, PathBonus: ${pathHealingBonus.toFixed(2)}x`);
                     
                     // Emit healing effect to player
                     socket.emit('skillDamage', {
@@ -1875,7 +1916,23 @@ export class NetworkManager {
         
         // Apply level-based damage bonus
         const attackerLevel = attacker.level || 1;
+        const targetLevel = target.level || 1;
+        
+        // Apply direct level difference scaling first (new)
+        // This significantly reduces damage when attacking higher level players
+        let levelDifferenceModifier = 1.0;
+        if (targetLevel > attackerLevel) {
+            // For each level the target is above the attacker, reduce damage by 8%
+            const levelDifference = targetLevel - attackerLevel;
+            levelDifferenceModifier = Math.max(0.4, 1 - (levelDifference * 0.08));
+        }
+        
+        // Apply standard attacker damage bonus
         const damageBonus = 1 + (attackerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL;
+        
+        // Apply additional level scaling to base damage for more significant progression
+        const levelMultiplier = 1 + (Math.sqrt(attackerLevel - 1) * 0.2); // Square root scaling for more balanced progression
+        const levelScaledBaseDamage = baseDamage * levelMultiplier;
         
         // Apply attacker's path bonuses if applicable
         let pathBonus = 1.0;
@@ -1887,26 +1944,48 @@ export class NetworkManager {
             pathBonus = 1.3; // 30% bonus for dark path using life drain on monsters
         }
         
-        // Apply damage calculation
-        let finalDamage = Math.floor(baseDamage * varianceFactor * damageBonus * pathBonus);
+        // Apply damage calculation with level-scaled base damage and level difference modifier
+        let finalDamage = Math.floor(levelScaledBaseDamage * varianceFactor * damageBonus * pathBonus * levelDifferenceModifier);
+        
+        // Debug log for damage calculation
+        console.log(`[DAMAGE CALC] Skill: ${skillName}, Base: ${baseDamage}, Level: ${attackerLevel}, ` +
+                  `Level-Scaled Base: ${levelScaledBaseDamage.toFixed(1)}, ` +
+                  `Damage Bonus: ${damageBonus.toFixed(2)}x, ` +
+                  `Path Bonus: ${pathBonus.toFixed(2)}x, ` +
+                  `Level Difference Mod: ${levelDifferenceModifier.toFixed(2)}x`);
         
         // Apply target's level-based damage reduction
-        const targetLevel = target.level || 1;
-        const maxDamageReduction = 0.3; // Cap at 30% damage reduction
-        const damageReduction = Math.min(
+        const maxDamageReduction = 0.4; // Cap at 40% damage reduction
+        
+        // Calculate base damage reduction from level
+        const levelDamageReduction = Math.min(
             maxDamageReduction, 
             (targetLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_REDUCTION_PER_LEVEL
         );
         
+        // Apply square root scaling to defense for a smoother progression curve
+        // Higher levels get additional defense scaling
+        const defenseBonus = 1 + (Math.sqrt(targetLevel - 1) * 0.15); // Additional defense based on square root of level
+        
+        // Combined reduction factor, capped at a maximum of 55%
+        const combinedReduction = Math.min(0.55, levelDamageReduction * defenseBonus);
+        
         // Apply damage reduction to the final damage
-        finalDamage = Math.floor(finalDamage * (1 - damageReduction));
+        const reducedDamage = Math.floor(finalDamage * (1 - combinedReduction));
+        
+        console.log(`[DAMAGE CALC] Initial: ${finalDamage}, Target Level: ${targetLevel}, ` +
+                  `Base Reduction: ${(levelDamageReduction * 100).toFixed(0)}%, ` +
+                  `Defense Bonus: ${defenseBonus.toFixed(2)}x, ` +
+                  `Total Reduction: ${(combinedReduction * 100).toFixed(0)}%, ` +
+                  `Final: ${reducedDamage}`);
         
         // Cap damage at remaining health to prevent overkill
-        if (target.life < finalDamage) {
-            finalDamage = target.life;
+        let cappedDamage = reducedDamage;
+        if (target.life < reducedDamage) {
+            cappedDamage = target.life;
         }
         
-        return finalDamage;
+        return cappedDamage;
     }
 
     /**
@@ -1956,7 +2035,25 @@ export class NetworkManager {
         
         // Apply player's level-based damage bonus
         const playerLevel = player.level || 1;
+        const monsterLevel = monster.level || 1;
         const damageBonus = 1 + (playerLevel - 1) * GameConstants.LEVEL_REWARDS.DAMAGE_BONUS_PER_LEVEL;
+        
+        // Apply level difference scaling (new)
+        // This significantly reduces damage when attacking higher level monsters
+        let levelDifferenceModifier = 1.0;
+        if (monsterLevel > playerLevel) {
+            // For each level the monster is above the player, reduce damage by 10%
+            const levelDifference = monsterLevel - playerLevel;
+            levelDifferenceModifier = Math.max(0.3, 1 - (levelDifference * 0.10));
+        } else if (playerLevel > monsterLevel) {
+            // For each level the player is above the monster, gain a smaller bonus (5%)
+            const levelDifference = playerLevel - monsterLevel;
+            levelDifferenceModifier = Math.min(1.5, 1 + (levelDifference * 0.05));
+        }
+        
+        // Apply additional level scaling to base damage for more significant progression
+        const levelMultiplier = 1 + (Math.sqrt(playerLevel - 1) * 0.2); // Square root scaling for more balanced progression
+        const levelScaledBaseDamage = baseDamage * levelMultiplier;
         
         // Apply player path bonuses if applicable
         let pathBonus = 1.0;
@@ -1968,8 +2065,33 @@ export class NetworkManager {
             pathBonus *= 1.3; // 30% bonus for dark path using life drain on monsters
         }
         
-        // Calculate final damage
-        let finalDamage = Math.floor(baseDamage * varianceFactor * damageBonus * pathBonus);
+        // Calculate final damage with level-scaled base damage and level difference modifier
+        let finalDamage = Math.floor(levelScaledBaseDamage * varianceFactor * damageBonus * pathBonus * levelDifferenceModifier);
+        
+        // Debug log for damage calculation against monsters
+        console.log(`[MONSTER DAMAGE CALC] Skill: ${skillId}, Base: ${baseDamage}, Player Level: ${playerLevel}, ` +
+                  `Monster Level: ${monsterLevel}, ` +
+                  `Level-Scaled Base: ${levelScaledBaseDamage.toFixed(1)}, ` +
+                  `Damage Bonus: ${damageBonus.toFixed(2)}x, ` +
+                  `Path Bonus: ${pathBonus.toFixed(2)}x, ` +
+                  `Level Difference Mod: ${levelDifferenceModifier.toFixed(2)}x, ` +
+                  `Initial: ${finalDamage}`);
+        
+        // Apply monster level damage reduction if applicable
+        if (monsterLevel > 1) {
+            const maxMonsterReduction = 0.5; // Cap monster damage reduction at 50%
+            const monsterReduction = Math.min(
+                maxMonsterReduction,
+                (monsterLevel - 1) * 0.05 // 5% reduction per monster level
+            );
+            
+            const reducedDamage = Math.floor(finalDamage * (1 - monsterReduction));
+            console.log(`[MONSTER DAMAGE CALC] Monster Defense: ` +
+                       `Reduction: ${(monsterReduction * 100).toFixed(0)}%, ` +
+                       `Final: ${reducedDamage}`);
+            
+            finalDamage = reducedDamage;
+        }
         
         // Cap damage at remaining health to prevent overkill
         if (monster.health < finalDamage) {
