@@ -188,9 +188,8 @@ export class Game {
             // Initialize MonsterManager after NPCs
             await this.monsterManager.init();
             
-            // Now that everything is loaded, hide loading screen and show game UI
+            // Now that everything is loaded, hide loading screen
             this.uiManager.hideLoadingScreen();
-            this.uiManager.createUI();
         } catch (error) {
             console.error('Failed to initialize managers:', error);
             this.handleInitializationError(error);

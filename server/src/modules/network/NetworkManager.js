@@ -1636,6 +1636,9 @@ export class NetworkManager {
     initialize() {
         // Set up interval to broadcast all player stats periodically
         this.startStatsUpdateInterval();
+        
+        // Start the main loop which handles synchronization and MVP updates
+        this.startMainLoop();
     }
     
     /**
@@ -2302,6 +2305,95 @@ export class NetworkManager {
                 type: 'warning'
             });
         }
+    }
+
+    /**
+     * Send MVP data to all clients
+     * Shows top 5 players by experience with their name, experience, and K/D ratio
+     */
+    sendMVPData() {
+        if (!this.playerManager) {
+            console.warn('Cannot send MVP data: playerManager not initialized');
+            return;
+        }
+        
+        // Get all players
+        const allPlayers = Array.from(this.playerManager.players.values());
+        
+        // First, add an original order index to each player to preserve initial ordering
+        const indexedPlayers = allPlayers.map((player, originalIndex) => ({
+            ...player,
+            originalIndex
+        }));
+        
+        // Sort players by experience (highest first)
+        // When experience is tied, preserve the original order (who reached that score first)
+        const sortedPlayers = indexedPlayers
+            .filter(player => player.experience > 0) // Only include players with experience
+            .sort((a, b) => {
+                // Primary sort by experience (highest first)
+                if (b.experience !== a.experience) {
+                    return b.experience - a.experience;
+                }
+                
+                // Secondary sort by original order (who achieved it first)
+                // This ensures we're not alphabetically sorting ties
+                return a.originalIndex - b.originalIndex;
+            });
+        
+        // Take top 5
+        const topPlayers = sortedPlayers.slice(0, 5);
+        
+        // Map to MVP format - including all data needed by client
+        const mvpData = topPlayers.map(player => {
+            const kdData = this.playerManager.getPlayerKDRatio(player.id);
+            return {
+                id: player.id,
+                name: player.displayName,
+                experience: player.experience,
+                kills: kdData.kills,
+                deaths: kdData.deaths,
+                kd: kdData.ratio ? parseFloat(kdData.ratio.toFixed(2)) : 0 // Format to 2 decimal places
+            };
+        });
+        
+        // Send data to all clients
+        this.io.emit('mvp_data', {
+            players: mvpData,
+            timestamp: Date.now(),
+            preserveOrder: true // Flag to client that this order should be preserved
+        });
+        
+        console.log('Sent MVP data to clients:', mvpData);
+    }
+
+    /**
+     * Start the main server loop for synchronization and MVP updates
+     */
+    startMainLoop() {
+        // Set up the main server loop
+        setInterval(() => {
+            try {
+                // Synchronize game state
+                this.synchronizeGameState();
+                
+                // Process monster AI and world updates
+                if (this.gameManager) {
+                    this.gameManager.update();
+                }
+            } catch (error) {
+                console.error('Error in server main loop:', error);
+            }
+        }, GameConstants.NETWORK.SYNC_INTERVAL);
+        
+        // Set up MVP data broadcast loop (every 5 seconds)
+        setInterval(() => {
+            try {
+                this.sendMVPData();
+            } catch (error) {
+                console.error('Error in MVP data broadcast:', error);
+            }
+        }, 5000); // Send every 5 seconds
     }
 }
 
