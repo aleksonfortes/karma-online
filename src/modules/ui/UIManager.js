@@ -40,39 +40,41 @@ export class UIManager {
         console.log('UIManager initialized');
     }
     
-    async init() {
-        // If in standalone mode (no game instance), just return
-        if (!this.game) {
-            console.log('UIManager init skipped - standalone mode');
-            return true;
+    /**
+     * Initialize the UI Manager
+     */
+    init() {
+        console.log('UIManager initializing...');
+        
+        // Load persisted death count from localStorage if available
+        if (this.game && this.game.playerStats) {
+            try {
+                const persistedDeaths = localStorage.getItem('playerDeaths');
+                if (persistedDeaths !== null) {
+                    const deathCount = parseInt(persistedDeaths);
+                    this.game.playerStats.deaths = deathCount;
+                    console.log(`Loaded persisted death count from localStorage: ${deathCount}`);
+                }
+            } catch (e) {
+                console.warn('Could not load death count from localStorage', e);
+            }
         }
         
-        try {
-            console.log('Initializing UI...');
-            
-            // Create basic UI elements
-            this.createUI();
-            
-            // Add target display overlay
-            this.createTargetDisplay();
-            
-            // Add interaction handler for clicks
-            document.addEventListener('click', (e) => {
-                // Ignore clicks on UI elements
-                if (e.target.closest('.ui-container')) {
-                    return;
-                }
-            });
-            
-            // Set up resize handler
-            window.addEventListener('resize', this.handleResize.bind(this));
-            
-            console.log('UI initialized successfully');
-            return true;
-        } catch (error) {
-            console.error('Failed to initialize UI:', error);
-            return false;
-        }
+        this.createUI();
+        
+        // Request initial MVP data from server when UI is ready
+        // This ensures players see MVP rankings as soon as they join
+        setTimeout(() => {
+            if (this.game && this.game.networkManager && this.game.networkManager.socket) {
+                console.log('Requesting initial MVP data from server');
+                this.game.networkManager.socket.emit('request_mvp_data', {
+                    playerId: this.game.networkManager.socket.id,
+                    requestFull: true,
+                    event: 'ui_init',
+                    includeDeaths: true
+                });
+            }
+        }, 1000); // Short delay to ensure network connection is established
     }
     
     createUI() {
@@ -89,11 +91,13 @@ export class UIManager {
         uiContainer.style.alignItems = 'center';
         uiContainer.style.gap = '10px';
         uiContainer.style.zIndex = '1000';
+        uiContainer.style.pointerEvents = 'auto'; // Ensure container handles events
         document.body.appendChild(uiContainer);
 
         // Create Karma bar container
         const karmaContainer = document.createElement('div');
         karmaContainer.style.width = '300px'; // Match skills bar width
+        karmaContainer.style.pointerEvents = 'auto'; // Ensure container handles events
         
         // Create karma bar with black background and white fill for right side
         const karmaBar = document.createElement('div');
@@ -105,6 +109,7 @@ export class UIManager {
         karmaBar.style.overflow = 'hidden';
         karmaBar.style.cursor = 'pointer'; // Add cursor to indicate it's interactive
         karmaBar.style.zIndex = '1000'; // Add z-index for proper stacking
+        karmaBar.style.pointerEvents = 'auto'; // Ensure container handles events
         
         // Black background for karma bar
         const karmaBackground = document.createElement('div');
@@ -174,9 +179,11 @@ export class UIManager {
         gameplayContainer.style.alignItems = 'center';
         gameplayContainer.style.justifyContent = 'center';
         gameplayContainer.style.gap = '30px'; // Increased from 20px for better spacing with larger rings
+        gameplayContainer.style.pointerEvents = 'auto'; // Ensure container handles events
 
         // Create Life ring
         const lifeRing = this.createStatRing('#ff6666', '#990000', 'Life');
+        lifeRing.style.pointerEvents = 'auto'; // Ensure ring handles events
         
         // Store the life ring elements for later access
         this.lifeRingFill = lifeRing.querySelector('.fill');
@@ -184,6 +191,7 @@ export class UIManager {
         
         // Create Mana ring
         const manaRing = this.createStatRing('#6699ff', '#000099', 'Mana');
+        manaRing.style.pointerEvents = 'auto'; // Ensure ring handles events
         
         // Store the mana ring elements for later access
         this.manaRingFill = manaRing.querySelector('.fill');
@@ -191,6 +199,7 @@ export class UIManager {
 
         // Create skill bar
         const skillBar = this.createSkillBar();
+        skillBar.style.pointerEvents = 'auto'; // Ensure skillbar handles events
 
         // Assemble the gameplay container
         gameplayContainer.appendChild(lifeRing);
@@ -2867,138 +2876,7 @@ export class UIManager {
     }
 
     /**
-     * Create level indicator with XP ring
-     */
-    createLevelIndicator() {
-        // Create the level indicator container
-        const container = document.createElement('div');
-        container.style.position = 'fixed';
-        container.style.bottom = '20px';
-        container.style.left = '20px';
-        container.style.width = '100px'; // Changed from 70px to match other rings
-        container.style.height = '100px'; // Changed from 70px to match other rings
-        container.style.borderRadius = '50%';
-        container.style.background = 'rgba(0, 0, 0, 0.6)';
-        container.style.border = '2px solid rgba(255, 215, 0, 0.15)';
-        container.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
-        container.style.display = 'flex';
-        container.style.alignItems = 'center';
-        container.style.justifyContent = 'center';
-        container.style.zIndex = '1000';
-        document.body.appendChild(container);
-        
-        // Create fill container - used for masking
-        const fillContainer = document.createElement('div');
-        fillContainer.style.position = 'absolute';
-        fillContainer.style.top = '0';
-        fillContainer.style.left = '0';
-        fillContainer.style.width = '100%';
-        fillContainer.style.height = '100%';
-        fillContainer.style.borderRadius = '50%';
-        fillContainer.style.overflow = 'hidden';
-        container.appendChild(fillContainer);
-        
-        // Create the XP ring fill
-        const ringFill = document.createElement('div');
-        ringFill.className = 'fill';
-        ringFill.style.position = 'absolute';
-        ringFill.style.top = '0';
-        ringFill.style.left = '0';
-        ringFill.style.width = '100%';
-        ringFill.style.height = '100%';
-        ringFill.style.background = 'radial-gradient(circle, #ffd700, #b8860b)';
-        ringFill.style.opacity = '0.8';
-        ringFill.style.borderRadius = '50%';
-        
-        // Initialize with 0% fill
-        ringFill.style.clipPath = 'inset(100% 0 0 0)';
-        ringFill.style.transition = 'clip-path 0.3s ease-out';
-        
-        fillContainer.appendChild(ringFill);
-        
-        // Level text
-        const levelText = document.createElement('div');
-        levelText.style.color = '#ffd700';
-        levelText.style.fontSize = '24px';
-        levelText.style.fontWeight = 'bold';
-        levelText.style.textShadow = '0 0 5px rgba(255, 215, 0, 0.5)';
-        levelText.style.position = 'relative';
-        levelText.style.zIndex = '3';
-        
-        // Get level from game if available
-        if (this.game?.playerStats?.level) {
-            levelText.textContent = this.game.playerStats.level;
-        } else {
-            levelText.textContent = '1';
-        }
-        
-        // Add pulsing animation to draw attention
-        levelText.style.animation = 'pulse 2s infinite';
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.1); }
-                100% { transform: scale(1); }
-            }
-        `;
-        document.head.appendChild(style);
-        
-        container.appendChild(levelText);
-        
-        // XP tooltip (shows on hover)
-        const tooltip = document.createElement('div');
-        tooltip.className = 'tooltip';
-        tooltip.style.position = 'absolute';
-        tooltip.style.bottom = '80px';
-        tooltip.style.left = '70px';
-        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        tooltip.style.color = '#ffd700';
-        tooltip.style.padding = '5px 10px';
-        tooltip.style.borderRadius = '4px';
-        tooltip.style.fontSize = '12px';
-        tooltip.style.whiteSpace = 'nowrap';
-        tooltip.style.display = 'none';
-        tooltip.style.zIndex = '1010';
-        tooltip.style.pointerEvents = 'none';
-        
-        // Get XP data from game if available
-        if (this.game?.playerStats) {
-            const level = this.game.playerStats.level || 1;
-            const experience = this.game.playerStats.experience || 0;
-            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
-            tooltip.textContent = `Level ${level}: ${experience}/${experienceToNextLevel} XP`;
-        } else {
-            tooltip.textContent = 'Level 1: 0/100 XP';
-        }
-        
-        container.appendChild(tooltip);
-        
-        // Show tooltip on hover
-        container.addEventListener('mouseenter', () => {
-            tooltip.style.display = 'block';
-        });
-        
-        container.addEventListener('mouseleave', () => {
-            tooltip.style.display = 'none';
-        });
-        
-        // Store references for later updates
-        this.xpRingFill = ringFill;
-        this.levelText = levelText;
-        this.xpTooltip = tooltip;
-        
-        // Initial update based on current stats
-        if (this.game?.playerStats) {
-            const experience = this.game.playerStats.experience || 0;
-            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
-            const level = this.game.playerStats.level || 1;
-            this.updateXPRing(experience, experienceToNextLevel, level);
-        }
-    }
-
-    /**
-     * Create and display the player name entry screen
+     * Create player name entry screen
      * @param {Function} onNameSubmit - Callback function when name is submitted
      */
     createPlayerNameScreen(onNameSubmit) {
@@ -3230,4 +3108,328 @@ export class UIManager {
         };
         pulse();
     }
-} 
+
+    /**
+     * Updates the MVP rankings display with the latest data from the server
+     * This is a simple implementation that should be replaced with a proper MVP module
+     * @param {Object} data - MVP data from the server
+     */
+    updateMVP(data) {
+        console.log('Updating MVP with server data:', data);
+        
+        // Security check: Verify data is from server
+        if (!data || !data.players) {
+            console.log('No valid MVP data to display');
+            this.createOrUpdateMVPDisplay([]);
+            return;
+        }
+
+        // Always treat server data as authoritative
+        // Never allow client-side data to override server data
+        this.mvpData = data;
+        
+        // Store timestamped data for verification
+        data.lastUpdated = Date.now();
+        
+        // Store in localStorage for persistence between sessions
+        // But only if it's server-authoritative data
+        try {
+            localStorage.setItem('mvpData', JSON.stringify({
+                players: data.players,
+                timestamp: data.timestamp || Date.now(),
+                serverAuthoritative: true
+            }));
+            console.log('Server-authoritative MVP data saved to localStorage');
+        } catch (e) {
+            console.warn('Failed to store MVP data in localStorage:', e);
+        }
+
+        // Create or update the MVP display with the players data
+        // Pass server data directly without client-side modifications
+        this.createOrUpdateMVPDisplay(data.players);
+    }
+
+    /**
+     * Creates or updates the MVP display with the provided players data
+     * Extracted to a separate method for better organization
+     * @param {Array} players - Array of player data from server
+     */
+    createOrUpdateMVPDisplay(players) {
+        // If players array is empty, try to load from localStorage
+        // But only use trusted server data, never client-generated data
+        if (!players || players.length === 0) {
+            try {
+                const storedData = localStorage.getItem('mvpData');
+                if (storedData) {
+                    const parsedData = JSON.parse(storedData);
+                    // Validate stored data is server-authoritative
+                    if (parsedData && parsedData.serverAuthoritative && 
+                        parsedData.players && parsedData.players.length > 0) {
+                        console.log('Using stored server-authoritative MVP data:', parsedData);
+                        players = parsedData.players;
+                        this.mvpData = parsedData;
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to retrieve MVP data from localStorage:', e);
+            }
+        }
+
+        // Find the MVP rankings element or create it if it doesn't exist
+        let mvpContainer = document.getElementById('mvp-rankings');
+        if (!mvpContainer) {
+            // Create MVP container
+            mvpContainer = document.createElement('div');
+            mvpContainer.id = 'mvp-rankings';
+            mvpContainer.style.position = 'fixed';
+            mvpContainer.style.top = '10px';
+            mvpContainer.style.right = '10px';
+            mvpContainer.style.width = '250px';
+            mvpContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+            mvpContainer.style.border = '1px solid #555';
+            mvpContainer.style.borderRadius = '5px';
+            mvpContainer.style.color = '#fff';
+            mvpContainer.style.padding = '10px';
+            mvpContainer.style.zIndex = '1000';
+            mvpContainer.style.fontFamily = 'Arial, sans-serif';
+            mvpContainer.style.fontSize = '14px';
+            mvpContainer.style.maxHeight = '300px';
+            mvpContainer.style.overflow = 'auto';
+            mvpContainer.style.textAlign = 'center'; // Center all text
+            document.body.appendChild(mvpContainer);
+        }
+
+        // Create/update the header - changed to "MVP Ranking"
+        let headerHTML = `
+            <div style="text-align: center; padding-bottom: 5px; border-bottom: 1px solid #555; margin-bottom: 5px;">
+                <h3 style="margin: 0; color: #ddd; font-size: 16px;">MVP Ranking</h3>
+            </div>
+            <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; text-align: center; font-weight: bold; padding: 5px 0;">
+                <div>NAME</div>
+                <div>EXP</div>
+                <div>K/D</div>
+            </div>
+        `;
+
+        // Current player info (for later use)
+        const localPlayerId = this.game?.networkManager?.socket?.id;
+        let currentPlayerData = null;
+
+        // Generate player rankings
+        let playersHTML = '';
+        
+        if (!players || players.length === 0) {
+            playersHTML = `<div style="text-align: center; padding: 15px 0; color: #999;">No players yet</div>`;
+        } else {
+            // CRITICAL: Do not sort or reorder the players array in any way
+            // Always preserve the exact server ordering
+            
+            // Just add meta-information without changing the order
+            const processedPlayers = players.map((player, index) => {
+                // Parse values properly to ensure display consistency
+                const kills = parseInt(player.kills || 0);
+                const deaths = parseInt(player.deaths || 0);
+                
+                // Check if this is the current player
+                const isCurrentPlayer = player.id === localPlayerId;
+                if (isCurrentPlayer) {
+                    currentPlayerData = {...player, kills, deaths};
+                }
+                
+                return {
+                    ...player,
+                    kills,
+                    deaths,
+                    isCurrentPlayer
+                };
+            });
+            
+            // Limit to top 5 players - no sorting, just take first 5 as provided by server
+            const topPlayers = processedPlayers.slice(0, 5);
+            
+            topPlayers.forEach((player, index) => {
+                // Format K/D ratio with authenticated server values
+                const kdDisplay = `${player.kills}/${player.deaths}`;
+                
+                // Highlight the current player in the top 5
+                const highlightStyle = player.isCurrentPlayer ? 
+                    'background-color: rgba(255, 215, 0, 0.2); font-weight: bold;' : '';
+                
+                playersHTML += `
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 5px 0; border-bottom: 1px solid #333; text-align: center; ${highlightStyle}">
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${player.name || 'Unknown'}</div>
+                        <div>${player.experience || 0}</div>
+                        <div>${kdDisplay}</div>
+                    </div>
+                `;
+            });
+            
+            // Add a separator between top 5 and current player
+            playersHTML += `
+                <div style="margin: 5px 0; border-bottom: 1px solid #555;"></div>
+            `;
+            
+            // Always display the current player stats below the separator
+            if (currentPlayerData) {
+                // Use server-authenticated values
+                const kdDisplay = `${currentPlayerData.kills}/${currentPlayerData.deaths}`;
+                
+                playersHTML += `
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 5px 0; background-color: rgba(255, 215, 0, 0.2); font-weight: bold; text-align: center;">
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${currentPlayerData.name || 'You'}</div>
+                        <div>${currentPlayerData.experience || 0}</div>
+                        <div>${kdDisplay}</div>
+                    </div>
+                `;
+            } else if (localPlayerId) {
+                // If we have a player ID but no data yet, show a placeholder with zeros
+                playersHTML += `
+                    <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; padding: 5px 0; background-color: rgba(255, 215, 0, 0.2); font-weight: bold; text-align: center;">
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">You</div>
+                        <div>0</div>
+                        <div>0/0</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Update the container content with server-authoritative data
+        mvpContainer.innerHTML = headerHTML + playersHTML;
+        mvpContainer.dataset.lastUpdated = Date.now();
+        mvpContainer.dataset.preserveServerOrder = "true";
+        console.log('MVP rankings updated successfully with exact server order preserved');
+    }
+
+    /**
+     * Create level indicator with XP ring
+     */
+    createLevelIndicator() {
+        // Create the level indicator container
+        const container = document.createElement('div');
+        container.style.position = 'fixed';
+        container.style.bottom = '20px';
+        container.style.left = '20px';
+        container.style.width = '100px'; // Same size as life/mana rings (100px)
+        container.style.height = '100px'; // Same size as life/mana rings (100px)
+        container.style.borderRadius = '50%';
+        container.style.background = 'rgba(0, 0, 0, 0.6)';
+        container.style.border = '2px solid rgba(255, 215, 0, 0.15)';
+        container.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+        container.style.display = 'flex';
+        container.style.alignItems = 'center';
+        container.style.justifyContent = 'center';
+        container.style.zIndex = '1000';
+        container.style.pointerEvents = 'auto'; // Ensure it handles events
+        document.body.appendChild(container);
+        
+        // Create fill container - used for masking
+        const fillContainer = document.createElement('div');
+        fillContainer.style.position = 'absolute';
+        fillContainer.style.top = '0';
+        fillContainer.style.left = '0';
+        fillContainer.style.width = '100%';
+        fillContainer.style.height = '100%';
+        fillContainer.style.borderRadius = '50%';
+        fillContainer.style.overflow = 'hidden';
+        container.appendChild(fillContainer);
+        
+        // Create the XP ring fill
+        const ringFill = document.createElement('div');
+        ringFill.className = 'fill';
+        ringFill.style.position = 'absolute';
+        ringFill.style.top = '0';
+        ringFill.style.left = '0';
+        ringFill.style.width = '100%';
+        ringFill.style.height = '100%';
+        ringFill.style.background = 'radial-gradient(circle, #ffd700, #b8860b)';
+        ringFill.style.opacity = '0.8';
+        ringFill.style.borderRadius = '50%';
+        
+        // Initialize with 0% fill
+        ringFill.style.clipPath = 'inset(100% 0 0 0)';
+        ringFill.style.transition = 'clip-path 0.3s ease-out';
+        
+        fillContainer.appendChild(ringFill);
+        
+        // Level text
+        const levelText = document.createElement('div');
+        levelText.style.color = '#ffd700';
+        levelText.style.fontSize = '24px';
+        levelText.style.fontWeight = 'bold';
+        levelText.style.textShadow = '0 0 5px rgba(255, 215, 0, 0.5)';
+        levelText.style.position = 'relative';
+        levelText.style.zIndex = '3';
+        
+        // Get level from game if available
+        if (this.game?.playerStats?.level) {
+            levelText.textContent = this.game.playerStats.level;
+        } else {
+            levelText.textContent = '1';
+        }
+        
+        // Add pulsing animation to draw attention
+        levelText.style.animation = 'pulse 2s infinite';
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.1); }
+                100% { transform: scale(1); }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        container.appendChild(levelText);
+        
+        // XP tooltip (shows on hover)
+        const tooltip = document.createElement('div');
+        tooltip.className = 'tooltip';
+        tooltip.style.position = 'absolute';
+        tooltip.style.bottom = '120%'; // Position above the ring
+        tooltip.style.left = '50%';
+        tooltip.style.transform = 'translateX(-50%)';
+        tooltip.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        tooltip.style.color = '#ffd700';
+        tooltip.style.padding = '5px 10px';
+        tooltip.style.borderRadius = '4px';
+        tooltip.style.fontSize = '12px';
+        tooltip.style.whiteSpace = 'nowrap';
+        tooltip.style.display = 'none';
+        tooltip.style.zIndex = '1010';
+        tooltip.style.pointerEvents = 'none';
+        
+        // Get XP data from game if available
+        if (this.game?.playerStats) {
+            const level = this.game.playerStats.level || 1;
+            const experience = this.game.playerStats.experience || 0;
+            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
+            tooltip.textContent = `Level ${level}: ${experience}/${experienceToNextLevel} XP`;
+        } else {
+            tooltip.textContent = 'Level 1: 0/100 XP';
+        }
+        
+        container.appendChild(tooltip);
+        
+        // Show tooltip on hover
+        container.addEventListener('mouseenter', () => {
+            tooltip.style.display = 'block';
+        });
+        
+        container.addEventListener('mouseleave', () => {
+            tooltip.style.display = 'none';
+        });
+        
+        // Store references for later updates
+        this.xpRingFill = ringFill;
+        this.levelText = levelText;
+        this.xpTooltip = tooltip;
+        
+        // Initial update based on current stats
+        if (this.game?.playerStats) {
+            const experience = this.game.playerStats.experience || 0;
+            const experienceToNextLevel = this.game.playerStats.experienceToNextLevel || 100;
+            const level = this.game.playerStats.level || 1;
+            this.updateXPRing(experience, experienceToNextLevel, level);
+        }
+    }
+}

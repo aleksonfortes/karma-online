@@ -31,7 +31,9 @@ export class PlayerManager {
             modelScale: GameConstants.PLAYER.MODEL_SCALE,
             displayName: `Player-${socketId.substring(0, 5)}`,
             experience: 0,
-            level: 1
+            level: 1,
+            killCount: 0,
+            deathCount: 0
         };
     }
 
@@ -168,6 +170,18 @@ export class PlayerManager {
         }
         player.deathCount++;
         
+        // Track kill for the killer if it's a player
+        if (killerId) {
+            const killer = this.getPlayer(killerId);
+            if (killer) {
+                if (!killer.killCount) {
+                    killer.killCount = 0;
+                }
+                killer.killCount++;
+                console.log(`Player ${killerId} got a kill. Total kills: ${killer.killCount}`);
+            }
+        }
+        
         console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''} (Death #${player.deathCount})`);
         
         // Schedule respawn
@@ -218,6 +232,26 @@ export class PlayerManager {
                 console.log(`Player ${socketId} is no longer invulnerable after respawn`);
             }
         }, 3000);
+    }
+
+    /**
+     * Get player kill/death statistics
+     * @param {string} socketId - The socket ID of the player
+     * @returns {Object} Object containing kills and deaths
+     */
+    getPlayerKDRatio(socketId) {
+        const player = this.getPlayer(socketId);
+        if (!player) return { kills: 0, deaths: 0 };
+        
+        const kills = player.killCount || 0;
+        const deaths = player.deathCount || 0;
+        
+        // Return kills and deaths as separate values
+        return {
+            kills,
+            deaths,
+            ratio: deaths > 0 ? kills / deaths : kills // Calculate ratio only if needed
+        };
     }
 }
 

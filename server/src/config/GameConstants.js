@@ -67,6 +67,13 @@ const GameConstants = {
         MAX_SPEED: 10 // Maximum units per second a player can move
     },
     
+    // Network synchronization settings
+    NETWORK: {
+        SYNC_INTERVAL: 10000, // 10 seconds between full game state synchronizations
+        STATS_UPDATE_INTERVAL: 500, // 500ms between player stats updates
+        RATE_LIMIT_MS: 100 // Rate limiting for player actions
+    },
+    
     // Monster configurations
     MONSTER: {
         BASIC: {

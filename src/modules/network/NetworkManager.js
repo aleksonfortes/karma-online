@@ -79,6 +79,39 @@ export class NetworkManager {
             
             // Set up handlers after socket is created
             this.setupSocketHandlers();
+            
+            // Request MVP data after connection
+            this.socket.on('connect', () => {
+                console.log('Connected to server with socket ID:', this.socket.id);
+                this.connected = true;
+                this.connectionState.isReconnecting = false;
+                this.connectionState.reconnectAttempts = 0;
+                
+                // Request initial game state
+                this.requestStateSync();
+                
+                // Request initial MVP data after connection
+                setTimeout(() => {
+                    console.log('Requesting initial MVP data after connection');
+                    this.socket.emit('request_mvp_data', {
+                        playerId: this.socket.id, 
+                        requestFull: true // Request the full leaderboard
+                    });
+                }, 1000);
+                
+                // Show connection success message
+                this.showConnectionStatus('Connected to server', true);
+                
+                // Reset reconnection flags
+                this.reconnectAttempt = 0;
+                
+                // If we have a pending player state to send, send it now
+                if (this.pendingPlayerState) {
+                    console.log('Sending pending player state:', this.pendingPlayerState);
+                    this.socket.emit('playerState', this.pendingPlayerState);
+                    this.pendingPlayerState = null;
+                }
+            });
         } catch (error) {
             console.error('Error connecting to server:', error);
             // Retry connection after a delay
@@ -170,8 +203,25 @@ export class NetworkManager {
     }
 
     setupSocketHandlers() {
+        NetworkManager.instance = this;
+
+        // Handle connection and game state events
+        this.socket.on('connect', () => {
+            console.log(`Connected to server as ${this.socket.id}`);
+            this.game.uiManager.clearAllNotifications();
+            
+            // Request initial player information
+            this.socket.emit('client_ready', { playerId: this.socket.id });
+            
+            // Always request latest MVP data on connection to ensure server authority
+            this.requestMVPDataWithSecurity('connection', true);
+            
+            // Sync all client stats from server to prevent client-side manipulation
+            this.syncStatsFromServer();
+        });
+
         if (!this.socket) {
-            console.error('Cannot set up socket handlers: socket not initialized');
+            console.error('Socket not initialized, cannot set up handlers');
             return;
         }
         
@@ -195,6 +245,7 @@ export class NetworkManager {
             this.socket.removeAllListeners('playerResetConfirmed');
             this.socket.removeAllListeners('skillDamage');
             this.socket.removeAllListeners('errorMessage');
+            this.socket.removeAllListeners('mvp_data');
             // Add other events that should be cleaned up
         }
 
@@ -1202,20 +1253,6 @@ export class NetworkManager {
             this.handleReconnection();
         });
 
-        // Handle player died event
-        this.socket.on('playerDied', (data) => {
-            console.log('Received player died event:', data);
-            
-            // Show appropriate death message based on killer type
-            if (this.game.uiManager) {
-                if (data.killerType === 'monster') {
-                    this.game.uiManager.showNotification(`You were killed by a monster!`, '#ff0000');
-                } else {
-                    this.game.uiManager.showNotification(`You were killed by another player!`, '#ff0000');
-                }
-            }
-        });
-
         // Handle player killed event (when another player was killed)
         this.socket.on('playerKilled', (data) => {
             console.log('Received player killed event:', data);
@@ -1238,8 +1275,135 @@ export class NetworkManager {
                 
                 // Show kill notification if we're the killer
                 if (data.killerId === this.socket.id && this.game.uiManager) {
+                    // Increment local kill counter
+                    if (this.game.playerStats) {
+                        this.game.playerStats.kills = (this.game.playerStats.kills || 0) + 1;
+                        console.log(`Incremented kill count to: ${this.game.playerStats.kills}`);
+                    }
+                    
+                    // Show notification
                     this.game.uiManager.showNotification(`You killed another player!`, '#00ff00');
+                    
+                    // Request MVP update to reflect new kill count
+                    this.requestMVPDataWithSecurity('kill', true);
                 }
+            }
+        });
+
+        // Handle player died event
+        this.socket.on('playerDied', (data) => {
+            console.log('Received player died event:', data);
+            
+            // Increment death count when we die
+            if (this.game.playerStats) {
+                this.game.playerStats.deaths = (this.game.playerStats.deaths || 0) + 1;
+                console.log(`Incremented death count to: ${this.game.playerStats.deaths}`);
+                
+                // Also update localStorage for persistence
+                try {
+                    localStorage.setItem('playerDeaths', this.game.playerStats.deaths.toString());
+                } catch (e) {
+                    console.warn('Could not update localStorage death count', e);
+                }
+            }
+            
+            // Mark player as dead
+            this.playerDead = true;
+            
+            // Request MVP update to ensure death is counted
+            this.requestMVPDataWithSecurity('death', true);
+            
+            // Show appropriate death message based on killer type
+            if (this.game.uiManager) {
+                if (data.killerType === 'monster') {
+                    this.game.uiManager.showNotification(`You were killed by a monster!`, '#ff0000');
+                } else if (data.killerId) {
+                    // Log who killed us
+                    console.log(`You were killed by player ${data.killerId}`);
+                    
+                    // Check if killer is in our player list
+                    const killer = this.game.playerManager.players.get(data.killerId);
+                    if (killer) {
+                        const killerName = killer.userData?.displayName || `Player ${data.killerId.substring(0, 5)}`;
+                        this.game.uiManager.showNotification(`You were killed by ${killerName}!`, '#ff4444');
+                    } else {
+                        this.game.uiManager.showNotification(`You were killed by another player!`, '#ff4444');
+                    }
+                } else {
+                    this.game.uiManager.showNotification(`You were killed!`, '#ff0000');
+                }
+                
+                // Show death screen
+                this.game.uiManager.showDeathScreen();
+            }
+            
+            // Handle death functionality
+            this.handlePlayerDeath();
+        });
+        
+        // Handle MVP data update
+        this.socket.on('mvp_data', (data) => {
+            console.log('MVP data received:', data);
+            
+            // Validate the data structure
+            if (!data || !data.players) {
+                console.error('Invalid MVP data format received');
+                return;
+            }
+            
+            // SECURITY CHECK: Validate data integrity
+            // We should never modify server-provided rankings to prevent cheating
+            // Only accept server-authoritative data without client-side modifications
+            data.serverAuthoritative = true;
+            
+            // Store the player ID if not already set
+            if (data.currentPlayerId) {
+                this.currentPlayerId = data.currentPlayerId;
+            }
+            
+            // Store server timestamp to track data freshness
+            data.clientReceivedTimestamp = Date.now();
+            
+            // Check if the current player is in the list - but don't modify server rankings
+            const localPlayerId = this.socket.id;
+            const localPlayerInList = data.players.some(p => p.id === localPlayerId);
+            
+            // Only update local player stats - never modify the ranking order or server data
+            if (localPlayerInList && this.game.playerStats) {
+                const localPlayerData = data.players.find(p => p.id === localPlayerId);
+                if (localPlayerData) {
+                    // Always trust server data for stats
+                    if (localPlayerData.deaths !== undefined) {
+                        this.game.playerStats.deaths = localPlayerData.deaths;
+                        console.log(`Updated local death count from server: ${localPlayerData.deaths}`);
+                        
+                        // Also update localStorage for session persistence
+                        try {
+                            localStorage.setItem('playerDeaths', localPlayerData.deaths.toString());
+                        } catch (e) {
+                            console.warn('Could not update localStorage death count', e);
+                        }
+                    }
+                    
+                    // Update kills count from server
+                    if (localPlayerData.kills !== undefined) {
+                        this.game.playerStats.kills = localPlayerData.kills;
+                        console.log(`Updated local kill count from server: ${localPlayerData.kills}`);
+                    }
+                    
+                    // Update experience from server
+                    if (localPlayerData.experience !== undefined) {
+                        this.game.playerStats.experience = localPlayerData.experience;
+                        console.log(`Updated local experience from server: ${localPlayerData.experience}`);
+                    }
+                }
+            }
+            
+            // Update the UI with the MVP data exactly as received from server
+            if (this.game.uiManager) {
+                this.game.uiManager.updateMVP(data);
+            } else {
+                console.warn('UI Manager not available to update MVP data');
             }
         });
         
@@ -1257,7 +1421,11 @@ export class NetworkManager {
             
             // CRITICAL: Check if player exists
             if (!this.game.localPlayer) {
-                console.error('Local player not found during respawn confirmation');
+                console.error('Local player not found during respawn!');
+                if (this.game.createLocalPlayer) {
+                    console.log('Attempting to recreate local player...');
+                    this.game.createLocalPlayer(data.position);
+                }
                 return;
             }
             
@@ -1267,120 +1435,156 @@ export class NetworkManager {
                 return;
             }
             
-            // STEP 1: Keep player invisible during teleport
+            // Player is no longer dead
+            this.playerDead = false;
+            this.playerRejoiningSafeZone = false;
+            console.log('Marked player as alive');
+            
+            // Ensure the game state is marked as alive
+            if (this.game) {
+                this.game.isAlive = true;
+            }
+            
+            // Set player invisible for teleportation
             this.game.localPlayer.visible = false;
             console.log('Set player invisible for teleportation');
             
-            // STEP 2: IMMEDIATELY teleport player to temple position
-            const templePosX = data.position.x;
-            const templePosY = data.position.y;
-            const templePosZ = data.position.z;
+            // Teleport player to temple
+            this.game.localPlayer.position.set(data.position.x, data.position.y, data.position.z);
+            console.log(`Teleported player to temple at: ${data.position.x}, ${data.position.y}, ${data.position.z}`);
             
-            this.game.localPlayer.position.set(templePosX, templePosY, templePosZ);
-            console.log(`Teleported player to temple at: ${templePosX}, ${templePosY}, ${templePosZ}`);
+            // Set player rotation
+            this.game.localPlayer.rotation.y = data.rotation?.y || 0;
+            console.log(`Set player rotation to: ${data.rotation?.y || 0}`);
             
-            // Set player rotation to correct direction (facing south)
-            if (data.rotation) {
-                this.game.localPlayer.rotation.y = data.rotation.y;
-                console.log(`Set player rotation to: ${data.rotation.y}`);
-            } else {
-                // Default rotation (south) if not provided
-                this.game.localPlayer.rotation.y = 0;
-                console.log(`Set player rotation to default (south): 0`);
-            }
-            
-            // STEP 3: Reset camera position immediately
-            if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
-                this.game.cameraManager.resetCamera();
+            // Reset camera position
+            if (this.game.cameraManager) {
+                if (this.game.cameraManager.resetCameraPosition) {
+                    this.game.cameraManager.resetCameraPosition();
+                } else if (this.game.cameraManager.resetCamera) {
+                    this.game.cameraManager.resetCamera();
+                }
                 console.log('Camera position reset to follow player at temple');
-            } else {
-                console.error('Cannot reset camera - cameraManager or resetCamera method not available');
             }
             
-            // STEP 4: Update player stats before making visible
+            // Update player stats
             if (this.game.playerStats) {
                 this.game.playerStats.currentLife = data.life;
                 this.game.playerStats.maxLife = data.maxLife;
+                this.game.playerStats.currentMana = data.mana;
+                this.game.playerStats.maxMana = data.maxMana;
                 
-                // Use handlePlayerStatsUpdate for mana with respawn source
-                if (data.mana !== undefined || data.maxMana !== undefined) {
-                    const playerData = {
-                        id: this.socket.id,
-                        mana: data.mana,
-                        maxMana: data.maxMana,
-                        source: 'respawn' // Mark this as a respawn update
-                    };
+                // Set mana from server data
+                if (this.setLocalPlayerMana) {
+                    this.setLocalPlayerMana(data.mana, 'respawn');
+                } else {
+                    // Fallback if setLocalPlayerMana is not available
+                    this.game.playerStats.currentMana = data.mana;
                     
-                    this.handlePlayerStatsUpdate(playerData);
-                    console.log(`Updated player mana during respawn: ${data.mana}`);
+                    // Also sync to localPlayer if it has userData.stats
+                    if (this.game.localPlayer && this.game.localPlayer.userData && this.game.localPlayer.userData.stats) {
+                        this.game.localPlayer.userData.stats.mana = data.mana;
+                    }
+                }
+                console.log(`Updated player mana during respawn: ${data.mana}`);
+                
+                // Update death count if provided by server
+                if (data.deaths !== undefined) {
+                    this.game.playerStats.deaths = data.deaths;
+                    
+                    // Also update localStorage for cross-session persistence
+                    try {
+                        localStorage.setItem('playerDeaths', data.deaths.toString());
+                    } catch (e) {
+                        console.warn('Could not update localStorage death count', e);
+                    }
+                    
+                    console.log(`Updated player death count from server: ${data.deaths}`);
+                } else {
+                    // If server didn't provide deaths, use our local count
+                    console.log(`Server did not provide death count, using local: ${this.game.playerStats.deaths || 0}`);
                 }
                 
-                // Update death count from server if provided
-                if (data.deathCount !== undefined) {
-                    this.game.playerStats.deaths = data.deathCount;
-                    console.log(`Updated player death count: ${data.deathCount}`);
-                }
-                
-                console.log(`Updated player stats: Life ${this.game.playerStats.currentLife}/${this.game.playerStats.maxLife}, Mana ${this.game.playerStats.currentMana}/${this.game.playerStats.maxMana}`);
-                
-                // Update UI
-                if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
-                    this.game.uiManager.hideDeathScreen();
-                    console.log('Updated UI status bars and hid death screen');
-                }
+                console.log(`Updated player stats: Life ${data.life}/${data.maxLife}, Mana ${data.mana}/${data.maxMana}`);
             }
             
-            // Also store death count in player userData for reference
-            if (this.game.localPlayer && data.deathCount !== undefined) {
-                if (!this.game.localPlayer.userData) {
-                    this.game.localPlayer.userData = {};
-                }
-                this.game.localPlayer.userData.deathCount = data.deathCount;
+            // Update UI
+            if (this.game.uiManager) {
+                this.game.uiManager.hideDeathScreen();
+                this.game.uiManager.updateStatusBars(this.game.playerStats);
+                console.log('Updated UI status bars and hid death screen');
             }
             
-            // STEP 5: Mark player as alive
-            this.game.isAlive = true;
-            this.playerDead = false;
-            console.log('Marked player as alive');
-            
-            // STEP 6: Re-enable controls
+            // Re-enable controls if they were disabled
             if (this.game.controlsManager && this.game.controlsManager.enableControls) {
                 this.game.controlsManager.enableControls();
                 console.log('Re-enabled player controls');
             }
             
-            // STEP 7: FINALLY make player visible after a short delay
+            // CRITICAL FIX: Ensure the player's movement state is reset
+            if (this.game.localPlayer) {
+                // Reset any movement-related flags
+                if (this.game.localPlayer.userData && this.game.localPlayer.userData.movement) {
+                    this.game.localPlayer.userData.movement = {
+                        forward: false,
+                        backward: false,
+                        left: false,
+                        right: false,
+                        running: false,
+                        jumping: false
+                    };
+                }
+                
+                // Ensure player has proper physics/collision
+                if (this.game.localPlayer.body) {
+                    // Wake up the physics body
+                    this.game.localPlayer.body.activate();
+                    console.log('Reactivated player physics body');
+                }
+            }
+            
+            // Request MVP data update to refresh the UI with latest stats
+            setTimeout(() => {
+                console.log('Requesting MVP data after respawn');
+                this.socket.emit('request_mvp_data', {
+                    playerId: this.socket.id,
+                    requestFull: true,
+                    event: 'respawn',
+                    forceUpdate: true
+                });
+            }, 500);
+            
+            // Actually make player visible after a very short delay
+            // This prevents a visual teleportation glitch
             setTimeout(() => {
                 if (this.game.localPlayer) {
-                    // Double-check position before making visible
                     console.log(`Player position before making visible: ${JSON.stringify({
                         x: this.game.localPlayer.position.x.toFixed(2),
                         y: this.game.localPlayer.position.y.toFixed(2),
                         z: this.game.localPlayer.position.z.toFixed(2)
                     })}`);
                     
-                    // Make absolutely sure we're at temple position
-                    this.game.localPlayer.position.set(templePosX, templePosY, templePosZ);
-                    
-                    // Make player visible
                     this.game.localPlayer.visible = true;
                     console.log('Player made visible at temple position');
                     
-                    // Reset camera one more time for good measure
-                    if (this.game.cameraManager && this.game.cameraManager.resetCamera) {
-                        this.game.cameraManager.resetCamera();
+                    // Reset camera position again after player is made visible
+                    if (this.game.cameraManager) {
+                        if (this.game.cameraManager.resetCameraPosition) {
+                            this.game.cameraManager.resetCameraPosition();
+                        } else if (this.game.cameraManager.resetCamera) {
+                            this.game.cameraManager.resetCamera();
+                        }
                         console.log('Camera position reset again after player made visible');
                     }
                     
                     // Show respawn notification
                     if (this.game.uiManager) {
-                        this.game.uiManager.showNotification('You have respawned in the temple!', '#00ff00');
+                        this.game.uiManager.showNotification('You have respawned at the temple', '#00ff00');
                         console.log('Showed respawn notification');
                     }
                 }
                 console.log('=======================================');
-            }, 300); // Slightly longer delay to ensure everything is set up
+            }, 100);
         });
         
         // Handle player respawn (for other players)
@@ -1553,82 +1757,82 @@ export class NetworkManager {
         this.socket.on('monsterDamage', (data) => {
             console.log('Received monster damage event:', data);
             
-            // CRITICAL FIX #1: Add more robust check for dead monsters
-            if (this.game.monsterManager && data.monsterId) {
-                const monster = this.game.monsterManager.getMonsterById(data.monsterId);
-                
-                // Check all possible death conditions
-                if (!monster) {
-                    console.log(`Ignoring damage from non-existent monster ${data.monsterId}`);
-                    return; // Monster doesn't exist, ignore damage
+            // Check if this damage targets the local player
+            if (data.targetId === this.socket.id) {
+                // Find the monster that dealt damage
+                let monster = null;
+                if (this.game.monsterManager) {
+                    monster = this.game.monsterManager.getMonsterById(data.monsterId);
                 }
                 
-                if (monster.isAlive === false || monster.health <= 0) {
-                    console.log(`Ignoring damage from dead monster ${data.monsterId} (isAlive=${monster.isAlive}, health=${monster.health})`);
-                    
-                    // CRITICAL FIX: Force server sync to ensure the server knows the monster is dead
-                    this.socket.emit('client_monster_state', {
-                        monsterId: data.monsterId,
-                        clientState: {
-                            isAlive: false,
-                            health: 0
-                        }
-                    });
-                    
-                    // Re-apply death handling just to be safe
-                    this.game.monsterManager.handleMonsterDeath(data.monsterId);
-                    return; // Don't apply damage from dead monsters
+                // Very high damage most likely came from boss monster like TYPHON
+                if (data.damage >= 80) {
+                    console.log(`High damage attack (${data.damage}) from ${data.monsterType} detected!`);
                 }
                 
-                // Extra logging for debugging
-                console.log(`Monster ${data.monsterId} damage accepted, current monster state: isAlive=${monster.isAlive}, health=${monster.health}`);
-            }
-            
-            // Check if player is in temple safe zone - no damage in temple
-            if (this.game.environmentManager && 
-                this.game.environmentManager.isInTempleSafeZone && 
-                targetPlayer.position && 
-                this.game.environmentManager.isInTempleSafeZone(targetPlayer.position)) {
-                console.log('Player in temple safe zone - ignoring monster damage');
-                return; // Don't apply damage when in temple
-            }
-            
-            // Create visual damage effect
-            if (this.game.localPlayer && this.socket.id === data.targetId) {
-                // Flash the screen red for player damage
-                this.game.uiManager.flashDamageEffect();
-                
-                // Show damage number
-                if (this.game.skillsManager) {
-                    this.game.skillsManager.createDamageNumber(
-                        this.game.localPlayer, 
-                        data.damage, 
-                        true // Mark as received damage
-                    );
+                // Log monster state if available
+                if (monster) {
+                    console.log(`Monster ${data.monsterId} damage accepted, current monster state: isAlive=${monster.userData.isAlive}, health=${monster.userData.health}`);
                 }
                 
-                // Show notification for significant damage
-                if (data.damage > 20) {
-                    this.game.uiManager.showNotification(
-                        `You received ${data.damage} damage from a monster!`, 
-                        '#ff3333'
-                    );
-                }
-                
-                // Update local player stats
+                // If player has stats, update their health
                 if (this.game.playerStats) {
-                    // Apply damage to local stats
-                    this.game.playerStats.currentLife = data.health;
-                    this.game.playerStats.maxLife = data.maxHealth;
+                    // Get current health and apply damage
+                    const currentHealth = this.game.playerStats.currentLife;
+                    const newHealth = Math.max(0, currentHealth - data.damage);
                     
-                    // Update UI
-                    this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    // Update player health locally
+                    this.game.playerStats.currentLife = newHealth;
+                    
+                    // Check if player died from this damage
+                    if (newHealth <= 0) {
+                        // Mark player as dead
+                        this.playerDead = true;
+                        
+                        // Increment death counter
+                        this.game.playerStats.deaths = (this.game.playerStats.deaths || 0) + 1;
+                        console.log(`Player died from monster damage, death count: ${this.game.playerStats.deaths}`);
+                        
+                        // Store death in local storage for persistence
+                        try {
+                            localStorage.setItem('playerDeaths', this.game.playerStats.deaths.toString());
+                            console.log(`Updated stored death count: ${this.game.playerStats.deaths}`);
+                        } catch (e) {
+                            console.warn('Could not update localStorage death count', e);
+                        }
+                        
+                        // Request MVP update to ensure death is counted on server
+                        this.requestMVPDataWithSecurity('monster_death', true);
+                        
+                        // Show notification
+                        if (this.game.uiManager) {
+                            this.game.uiManager.showNotification(`You were killed by ${data.monsterType || 'a monster'}!`, '#ff0000');
+                            this.game.uiManager.showDeathScreen();
+                        }
+                        
+                        // Handle player death
+                        this.handlePlayerDeath();
+                    }
+                    
+                    // Update UI with new health value
+                    if (this.game.uiManager) {
+                        this.game.uiManager.updateStatusBars(this.game.playerStats);
+                    }
                 }
                 
-                // Play hit sound
-                if (this.game.soundManager) {
-                    this.game.soundManager.playSound('player_hit');
+                // Apply visual damage effect
+                if (this.game.localPlayer) {
+                    // Create damage particle/text effect
+                    this.visualizeDamage(data.damage);
+                    
+                    // Flash screen to indicate damage
+                    if (this.game.uiManager) {
+                        this.game.uiManager.flashDamageEffect();
+                    }
                 }
+            } else {
+                // Damage was to another player
+                console.log(`Monster ${data.monsterId} damaged player ${data.targetId} for ${data.damage}`);
             }
         });
         
@@ -2326,6 +2530,25 @@ export class NetworkManager {
     handlePlayerDeath() {
         console.log('Local player has died');
         
+        // Get player ID
+        const playerId = this.socket?.id;
+        if (!playerId) {
+            console.error('Cannot handle player death: No valid player ID');
+            return;
+        }
+        
+        // Mark player as dead immediately
+        this.playerDead = true;
+        
+        // Update local death count for immediate UI feedback
+        if (this.game.playerStats) {
+            this.game.playerStats.deaths = (this.game.playerStats.deaths || 0) + 1;
+            console.log(`Updated local death count: ${this.game.playerStats.deaths}`);
+        }
+        
+        // Request MVP update to ensure death is counted
+        this.requestMVPDataWithSecurity('death', true);
+        
         // Use existing death handling if available
         if (this.game.handlePlayerDeath) {
             this.game.handlePlayerDeath();
@@ -2357,30 +2580,7 @@ export class NetworkManager {
             respawnButton.style.margin = '20px auto';
             respawnButton.style.padding = '10px 20px';
             respawnButton.style.fontSize = '18px';
-            respawnButton.onclick = () => {
-                // Request respawn from server
-                this.socket.emit('respawn');
-                
-                // Remove death screen
-                const deathScreen = document.getElementById('death-screen');
-                if (deathScreen) {
-                    document.body.removeChild(deathScreen);
-                }
-                
-                // Reset player state
-                this.playerDead = false;
-                
-                // Restore player stats
-                if (this.game.playerStats) {
-                    // Update player health
-                    this.game.playerStats.currentLife = 100;
-                }
-                
-                // Update UI
-                if (this.game.uiManager) {
-                    this.game.uiManager.updateStatusBars();
-                }
-            };
+            respawnButton.onclick = () => this.requestRespawn();
             deathMessage.appendChild(respawnButton);
             deathMessage.textContent = 'YOU DIED';
         }
@@ -2389,6 +2589,78 @@ export class NetworkManager {
         if (this.game.controlsManager && this.game.controlsManager.disableControls) {
             this.game.controlsManager.disableControls();
         }
+    }
+
+    requestRespawn() {
+        if (!this.socket) {
+            console.error('Cannot request respawn: No socket connection');
+            return;
+        }
+        
+        console.log('Requesting respawn from server');
+        this.socket.emit('respawn', { 
+            playerId: this.socket.id,
+            timestamp: Date.now() // Add timestamp for server validation
+        });
+        
+        // Request updated MVP data to show current death count
+        // Use a short delay to allow server to process the respawn first
+        this.requestMVPDataWithSecurity('respawn_request');
+    }
+
+    /**
+     * Request MVP data with security measures to prevent abuse
+     * @param {string} event - The event type triggering this request
+     * @param {boolean} forceUpdate - Whether to force an update even if recently requested
+     */
+    requestMVPDataWithSecurity(event = 'manual', forceUpdate = false) {
+        if (!this.socket) {
+            console.error('Cannot request MVP data: No socket connection');
+            return;
+        }
+        
+        // Rate limiting logic
+        const now = Date.now();
+        if (!this.lastMVPRequest) {
+            this.lastMVPRequest = { timestamp: 0, count: 0 };
+        }
+        
+        // Allow at most 5 requests per minute unless forced
+        const timeSinceLastRequest = now - this.lastMVPRequest.timestamp;
+        const requestTooFrequent = timeSinceLastRequest < 12000; // 12 seconds between requests
+        const tooManyRequests = this.lastMVPRequest.count > 5 && timeSinceLastRequest < 60000;
+        
+        if ((requestTooFrequent || tooManyRequests) && !forceUpdate) {
+            console.log(`MVP data request ignored (rate limited): last request ${timeSinceLastRequest}ms ago`);
+            return;
+        }
+        
+        // Update rate limiting counters
+        if (timeSinceLastRequest > 60000) {
+            this.lastMVPRequest.count = 1;
+        } else {
+            this.lastMVPRequest.count++;
+        }
+        this.lastMVPRequest.timestamp = now;
+        
+        // Generate a request nonce for security (prevents replay attacks)
+        const nonce = Math.random().toString(36).substring(2, 15);
+        
+        // Add security hash
+        const securityToken = `${this.socket.id}_${now}_${nonce}`;
+        
+        console.log(`Requesting MVP data (event: ${event})`);
+        setTimeout(() => {
+            this.socket.emit('request_mvp_data', {
+                playerId: this.socket.id,
+                requestFull: true,
+                event: event,
+                forceUpdate: forceUpdate,
+                timestamp: now,
+                nonce: nonce,
+                securityToken: securityToken
+            });
+        }, 300);
     }
 
     initialize() {
@@ -3262,5 +3534,63 @@ export class NetworkManager {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Request full stat synchronization from server
+     * Important for maintaining server authority
+     */
+    syncStatsFromServer() {
+        if (!this.socket || !this.socket.connected) {
+            console.error('Cannot sync stats: No socket connection');
+            return;
+        }
+        
+        console.log('Requesting full server stats synchronization');
+        this.socket.emit('request_full_sync', {
+            playerId: this.socket.id,
+            timestamp: Date.now(),
+            clientVersion: '1.0' // For version compatibility checks
+        });
+        
+        // Request MVP data with a delay to ensure we have player data first
+        setTimeout(() => {
+            this.requestMVPDataWithSecurity('initial_sync', true);
+        }, 1000);
+    }
+
+    /**
+     * Creates visual damage effect
+     * @param {number} amount - The amount of damage to display
+     * @param {boolean} isCritical - Whether this is a critical hit
+     */
+    visualizeDamage(amount, isCritical = false) {
+        // Create damage number text
+        if (this.game.skillsManager) {
+            this.game.skillsManager.createDamageNumber(
+                this.game.localPlayer, 
+                amount, 
+                true, // Mark as received damage
+                isCritical
+            );
+        }
+        
+        // Play hit sound
+        if (this.game.soundManager) {
+            this.game.soundManager.playSound('player_hit');
+        }
+        
+        // Show notification for significant damage
+        if (amount >= 50 && this.game.uiManager) {
+            this.game.uiManager.showNotification(
+                `Massive hit! ${amount} damage!`, 
+                '#ff0000' // Bright red for high damage
+            );
+        } else if (amount > 20 && this.game.uiManager) {
+            this.game.uiManager.showNotification(
+                `You received ${amount} damage!`, 
+                '#ff3333'
+            );
+        }
     }
 }
