@@ -15,6 +15,15 @@ export class MonsterManager {
         
         // Initialize monsters with their positions and types
         this.initializeMonsters();
+        
+        // Set desired monster counts
+        this.desiredMonsterCounts = {
+            'BASIC': 20,  // Always maintain 20 basic monsters
+            'TYPHON': 1   // Always maintain 1 Typhon boss
+        };
+        
+        // Set last check time for maintaining monster counts
+        this.lastMonsterCountCheck = Date.now();
     }
     
     /**
@@ -272,36 +281,66 @@ export class MonsterManager {
             });
         }
         
-        // Save original spawn position for reference
-        const originalPosition = { ...monster.position };
+        // Save death position for respawn
+        const deathPosition = { ...monster.position };
         
-        // Define water edge positions for respawning - keeping monsters away from temple
-        const safeSpawnPositions = [
-            // North region
-            { x: 0, y: 0, z: 60 },    // Restored original value
-            { x: 20, y: 0, z: 55 },   // Restored original value
-            { x: -20, y: 0, z: 55 },  // Restored original value
-            
-            // East region
-            { x: 60, y: 0, z: 0 },    // Restored original value
-            { x: 55, y: 0, z: 20 },   // Restored original value
-            { x: 55, y: 0, z: -20 },  // Restored original value
-            
-            // South region
-            { x: 0, y: 0, z: -60 },   // Restored original value
-            { x: 20, y: 0, z: -55 },  // Restored original value
-            { x: -20, y: 0, z: -55 }, // Restored original value
-            
-            // West region
-            { x: -60, y: 0, z: 0 },   // Restored original value
-            { x: -55, y: 0, z: 20 },  // Restored original value
-            { x: -55, y: 0, z: -20 }  // Restored original value
-        ];
+        // IMMEDIATE RESPAWN: Spawn a new monster immediately to maintain monster count
+        // This ensures there are always 20 monsters plus the boss available for players
+        let immediatePosition;
         
-        // Schedule respawn with a random position from the safe positions
-        const respawnTime = 30000; // Reduced from 60 seconds to 30 seconds for better gameplay
+        if (monster.type === 'TYPHON') {
+            // For Typhon, always respawn at its configured position 
+            immediatePosition = { ...GameConstants.MONSTER.TYPHON.SPAWN_POSITION };
+            // Apply a small random offset to avoid potential issues
+            immediatePosition.x += (Math.random() * 5) - 2.5; // ±2.5 units 
+            immediatePosition.z += (Math.random() * 5) - 2.5; // ±2.5 units
+        } else {
+            // For regular monsters, spawn near the death position
+            // Add a small random offset (5-10 units) to avoid stacking and camping
+            const randomOffsetX = (Math.random() * 10) - 5; // ±5 units
+            const randomOffsetZ = (Math.random() * 10) - 5; // ±5 units
+            
+            // Calculate the respawn position near death location
+            immediatePosition = {
+                x: deathPosition.x + randomOffsetX,
+                y: 0,
+                z: deathPosition.z + randomOffsetZ
+            };
+            
+            // Ensure the position is not in the temple
+            if (this.isInTemple(immediatePosition)) {
+                // If somehow in temple, move it a bit further out
+                const distanceFromCenter = Math.sqrt(immediatePosition.x * immediatePosition.x + immediatePosition.z * immediatePosition.z);
+                if (distanceFromCenter < 30) {
+                    // Scale the position outward
+                    const scale = 40 / distanceFromCenter;
+                    immediatePosition.x *= scale;
+                    immediatePosition.z *= scale;
+                } else {
+                    // Use the death position but move it away from temple
+                    const angle = Math.atan2(deathPosition.x, deathPosition.z);
+                    immediatePosition.x = Math.cos(angle) * 45;
+                    immediatePosition.z = Math.sin(angle) * 45;
+                }
+            }
+            
+            // Check if spawn position is too far from map boundaries
+            const MAX_MAP_COORD = 85; // Maximum coordinate for map boundaries
+            if (Math.abs(immediatePosition.x) > MAX_MAP_COORD || Math.abs(immediatePosition.z) > MAX_MAP_COORD) {
+                // If too far, move it back within map boundaries
+                if (Math.abs(immediatePosition.x) > MAX_MAP_COORD) {
+                    immediatePosition.x = Math.sign(immediatePosition.x) * MAX_MAP_COORD;
+                }
+                if (Math.abs(immediatePosition.z) > MAX_MAP_COORD) {
+                    immediatePosition.z = Math.sign(immediatePosition.z) * MAX_MAP_COORD;
+                }
+            }
+        }
         
-        console.log(`Monster ${monsterId} will be removed and a new one created in ${respawnTime / 1000} seconds`);
+        // Set respawn timer to 10 seconds (instead of immediately spawning)
+        const respawnTime = 10000; // 10 seconds
+        
+        console.log(`Monster ${monsterId} will respawn in 10 seconds near position: x=${immediatePosition.x.toFixed(2)}, z=${immediatePosition.z.toFixed(2)}`);
         
         // Clear any existing respawn timer
         if (this.respawnTimers.has(monsterId)) {
@@ -313,87 +352,16 @@ export class MonsterManager {
             // Remove the old monster completely
             this.monsters.delete(monsterId);
             
-            // For Typhon, always respawn at its configured position
-            let finalPosition;
-            if (monster.type === 'TYPHON') {
-                finalPosition = { ...GameConstants.MONSTER.TYPHON.SPAWN_POSITION };
-                // Apply a small random offset to avoid potential issues
-                finalPosition.x += (Math.random() * 5) - 2.5; // ±2.5 units 
-                finalPosition.z += (Math.random() * 5) - 2.5; // ±2.5 units
-            } else {
-                // For regular monsters, use the existing random position logic
-                // Choose a random position from safe positions
-                const randomIndex = Math.floor(Math.random() * safeSpawnPositions.length);
-                const newPosition = safeSpawnPositions[randomIndex];
-                
-                // Create randomness around the chosen position to avoid monsters stacking
-                const randomOffset = {
-                    x: (Math.random() * 6) - 3, // ±3 units 
-                    z: (Math.random() * 6) - 3  // ±3 units
-                };
-                
-                // Calculate the final position
-                finalPosition = {
-                    x: newPosition.x + randomOffset.x,
-                    y: 0,
-                    z: newPosition.z + randomOffset.z
-                };
-            }
+            // Create new monster with same type at the calculated position
+            const newMonster = this.spawnMonsterAtPosition(monster.type, immediatePosition);
             
-            // Double-check that the position is not in the temple
-            if (this.isInTemple(finalPosition)) {
-                // If somehow in temple, move it further away
-                const distanceFromCenter = Math.sqrt(finalPosition.x * finalPosition.x + finalPosition.z * finalPosition.z);
-                if (distanceFromCenter < 30) {
-                    // Scale the position outward
-                    const scale = 40 / distanceFromCenter;
-                    finalPosition.x *= scale;
-                    finalPosition.z *= scale;
-                } else {
-                    // Use a completely random position as fallback
-                    const randomPos = this.getRandomSpawnPosition();
-                    finalPosition.x = randomPos.x;
-                    finalPosition.z = randomPos.z;
-                }
-            }
-            
-            // Create an entirely new monster with a new ID
-            const newMonsterId = `monster-${this.generateUUID()}`;
-            
-            // Create new monster with same type but at new position
-            const newMonster = {
-                id: newMonsterId,
-                type: monster.type,
-                isAlive: true,
-                health: GameConstants.MONSTER[monster.type].MAX_HEALTH,
-                maxHealth: GameConstants.MONSTER[monster.type].MAX_HEALTH,
-                position: finalPosition,
-                spawnPosition: finalPosition, // Set new spawn position for return-to-spawn behavior
-                rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 },
-                targetPlayerId: null,
-                isReturningToSpawn: false,
-                isAttacking: false,
-                lastAttackTime: 0,
-                lastMoveTime: Date.now(),
-                wanderAngle: Math.random() * Math.PI * 2,
-                wanderTimer: 0,
-                wanderInterval: 2000 + Math.random() * 3000,
-                // Add health regeneration properties
-                lastCombatTime: 0
-            };
-            
-            // Add the new monster to our collection
-            this.monsters.set(newMonsterId, newMonster);
-            
-            console.log(`New monster ${newMonsterId} created at position: x=${finalPosition.x.toFixed(2)}, z=${finalPosition.z.toFixed(2)}`);
-            
-            // Notify all clients about the new monster
-            if (this.gameManager && this.gameManager.io) {
+            // Notify clients about the new monster
+            if (this.gameManager && this.gameManager.io && newMonster) {
                 this.gameManager.io.emit('monster_respawn', {
                     monster: {
-                        id: newMonsterId, // Note this is a new ID
+                        id: newMonster.id,
                         type: newMonster.type,
-                        position: finalPosition,
+                        position: newMonster.position,
                         health: newMonster.health,
                         maxHealth: newMonster.maxHealth,
                         isAlive: true
@@ -558,6 +526,14 @@ export class MonsterManager {
     update(playerManager) {
         const players = playerManager.getAllPlayers();
         const currentTime = Date.now();
+        
+        // Ensure we maintain the desired monster count
+        this.maintainMonsterCount();
+        
+        // Skip if no players online
+        if (players.length === 0) {
+            return;
+        }
         
         // Update each monster
         this.monsters.forEach(monster => {
@@ -1335,6 +1311,126 @@ export class MonsterManager {
         if (playersInRange.length > 0) {
             monster.targetPlayerId = playersInRange[0].playerId;
             console.log(`Monster ${monster.id} targeting player ${monster.targetPlayerId} at distance ${playersInRange[0].distance.toFixed(2)}`);
+        }
+    }
+
+    /**
+     * Ensures the server maintains the desired number of monsters at all times
+     * This function checks monster counts and spawns new ones if needed
+     */
+    maintainMonsterCount() {
+        // Only check every 10 seconds to avoid performance issues
+        const currentTime = Date.now();
+        if (currentTime - this.lastMonsterCountCheck < 10000) {
+            return;
+        }
+        
+        this.lastMonsterCountCheck = currentTime;
+        
+        // Count current alive monsters by type
+        const monsterCounts = {};
+        
+        // Initialize counts for all monster types
+        Object.keys(this.desiredMonsterCounts).forEach(type => {
+            monsterCounts[type] = 0;
+        });
+        
+        // Count alive monsters
+        this.monsters.forEach(monster => {
+            // Only count monsters that are alive
+            if (monster.isAlive) {
+                monsterCounts[monster.type] = (monsterCounts[monster.type] || 0) + 1;
+            }
+        });
+        
+        // Count monsters scheduled to respawn
+        const pendingRespawnCounts = {};
+        
+        // Initialize pending counts for all monster types
+        Object.keys(this.desiredMonsterCounts).forEach(type => {
+            pendingRespawnCounts[type] = 0;
+        });
+        
+        // Go through respawn timers and count by monster type
+        this.monsters.forEach((monster, monsterId) => {
+            // If monster is dead but has a respawn timer, count it as "pending"
+            if (!monster.isAlive && this.respawnTimers.has(monsterId)) {
+                pendingRespawnCounts[monster.type] = (pendingRespawnCounts[monster.type] || 0) + 1;
+            }
+        });
+        
+        // Check if we need to spawn additional monsters to meet desired counts
+        for (const [monsterType, desiredCount] of Object.entries(this.desiredMonsterCounts)) {
+            const currentCount = monsterCounts[monsterType] || 0;
+            const pendingCount = pendingRespawnCounts[monsterType] || 0;
+            const totalExpectedCount = currentCount + pendingCount;
+            
+            if (totalExpectedCount < desiredCount) {
+                const deficit = desiredCount - totalExpectedCount;
+                console.log(`Monster count for ${monsterType} is below target: ${currentCount}/${desiredCount} (${pendingCount} pending respawn). Spawning ${deficit} additional monsters.`);
+                
+                // Spawn the needed monsters
+                for (let i = 0; i < deficit; i++) {
+                    // For Typhon, use its specific spawn position
+                    if (monsterType === 'TYPHON') {
+                        const typhonPosition = { ...GameConstants.MONSTER.TYPHON.SPAWN_POSITION };
+                        // Apply a small random offset to avoid potential issues
+                        typhonPosition.x += (Math.random() * 5) - 2.5; // ±2.5 units 
+                        typhonPosition.z += (Math.random() * 5) - 2.5; // ±2.5 units
+                        this.spawnMonsterAtPosition('TYPHON', typhonPosition);
+                    } else {
+                        // For regular monsters, find a good spawn position
+                        // Use the original spawn positions from initializeMonsters
+                        const spawnPositions = [
+                            // North quadrant
+                            { x: 0, y: 0, z: 55 },
+                            { x: 20, y: 0, z: 50 },
+                            { x: -20, y: 0, z: 50 },
+                            { x: 35, y: 0, z: 45 },
+                            { x: -35, y: 0, z: 45 },
+                            
+                            // East quadrant
+                            { x: 55, y: 0, z: 0 },
+                            { x: 50, y: 0, z: 20 },
+                            { x: 50, y: 0, z: -20 },
+                            { x: 45, y: 0, z: 35 },
+                            { x: 45, y: 0, z: -35 },
+                            
+                            // South quadrant
+                            { x: 0, y: 0, z: -55 },
+                            { x: 20, y: 0, z: -50 },
+                            { x: -20, y: 0, z: -50 },
+                            { x: 35, y: 0, z: -45 },
+                            { x: -35, y: 0, z: -45 },
+                            
+                            // West quadrant
+                            { x: -55, y: 0, z: 0 },
+                            { x: -50, y: 0, z: 20 },
+                            { x: -50, y: 0, z: -20 },
+                            { x: -45, y: 0, z: 35 },
+                            { x: -45, y: 0, z: -35 }
+                        ];
+                        
+                        // Choose a random position from the predefined spawn positions
+                        const randomIndex = Math.floor(Math.random() * spawnPositions.length);
+                        const spawnPosition = spawnPositions[randomIndex];
+                        
+                        // Add some randomness to avoid stacking
+                        const randomOffset = {
+                            x: (Math.random() * 6) - 3, // ±3 units 
+                            z: (Math.random() * 6) - 3  // ±3 units
+                        };
+                        
+                        const finalPosition = {
+                            x: spawnPosition.x + randomOffset.x,
+                            y: 0,
+                            z: spawnPosition.z + randomOffset.z
+                        };
+                        
+                        this.spawnMonsterAtPosition('BASIC', finalPosition);
+                    }
+                }
+            }
         }
     }
 }
