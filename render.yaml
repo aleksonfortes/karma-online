@@ -42,7 +42,7 @@ services:
   - name: karma-server
     type: web
     env: node
-    buildCommand: npm config set registry https://registry.npmjs.org/ && npm config set always-auth false && npm install
+    buildCommand: npm config set registry https://registry.npmjs.org/ && npm install
     startCommand: npm run start
     domains:
       - api.karmaonline.io

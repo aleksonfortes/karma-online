@@ -4,7 +4,6 @@ set -e
 # Set npm to use the public registry
 echo "Ensuring we use the public npm registry..."
 npm config set registry https://registry.npmjs.org/
-npm config set always-auth false
 npm config list
 
 # Display node and npm versions
