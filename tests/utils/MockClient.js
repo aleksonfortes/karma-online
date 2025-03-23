@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
+import { jest } from '@jest/globals';
 
 /**
  * Creates a mock client for testing with TestableNetworkManager
@@ -89,16 +90,111 @@ export function createMockClient(networkManager, options = {}) {
         throw new Error('Cannot emit when not connected');
       }
       
-      // Handle specific events
+      // Handle specific events based on what TestableNetworkManager supports
       switch (event) {
-        case 'playerMove':
+        case 'playerMovement':
           networkManager.simulatePlayerMovement(socketId, data);
           break;
         case 'playerHealth':
-          networkManager.simulateHealthUpdate(socketId, data);
+          if (networkManager.simulateHealthUpdate) {
+            networkManager.simulateHealthUpdate(socketId, data);
+          }
           break;
-        case 'playerAttack':
-          networkManager.simulateDamage(socketId, data);
+        case 'attack_monster':
+          // Create proper damage data structure for monster attacks
+          if (networkManager.simulateDamage) {
+            const damageData = {
+              attackType: 'monster',
+              monsterId: data.monsterId,
+              damage: data.damage || 10,
+              skillId: data.skillName // Convert skillName to skillId for consistency
+            };
+            
+            // Validate skill if the method exists
+            let isValidSkill = true;
+            if (networkManager.gameManager && networkManager.gameManager.validateSkillUse) {
+              try {
+                isValidSkill = networkManager.gameManager.validateSkillUse(socketId, damageData.skillId);
+              } catch (err) {
+                isValidSkill = false;
+                console.log(`Skill validation error: ${err.message}`);
+              }
+            }
+            
+            // Only process if skill is valid
+            if (isValidSkill) {
+              networkManager.simulateDamage(socketId, damageData);
+            }
+          }
+          break;
+        case 'attack':
+        case 'attack_player':
+          // Create proper damage data structure for PVP attacks
+          if (networkManager.simulateDamage) {
+            const damageData = {
+              attackType: 'pvp',
+              targetId: data.targetId,
+              damage: data.damage || 10,
+              skillId: data.skillId
+            };
+            networkManager.simulateDamage(socketId, damageData);
+          }
+          break;
+        case 'useSkill':
+          // Handle skill usage with appropriate damage data
+          if (networkManager.simulateDamage) {
+            const damageData = {
+              attackType: data.targetType === 'player' ? 'pvp' : 
+                         (data.targetType === 'monster' ? 'monster' : 'skill'),
+              skillId: data.skillId || 'test_skill_1',
+              targetId: data.targetId,
+              monsterId: data.monsterId,
+              damage: data.damage || 15
+            };
+            
+            // First validate skill use - only proceed if validation passes
+            let isValidSkill = true;
+            if (networkManager.gameManager && networkManager.gameManager.validateSkillUse) {
+              try {
+                isValidSkill = networkManager.gameManager.validateSkillUse(socketId, damageData.skillId);
+              } catch (err) {
+                isValidSkill = false;
+                console.log(`Skill validation error: ${err.message}`);
+              }
+            }
+            
+            // Only process damage if the skill is valid
+            if (isValidSkill) {
+              networkManager.simulateDamage(socketId, damageData);
+            }
+          }
+          break;
+        case 'npcInteraction':
+          if (networkManager.simulateNpcInteraction) {
+            networkManager.simulateNpcInteraction(data, socketId);
+          }
+          break;
+        case 'choosePath':
+          if (networkManager.gameManager && networkManager.gameManager.processPathChoice) {
+            // Get the player to check if they already have a path
+            const player = networkManager.playerManager.getPlayer(socketId);
+            
+            // Only process path choice if player doesn't already have a path
+            if (!player || !player.stats || !player.stats.path) {
+              networkManager.gameManager.processPathChoice(socketId, data.path);
+              
+              // Broadcast skill update if available
+              const updatedPlayer = networkManager.playerManager.getPlayer(socketId);
+              if (updatedPlayer && updatedPlayer.stats && updatedPlayer.stats.skills) {
+                networkManager.broadcastToAll('skillUpdate', {
+                  id: socketId,
+                  skills: updatedPlayer.stats.skills
+                });
+              }
+            } else {
+              console.log(`Player ${socketId} already has path ${player.stats.path}, cannot change to ${data.path}`);
+            }
+          }
           break;
         default:
           console.log(`Unhandled event '${event}' with data:`, data);

@@ -129,23 +129,23 @@ export class KarmaManager {
     }
     
     updateKarmaPath() {
-        // Update karma path based on current level
+        // Don't automatically update the path based on karma level anymore
+        // Only change path when explicitly chosen by player through choosePath()
+        
+        // The path shouldn't change automatically based on karma
+        // Keep the karma visual effects but don't modify the actual path
+        
+        // Only update effects
         const karma = this.game.playerStats.currentKarma;
         const maxKarma = this.game.playerStats.maxKarma;
-        const previousPath = this.game.playerStats.path;
         
-        if (karma > maxKarma * 0.7) {
-            this.game.playerStats.path = "dark";
-        } else if (karma < maxKarma * 0.3) {
-            this.game.playerStats.path = "light";
-        } else {
-            this.game.playerStats.path = null;
-        }
-        
-        // If path changed, trigger effects
-        if (previousPath !== this.game.playerStats.path) {
+        // Show threshold effect if extreme karma is reached, but don't change path
+        if ((karma > maxKarma * 0.7 && this.lastLoggedKarma <= maxKarma * 0.7) ||
+            (karma < maxKarma * 0.3 && this.lastLoggedKarma >= maxKarma * 0.3)) {
             this.onKarmaThresholdCrossed();
         }
+        
+        this.lastLoggedKarma = karma;
     }
     
     updateKarmaEffects() {
@@ -513,20 +513,34 @@ export class KarmaManager {
                     console.error('Failed to add martial_arts skill');
                     this.game.activeSkills.add('martial_arts');
                 }
+                
+                // Ensure skill has proper slot value
+                if (this.game.skillsManager.skills.martial_arts) {
+                    this.game.skillsManager.skills.martial_arts.slot = 1;
+                }
             } else if (path === 'dark') {
                 // Add dark path skills
-                this.game.skillsManager.addSkill('dark_strike');
+                this.game.skillsManager.addSkill('dark_ball');
                 
                 // Validate that the skill was added
-                if (!this.game.activeSkills.has('dark_strike')) {
-                    console.error('Failed to add dark_strike skill');
-                    this.game.activeSkills.add('dark_strike');
+                if (!this.game.activeSkills.has('dark_ball')) {
+                    console.error('Failed to add dark_ball skill');
+                    this.game.activeSkills.add('dark_ball');
+                }
+                
+                // Ensure skill has proper slot value
+                if (this.game.skillsManager.skills.dark_ball) {
+                    this.game.skillsManager.skills.dark_ball.slot = 1;
                 }
             }
             
             // Update UI
             if (this.game.uiManager) {
-                this.game.uiManager.updateSkillBar();
+                try {
+                    this.game.uiManager.updateSkillBar();
+                } catch (error) {
+                    console.error('Error updating skill bar:', error);
+                }
             }
         }
         

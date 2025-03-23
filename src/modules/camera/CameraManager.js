@@ -80,4 +80,62 @@ export class CameraManager {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
     }
+
+    /**
+     * Immediately resets the camera position to follow the player
+     * Used when player teleports or respawns
+     */
+    resetCamera() {
+        if (!this.game.localPlayer) {
+            console.error('Reset camera failed: local player not found');
+            return;
+        }
+        
+        console.log('===== CAMERA RESET =====');
+        
+        // Get current player position
+        const playerPosition = this.game.localPlayer.position.clone();
+        console.log(`Player position: ${JSON.stringify({
+            x: playerPosition.x.toFixed(2),
+            y: playerPosition.y.toFixed(2),
+            z: playerPosition.z.toFixed(2)
+        })}`);
+        
+        // Get current camera position before reset
+        const oldCameraPos = {
+            x: this.camera.position.x.toFixed(2),
+            y: this.camera.position.y.toFixed(2),
+            z: this.camera.position.z.toFixed(2)
+        };
+        console.log(`Camera position before reset: ${JSON.stringify(oldCameraPos)}`);
+        
+        // Move the camera directly behind the player
+        // Use the player's current rotation to position the camera properly
+        const playerRotation = this.game.localPlayer.rotation.y;
+        const distance = this.currentZoom;
+        
+        // Calculate camera position behind player based on player's rotation
+        this.camera.position.x = playerPosition.x - Math.sin(playerRotation) * distance;
+        this.camera.position.z = playerPosition.z - Math.cos(playerRotation) * distance;
+        this.camera.position.y = playerPosition.y + this.cameraOffset.y;
+        
+        // Look at player - focus on player head for better visibility
+        const lookAtPosition = playerPosition.clone();
+        lookAtPosition.y += 1.5; // Look at player head level
+        this.camera.lookAt(lookAtPosition);
+        
+        // Log new camera position
+        const newCameraPos = {
+            x: this.camera.position.x.toFixed(2),
+            y: this.camera.position.y.toFixed(2),
+            z: this.camera.position.z.toFixed(2)
+        };
+        console.log(`Camera position after reset: ${JSON.stringify(newCameraPos)}`);
+        
+        // Force camera update
+        this.camera.updateProjectionMatrix();
+        this.camera.updateMatrixWorld();
+        
+        console.log('===== CAMERA RESET COMPLETE =====');
+    }
 }

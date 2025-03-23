@@ -42,8 +42,8 @@ export class PlayerManager {
                 console.log('Character model preloaded and cached');
             }
             
-            // Only create local player if it doesn't already exist and we're not in offline mode
-            if (!this.game.localPlayer && this.game.networkManager && !this.game.networkManager.isOfflineMode) {
+            // Create local player if it doesn't already exist
+            if (!this.game.localPlayer && this.game.networkManager) {
                 console.log('PlayerManager: Creating local player');
                 // Let NetworkManager handle local player creation to ensure proper synchronization
                 // The actual player will be created when receiving server position
@@ -213,9 +213,40 @@ export class PlayerManager {
     }
     
     async createPlayer(id, position = null, rotation = { y: 0 }, isLocal = false) {
+        // Check if player already exists
         if (this.players.has(id)) {
-            console.warn(`Player with ID ${id} already exists.`);
-            return this.players.get(id);
+            console.warn(`Player with ID ${id} already exists. Not creating a duplicate.`);
+            
+            // Return the existing player
+            const existingPlayer = this.players.get(id);
+            
+            // If we're requesting a local player but the existing one isn't marked as local,
+            // we might want to update that flag
+            if (isLocal && existingPlayer.userData && !existingPlayer.userData.isLocal) {
+                console.log(`Updating existing player ${id} to mark as local`);
+                existingPlayer.userData.isLocal = true;
+            }
+            
+            // Update position if specified and significantly different from current position
+            if (position) {
+                const distance = Math.sqrt(
+                    Math.pow(existingPlayer.position.x - position.x, 2) + 
+                    Math.pow(existingPlayer.position.z - position.z, 2)
+                );
+                
+                // Only update if position differs by more than 1 unit
+                if (distance > 1) {
+                    console.log(`Updating existing player ${id} position: [${existingPlayer.position.x.toFixed(2)}, ${existingPlayer.position.z.toFixed(2)}] -> [${position.x.toFixed(2)}, ${position.z.toFixed(2)}]`);
+                    existingPlayer.position.set(position.x, position.y, position.z);
+                }
+            }
+            
+            // Update rotation if needed
+            if (rotation && Math.abs(existingPlayer.rotation.y - rotation.y) > 0.1) {
+                existingPlayer.rotation.y = rotation.y;
+            }
+            
+            return existingPlayer;
         }
         
         // Use default position if none provided
@@ -225,10 +256,18 @@ export class PlayerManager {
         
         const player = await this.createPlayerMesh(id, position, rotation);
         if (player) {
+            // Set isLocal flag in userData
+            if (!player.userData) player.userData = {};
+            player.userData.isLocal = isLocal;
+            
+            // Store the player ID in userData for reference
+            player.userData.playerId = id;
+            
             this.players.set(id, player);
             this.game.scene.add(player);
             if (isLocal) {
                 this.game.localPlayer = player;
+                console.log(`Set local player to ${id}`);
             }
             
             // Create a health bar for the player
@@ -254,10 +293,24 @@ export class PlayerManager {
             playerMesh.position.set(position.x, position.y, position.z);
             playerMesh.rotation.y = rotation.y;
             
+            // Get player name from localStorage for local player
+            const isLocalPlayer = id === this.game.networkManager?.socket?.id;
+            let displayName;
+            
+            if (isLocalPlayer) {
+                // For local player, use name from localStorage
+                displayName = localStorage.getItem('playerName') || `Player-${id.substring(0, 5)}`;
+                console.log(`Setting local player displayName: ${displayName}`);
+            } else {
+                // For network players, this will be updated later from server data
+                displayName = `Player-${id.substring(0, 5)}`;
+            }
+            
             // Set player metadata
             playerMesh.userData = {
                 id: id,
-                isLocal: false,
+                isLocal: isLocalPlayer,
+                displayName: displayName,
                 stats: {
                     life: 100,
                     maxLife: 100,
@@ -581,38 +634,10 @@ export class PlayerManager {
                     healthBarSprite.material.visible = true;
                     healthBarSprite.visible = true;
                 }
-                
-                // CRITICAL FIX: Lock the health value to prevent oscillation
-                // This ensures that once we've updated to a value, we don't update again for a short period
-                if (!player.userData.healthLocked) {
-                    player.userData.healthLocked = true;
-                    
-                    // Unlock after a delay to allow for new legitimate updates
-                    setTimeout(() => {
-                        player.userData.healthLocked = false;
-                    }, 1000); // 1 second lock to prevent oscillation
-                } else {
-                    // If we're locked, don't update the visual
-                    return;
-                }
             } else {
                 // No significant change, so don't update the visual
                 return;
             }
-        }
-        
-        // CRITICAL FIX: Check for final health update flag
-        // If this player has a final health update, use the server values directly
-        if (player.userData.finalHealthUpdate && player.userData.serverLife !== undefined) {
-            // Use server values directly for final updates
-            const serverLife = player.userData.serverLife;
-            const serverMaxLife = player.userData.serverMaxLife || 100;
-            
-            // Recalculate health percentage using server values
-            healthPercent = Math.max(0, Math.min(1, serverLife / serverMaxLife));
-            
-            // Log this special case
-            console.log(`Using final health update for player ${player.userData.playerId}: ${Math.round(healthPercent * 100)}%`);
         }
         
         // Clear the canvas
@@ -624,7 +649,11 @@ export class PlayerManager {
         
         // Always use red for health bar to match original design
         context.fillStyle = '#ff0000';
+        
+        // Calculate health width - ensure it's a whole number of pixels for clean rendering
         const healthWidth = Math.floor(canvas.width * healthPercent);
+        
+        // Draw the health bar from left to right (linear decrease)
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
@@ -719,90 +748,102 @@ export class PlayerManager {
     handlePlayerDeath(player) {
         if (!player) return;
         
+        console.log(`==== PLAYER DEATH HANDLING ====`);
         console.log(`Handling death for player: ${player.userData.id || 'unknown'}`);
         
-        // Visual changes for dead player
-        player.traverse((child) => {
-            if (child.isMesh && child.material) {
-                child.material.transparent = true;
-                child.material.opacity = 0.5;
-            }
-        });
+        // Save original player position for debugging
+        const deathPosition = {
+            x: player.position.x,
+            y: player.position.y,
+            z: player.position.z
+        };
+        console.log(`Player death position: ${JSON.stringify(deathPosition)}`);
         
-        // If this is the local player, show death UI
+        // Mark player as dead immediately to prevent further interaction
+        player.userData.isDead = true;
+        
+        // IMPORTANT: Make player completely invisible immediately so monsters can't see/target them
+        player.visible = false;
+        console.log('Made player invisible at death location');
+        
+        // Track death count
+        if (!player.userData.deathCount) {
+            player.userData.deathCount = 0;
+        }
+        player.userData.deathCount++;
+        console.log(`Player death count increased to: ${player.userData.deathCount}`);
+        
+        // If this is the local player, show death UI and handle game state
         if (player === this.game.localPlayer) {
+            console.log('Local player died - updating game state and UI');
+            
+            // Update game state
             this.game.isAlive = false;
             
-            // Show notification
-            if (this.game.uiManager) {
-                this.game.uiManager.showNotification('You have died! Respawning in ' + (this.respawnDelay / 1000) + ' seconds...', '#ff0000');
-                
-                // Show death screen
-                if (this.game.uiManager.showDeathScreen) {
-                    this.game.uiManager.showDeathScreen();
+            // Track death in player stats if available
+            if (this.game.playerStats) {
+                if (!this.game.playerStats.deaths) {
+                    this.game.playerStats.deaths = 0;
                 }
+                this.game.playerStats.deaths++;
+                console.log(`Death count in player stats updated: ${this.game.playerStats.deaths}`);
             }
             
-            // The respawn will now be handled by the UI's countdown timer
-            // No need to set a timeout here as the UI will call respawnPlayer when ready
+            // Disable controls while dead
+            if (this.game.controlsManager && this.game.controlsManager.disableControls) {
+                this.game.controlsManager.disableControls();
+                console.log('Disabled player controls');
+            }
+            
+            // Show death notification and UI
+            if (this.game.uiManager) {
+                this.game.uiManager.showNotification('You have died! Respawning soon...', '#ff0000');
+                
+                if (this.game.uiManager.showDeathScreen) {
+                    this.game.uiManager.showDeathScreen();
+                    console.log('Showed death screen with countdown');
+                }
+            }
         }
+        console.log(`==== END PLAYER DEATH HANDLING ====`);
     }
     
     respawnPlayer(player) {
         if (!player) return;
         
-        // Reset player stats
-        if (player.userData.stats) {
-            player.userData.stats.currentLife = player.userData.stats.maxLife;
-            this.updatePlayerLife(player, player.userData.stats.currentLife, player.userData.stats.maxLife);
-        }
+        console.log(`==== PLAYER RESPAWN INITIATED ====`);
         
-        // Visual changes for respawned player
-        player.traverse((child) => {
-            if (child.isMesh && child.material) {
-                child.material.transparent = false;
-                child.material.opacity = 1.0;
-            }
-        });
+        // Current player position (should be far below ground)
+        console.log(`Player position before respawn: ${JSON.stringify({
+            x: player.position.x,
+            y: player.position.y,
+            z: player.position.z
+        })}`);
+        
+        // Keep player invisible until server confirms respawn with temple position
+        // The player will become visible only after being properly teleported to temple
+        player.visible = false;
+        console.log('Player kept invisible during respawn process');
         
         // For local player, request respawn position from server
         if (player === this.game.localPlayer) {
+            console.log('Requesting respawn from server');
             this.game.networkManager.socket.emit('requestRespawn');
             
-            // Set temporary position until server responds
-            player.position.set(
-                GameConstants.PLAYER.DEFAULT_POSITION.x,
-                GameConstants.PLAYER.DEFAULT_POSITION.y,
-                GameConstants.PLAYER.DEFAULT_POSITION.z
-            );
-        }
-        // For network players, position will be updated by server
-        
-        // Reset rotation
-        player.rotation.set(0, 0, 0);
-        
-        // If this is the local player, handle respawn UI
-        if (player === this.game.localPlayer) {
-            this.game.isAlive = true;
+            // NOTE: The NetworkManager.respawnConfirmed event handler will:
+            // 1. Teleport player to temple
+            // 2. Reset camera position
+            // 3. Make player visible at temple
+            // 4. Update UI
             
-            // Hide death screen
+            // Clear death screen UI
             if (this.game.uiManager) {
                 this.game.uiManager.hideDeathScreen();
-            }
-            
-            // Notify server
-            if (this.game.socket && this.game.socket.connected) {
-                this.game.socket.emit('playerRespawn', {
-                    id: this.game.socket.id,
-                    position: {
-                        x: player.position.x,
-                        y: player.position.y,
-                        z: player.position.z
-                    },
-                    stats: player.userData.stats
-                });
+                console.log('Hiding death screen');
             }
         }
+        
+        console.log(`==== PLAYER RESPAWN REQUEST SENT ====`);
     }
     
     checkCollision(newPosition, previousPosition) {
@@ -856,11 +897,6 @@ export class PlayerManager {
         // Get player ID for debugging
         const playerId = player.userData.healthBarPlayerId || player.userData.playerId || 'unknown';
         
-        // CRITICAL FIX: Check if we're in a locked state
-        if (player.userData.healthLocked) {
-            return;
-        }
-        
         // Only log significant changes to reduce spam
         if (player.userData.lastHealthPercent === undefined || 
             Math.abs(player.userData.lastHealthPercent - healthPercent) > 0.05) {
@@ -878,14 +914,6 @@ export class PlayerManager {
                 healthBarSprite.material.visible = true;
                 healthBarSprite.visible = true;
             }
-            
-            // CRITICAL FIX: Lock the health value to prevent oscillation
-            player.userData.healthLocked = true;
-            
-            // Unlock after a delay to allow for new legitimate updates
-            setTimeout(() => {
-                player.userData.healthLocked = false;
-            }, 2000); // 2 second lock to prevent oscillation
         } else {
             // No significant change, so don't update the visual
             return;
@@ -900,7 +928,11 @@ export class PlayerManager {
         
         // Always use red for health bar to match original design
         context.fillStyle = '#ff0000';
+        
+        // Calculate health width - ensure it's a whole number of pixels for clean rendering
         const healthWidth = Math.floor(canvas.width * healthPercent);
+        
+        // Draw the health bar from left to right (linear decrease)
         context.fillRect(0, 0, healthWidth, canvas.height);
         
         // Update the texture
@@ -959,5 +991,62 @@ export class PlayerManager {
         }
         
         return false;
+    }
+
+    /**
+     * Get the local player (the player controlled by this user)
+     * @returns {Object} The local player object
+     */
+    getLocalPlayer() {
+        // If localPlayer is already set, return it
+        if (this.localPlayer) {
+            return this.localPlayer;
+        }
+        
+        // If localPlayer is directly available in the game object, use that
+        if (this.game.localPlayer) {
+            this.localPlayer = this.game.localPlayer;
+            return this.localPlayer;
+        }
+        
+        // Otherwise, try to find it in the player collection
+        if (this.game.networkManager && this.game.networkManager.socket) {
+            const localPlayerId = this.game.networkManager.socket.id;
+            if (localPlayerId && this.players.has(localPlayerId)) {
+                this.localPlayer = this.players.get(localPlayerId);
+                return this.localPlayer;
+            }
+        }
+        
+        console.warn('Could not find local player');
+        return null;
+    }
+
+    /**
+     * Get a player by ID
+     * @param {string} id - The player's ID
+     * @returns {Object} The player object if found, or null otherwise
+     */
+    getPlayerById(id) {
+        // First check the players Map
+        const playerMesh = this.players.get(id);
+        
+        if (!playerMesh) {
+            console.log(`Player mesh not found for id: ${id}`);
+            return null;
+        }
+        
+        // Return a player object with the expected structure
+        // based on player.userData.stats which is the format expected by SkillsManager/TargetingManager
+        return {
+            id: id,
+            type: 'player',
+            mesh: playerMesh,
+            position: playerMesh.position,
+            displayName: playerMesh.userData?.displayName || `Player-${id.substring(0, 5)}`,
+            life: playerMesh.userData?.stats?.life || 100,
+            maxLife: playerMesh.userData?.stats?.maxLife || 100,
+            level: playerMesh.userData?.level || 1
+        };
     }
 }

@@ -58,20 +58,28 @@ const mockIo = {
 // Create a testable subclass of NetworkManager
 class TestableNetworkManager extends NetworkManager {
   constructor() {
-    // Create a mock HTTP server
-    const mockHttpServer = {};
-    super(mockHttpServer, mockGameManager, mockPlayerManager);
+    super({}, {});
     
-    // Replace the io instance with our mock
+    // Set up mock dependencies
+    this.playerManager = mockPlayerManager;
+    this.gameManager = mockGameManager;
+    this.sockets = new Map();
     this.io = mockIo;
     
-    // Initialize collections for tracking
+    // Version checking
+    this.requiredVersion = GameConstants.REQUIRED_CLIENT_VERSION;
+    
+    // Security
+    this.bannedIps = new Set();
+    this.maxInvalidAttempts = 5;
+    this.invalidAttempts = new Map();
     this.securityLogs = [];
     this.rateLimit = new Map();
     this.blacklistedIPs = new Set();
-    this.lastUpdateTime = new Map();
-    this.sockets = new Map();
     this.bannedPlayers = new Set();
+    
+    // Game state
+    this.serverStartTime = Date.now();
   }
   
   // Override socket initialization
@@ -84,40 +92,47 @@ class TestableNetworkManager extends NetworkManager {
     // No-op for testing
   }
   
-  // Simulate a connection with different security parameters
-  simulateConnection(socket = mockSocket) {
+  // Validate client version
+  validateClientVersion(clientVersion) {
+    return clientVersion === GameConstants.REQUIRED_CLIENT_VERSION;
+  }
+  
+  // Simulate a connection
+  simulateConnection(socket = mockSocket, validate = true) {
     // Validate the client version
     if (!this.validateClientVersion(socket.handshake.query.version)) {
       this.logSecurityEvent('Invalid client version', socket.id);
-      socket.emit('error', { message: 'Invalid client version' });
+      socket.emit('connectionRejected', { reason: 'Invalid client version' });
       socket.disconnect();
-      return false;
+      return null;
     }
     
-    // Validate the session token
-    if (!this.validateSession(socket)) {
+    // Validate session if required
+    if (validate && !this.validateSession(socket)) {
       this.logSecurityEvent('Invalid session token', socket.id);
-      socket.emit('error', { message: 'Invalid session token' });
+      socket.emit('connectionRejected', { reason: 'Invalid session' });
       socket.disconnect();
-      return false;
+      return null;
     }
     
-    // Check for banned IP
-    if (this.isIPBanned(socket)) {
+    // Check for banned player
+    if (this.bannedPlayers.has(socket.handshake.query.username)) {
+      this.logSecurityEvent('Banned player attempted connection', socket.id);
+      socket.emit('connectionRejected', { reason: 'You are banned' });
+      socket.disconnect();
+      return null;
+    }
+    
+    // Check for ban
+    if (this.bannedIps.has(socket.handshake.address)) {
       this.logSecurityEvent('Banned IP attempted connection', socket.id);
-      socket.emit('error', { message: 'You are banned' });
+      socket.emit('connectionRejected', { reason: 'IP banned' });
       socket.disconnect();
-      return false;
+      return null;
     }
     
-    // Add the player
-    const player = this.playerManager.addPlayer(socket.id, socket.handshake.query.username, { x: 0, y: 0, z: 0 });
-    
-    // Store the socket
-    this.sockets.set(socket.id, { statsInterval: null });
-    
-    // Broadcast to others
-    socket.broadcast.emit('playerJoined', player);
+    // Process the connection
+    socket.emit('connectionAccepted', { timestamp: Date.now() });
     
     return socket;
   }
@@ -151,13 +166,6 @@ class TestableNetworkManager extends NetworkManager {
       socket.handshake.query.username, 
       socket.handshake.query.sessionToken
     );
-  }
-  
-  validateClientVersion(version) {
-    if (!version) return false;
-    
-    // Simple version check for testing
-    return version === GameConstants.CLIENT_VERSION;
   }
   
   validateAction(type, data) {
@@ -353,7 +361,7 @@ describe('NetworkManager Security Tests', () => {
   
   test('should validate client versions', () => {
     // Set a constant for testing
-    GameConstants.CLIENT_VERSION = '1.0.0';
+    GameConstants.REQUIRED_CLIENT_VERSION = '1.0.0';
     
     // Valid version
     expect(networkManager.validateClientVersion('1.0.0')).toBe(true);
@@ -433,15 +441,15 @@ describe('NetworkManager Security Tests', () => {
     
     const result = networkManager.simulateConnection(invalidSocket);
     
-    expect(result).toBe(false);
-    expect(invalidSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(result).toBe(null);
+    expect(invalidSocket.emit).toHaveBeenCalledWith('connectionRejected', expect.any(Object));
     expect(invalidSocket.disconnect).toHaveBeenCalled();
     expect(networkManager.securityLogs.length).toBe(1);
   });
   
   test('should reject connection with invalid client version', () => {
     // Set a constant for testing
-    GameConstants.CLIENT_VERSION = '1.0.0';
+    GameConstants.REQUIRED_CLIENT_VERSION = '1.0.0';
     
     const invalidSocket = { 
       ...mockSocket, 
@@ -458,8 +466,8 @@ describe('NetworkManager Security Tests', () => {
     
     const result = networkManager.simulateConnection(invalidSocket);
     
-    expect(result).toBe(false);
-    expect(invalidSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(result).toBe(null);
+    expect(invalidSocket.emit).toHaveBeenCalledWith('connectionRejected', expect.any(Object));
     expect(invalidSocket.disconnect).toHaveBeenCalled();
     expect(networkManager.securityLogs.length).toBe(1);
   });
@@ -513,8 +521,8 @@ describe('NetworkManager Security Tests', () => {
     
     const result = networkManager.simulateConnection(bannedSocket);
     
-    expect(result).toBe(false);
-    expect(bannedSocket.emit).toHaveBeenCalledWith('error', expect.any(Object));
+    expect(result).toBe(null);
+    expect(bannedSocket.emit).toHaveBeenCalledWith('connectionRejected', expect.any(Object));
     expect(bannedSocket.disconnect).toHaveBeenCalled();
     expect(networkManager.securityLogs.length).toBe(1);
   });

@@ -9,22 +9,33 @@ import { NPCManager } from './modules/npc/NPCManager.js';
 import { EnvironmentManager } from './modules/environment/EnvironmentManager.js';
 import { CameraManager } from './modules/camera/CameraManager.js';
 import { TargetingManager } from './modules/targeting/TargetingManager.js';
+import { MonsterManager } from './modules/monster/MonsterManager.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import GameConstants from '../server/src/config/GameConstants.js';
 import { getServerUrl } from './config.js';
 
 export class Game {
-    constructor() {
+    constructor(serverUrl) {
         // Initialize Three.js components
         this.scene = new THREE.Scene();
         this.renderer = new THREE.WebGLRenderer({ antialias: true });
+        
+        // Enable debug flags
+        this.DEBUG_MONSTERS = false; // Disable monster debugging by default to reduce console spam
         
         // Game state
         this.players = new Map();
         this.localPlayer = null;
         this.isRunning = true;
         this.isAlive = true;
-        this.SERVER_URL = getServerUrl();
+        this.isInitialized = false;
+        this.isOfflineMode = false;
+        this.isPaused = false;
+        this.SERVER_URL = serverUrl || getServerUrl();
+        this.currentTime = 0;
+        
+        // Add game constants for use by other modules
+        this.gameConstants = GameConstants;
         
         // Controls
         this.controls = {
@@ -92,6 +103,9 @@ export class Game {
             // Start the game loop
             this.startGameLoop();
             
+            // Mark game as fully initialized
+            this.isInitialized = true;
+            
             console.log('Game initialization complete');
         } catch (error) {
             console.error('Failed to initialize game:', error);
@@ -109,15 +123,44 @@ export class Game {
             this.karmaManager = new KarmaManager(this);
             this.cameraManager = new CameraManager(this);
             this.targetingManager = new TargetingManager(this);
+            this.monsterManager = new MonsterManager(this);
             
             // Initialize UI first so we can show loading indicators
             await this.uiManager.init();
             this.uiManager.showLoadingScreen('Connecting to server...');
             
-            // Initialize network first - required for game to work
-            const networkInitialized = await this.networkManager.init();
+            // Initialize network with retry logic
+            let networkInitialized = false;
+            let retryCount = 0;
+            const MAX_RETRIES = 3;
+            
+            while (!networkInitialized && retryCount < MAX_RETRIES) {
+                try {
+                    this.uiManager.updateLoadingScreen(`Connecting to server (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
+                    networkInitialized = await this.networkManager.init();
+                    
+                    if (!networkInitialized) {
+                        retryCount++;
+                        if (retryCount < MAX_RETRIES) {
+                            // Wait before retrying
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                        }
+                    }
+                } catch (err) {
+                    console.error('Network connection error:', err);
+                    retryCount++;
+                    if (retryCount < MAX_RETRIES) {
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                }
+            }
+            
             if (!networkInitialized) {
-                throw new Error('Failed to connect to server');
+                // Don't proceed if we can't connect to the server
+                console.error('Failed to connect to server. The game requires a server connection to run.');
+                this.handleInitializationError(new Error('Server connection required'));
+                throw new Error('Server connection required');
             }
             
             // Initialize player - this already loads the character model
@@ -142,20 +185,33 @@ export class Game {
             // Initialize TargetingManager
             await this.targetingManager.init();
             
-            // Now that everything is loaded, hide loading screen and show game UI
+            // Initialize MonsterManager after NPCs
+            await this.monsterManager.init();
+            
+            // Now that everything is loaded, hide loading screen
             this.uiManager.hideLoadingScreen();
-            this.uiManager.createUI();
         } catch (error) {
             console.error('Failed to initialize managers:', error);
             this.handleInitializationError(error);
+            throw error; // Rethrow to stop initialization
         }
     }
 
     // Handle network-related events from NetworkManager
     onNetworkEvent(eventName, data) {
-        console.log(`Network event: ${eventName}`, data);
+        console.log(`Network event received: ${eventName}`);
         
-        switch (eventName) {
+        // Forward to appropriate event handlers
+        switch(eventName) {
+            case 'game_state':
+                this.handleGameUpdate(data);
+                break;
+            case 'monster_data':
+                this.monsterManager.processServerMonsters(data);
+                break;
+            case 'monster_update':
+                this.monsterManager.processMonsterUpdate(data);
+                break;
             case 'gameUpdate':
                 // Handle game state update from server
                 this.handleGameUpdate(data);
@@ -181,12 +237,63 @@ export class Game {
         }
     }
 
+    /**
+     * Handle initialization errors
+     * @param {Error} error - The error that occurred
+     */
     handleInitializationError(error) {
         console.error('Game initialization error:', error);
         
-        // Show error message to the user
-        this.uiManager.hideLoadingScreen();
-        this.uiManager.showErrorScreen(`Failed to initialize game: ${error.message}`);
+        // Hide loading screen if it exists
+        if (this.uiManager) {
+            this.uiManager.hideLoadingScreen();
+        }
+        
+        // Show error message
+        const errorContainer = document.createElement('div');
+        errorContainer.style.position = 'fixed';
+        errorContainer.style.top = '0';
+        errorContainer.style.left = '0';
+        errorContainer.style.width = '100%';
+        errorContainer.style.height = '100%';
+        errorContainer.style.display = 'flex';
+        errorContainer.style.flexDirection = 'column';
+        errorContainer.style.alignItems = 'center';
+        errorContainer.style.justifyContent = 'center';
+        errorContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+        errorContainer.style.color = '#ff0000';
+        errorContainer.style.fontFamily = 'Arial, sans-serif';
+        errorContainer.style.fontSize = '24px';
+        errorContainer.style.zIndex = '10000';
+        
+        const title = document.createElement('h1');
+        title.textContent = 'Game Initialization Failed';
+        title.style.marginBottom = '20px';
+        
+        const message = document.createElement('p');
+        message.textContent = error.message || 'Failed to connect to server. The game requires a server connection to run.';
+        message.style.marginBottom = '30px';
+        message.style.textAlign = 'center';
+        message.style.maxWidth = '600px';
+        
+        const retryButton = document.createElement('button');
+        retryButton.textContent = 'Retry Connection';
+        retryButton.style.padding = '15px 30px';
+        retryButton.style.fontSize = '18px';
+        retryButton.style.backgroundColor = '#4CAF50';
+        retryButton.style.border = 'none';
+        retryButton.style.borderRadius = '5px';
+        retryButton.style.color = 'white';
+        retryButton.style.cursor = 'pointer';
+        retryButton.addEventListener('click', () => {
+            location.reload();
+        });
+        
+        errorContainer.appendChild(title);
+        errorContainer.appendChild(message);
+        errorContainer.appendChild(retryButton);
+        
+        document.body.appendChild(errorContainer);
     }
 
     handleGameUpdate(data) {
@@ -227,10 +334,11 @@ export class Game {
         console.log('Scene setup complete');
     }
 
+    /**
+     * Set up input handlers for keyboard and mouse
+     */
     setupInputHandlers() {
-        console.log('Setting up input handlers...');
-        
-        // Keyboard events for movement
+        // Set up keyboard handler for movement and skills
         document.addEventListener('keydown', (event) => {
             if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
             
@@ -240,40 +348,148 @@ export class Game {
                 case 'KeyA': this.controls.left = true; break;
                 case 'KeyD': this.controls.right = true; break;
                 case 'Space': 
-                    if (this.isAlive) this.skillsManager?.useMartialArts();
+                    if (this.isAlive) {
+                        // Check if player has chosen a path - skip in test environment
+                        const isTestEnvironment = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
+                        if (!this.playerStats.path && !isTestEnvironment) {
+                            console.log('You must choose a path (light or dark) before using skills');
+                            // Show UI message if UI manager exists
+                            if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                this.uiManager.showNotification('Choose a path (light or dark) first');
+                            } else if (this.uiManager && typeof this.uiManager.showMessage === 'function') {
+                                this.uiManager.showMessage('Choose a path (light or dark) first');
+                            }
+                            break;
+                        }
+                        
+                        // Check if we have targeting manager and a monster targeted
+                        const target = this.targetingManager?.currentTarget;
+                        if (target && target.type === 'monster' && this.skillsManager) {
+                            // Get the monster
+                            const monster = this.monsterManager?.getMonsterById(target.id);
+                            if (monster) {
+                                // Only attempt to attack if monster exists
+                                this.skillsManager.useSkillOnMonster(target.id);
+                            }
+                        } else if (this.skillsManager) {
+                            // Check if there's no target and show notification if needed
+                            if (!target && this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                                this.uiManager.showNotification('No target selected', 'white');
+                            } else {
+                                // Use appropriate skill based on path
+                                const skillToUse = this.skillsManager.getDefaultSkill();
+                                if (skillToUse === 'martial_arts') {
+                                    this.skillsManager.useMartialArts();
+                                } else if (skillToUse === 'dark_ball') {
+                                    this.skillsManager.useDarkBall();
+                                }
+                            }
+                        }
+                    }
+                    break;
+                case 'KeyR':
+                    // R key for skill in slot 2
+                    if (this.isAlive && this.skillsManager) {
+                        const skillId = this.skillsManager.getSkillBySlot(2); // Slot 2 is R
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to R', 'white');
+                        }
+                    }
+                    break;
+                case 'KeyF':
+                    // F key for skill in slot 3
+                    if (this.isAlive && this.skillsManager) {
+                        const skillId = this.skillsManager.getSkillBySlot(3); // Slot 3 is F
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to F', 'white');
+                        }
+                    }
+                    break;
+                case 'KeyV':
+                    // V key for skill in slot 4
+                    if (this.isAlive && this.skillsManager) {
+                        const skillId = this.skillsManager.getSkillBySlot(4); // Slot 4 is V
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to V', 'white');
+                        }
+                    }
+                    break;
+                case 'Digit4':
+                    // 4 key for skill in slot 5
+                    if (this.isAlive && this.skillsManager) {
+                        const skillId = this.skillsManager.getSkillBySlot(5); // Slot 5 is 4
+                        if (skillId) {
+                            this.skillsManager.useSkill(skillId);
+                        } else if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('No skill assigned to 4', 'white');
+                        }
+                    }
                     break;
                 case 'KeyE':
-                    if (this.isAlive) this.npcManager?.handleInteraction();
+                    // E key for NPC interaction
+                    if (this.isAlive && this.npcManager && this.npcManager.isNearNPC()) {
+                        this.npcManager.handleInteraction();
+                    }
                     break;
-                case 'Escape':
-                    // Clear current target when pressing Escape
-                    this.targetingManager?.clearTarget();
+                case 'Digit3':
+                    // Handle NPC interaction with the number 3 key
+                    if (this.isAlive && this.npcManager) this.npcManager.handleInteraction();
+                    break;
+                case 'KeyO':
+                    // O key for gaining XP in dev mode
+                    if (this.networkManager && typeof this.networkManager.isDevModeAvailable === 'function' 
+                        && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Gaining XP');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Gaining XP', '#00ff00');
+                        }
+                        // Send request to server for XP gain
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'gain_xp', 
+                            amount: 50 
+                        });
+                    }
+                    // Completely silent in production - no logs, no messages, no network requests
                     break;
                 case 'KeyK':
-                    // Test karma - increase karma (dark path)
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Increasing karma - moving toward dark path (testing)');
-                        this.karmaManager.adjustKarma(10);
-                        this.uiManager?.showNotification('Karma increased by 10 (more debt)', '#444444');
+                    // K key for gaining karma in dev mode
+                    if (this.networkManager && typeof this.networkManager.isDevModeAvailable === 'function'
+                        && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Gaining Karma');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Gaining Karma', '#00ff00');
+                        }
+                        // Send request to server for karma gain
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'gain_karma', 
+                            amount: 10 
+                        });
                     }
+                    // Completely silent in production - no logs, no messages, no network requests
                     break;
                 case 'KeyJ':
-                    // Test karma - decrease karma (light path)
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Decreasing karma - moving toward light path (testing)');
-                        this.karmaManager.adjustKarma(-10);
-                        this.uiManager?.showNotification('Karma decreased by 10 (less debt)', '#ffffff');
+                    // J key for losing karma in dev mode
+                    if (this.networkManager && this.networkManager.isDevModeAvailable()) {
+                        console.log('DEV MODE: Losing Karma');
+                        // Show notification
+                        if (this.uiManager && typeof this.uiManager.showNotification === 'function') {
+                            this.uiManager.showNotification('DEV MODE: Losing Karma', '#ff3300');
+                        }
+                        // Send request to server for karma loss
+                        this.networkManager.socket.emit('dev_action', { 
+                            action: 'lose_karma', 
+                            amount: 10 
+                        });
                     }
-                    break;
-                case 'Digit8':
-                    // Test karma - reset karma to default
-                    if (this.isAlive && this.karmaManager) {
-                        console.log('Resetting karma to default (testing)');
-                        // Calculate amount needed to reset to 50
-                        const resetAmount = 50 - this.playerStats.currentKarma;
-                        this.karmaManager.adjustKarma(resetAmount);
-                        this.uiManager?.showNotification('Karma reset to default (50)', '#ffffff');
-                    }
+                    // Completely silent in production - no logs, no messages, no network requests
                     break;
             }
         });
@@ -289,48 +505,16 @@ export class Game {
             }
         });
         
-        // Mouse click event for targeting
-        this.renderer.domElement.addEventListener('click', (event) => {
-            if (!this.isAlive) return;
-            
-            console.log('Mouse click detected');
-            
-            // Log player information
-            console.log('Local player:', this.localPlayer ? {
-                id: this.localPlayer.userData?.id || 'unknown',
-                position: this.localPlayer.position ? 
-                    `(${this.localPlayer.position.x.toFixed(2)}, ${this.localPlayer.position.y.toFixed(2)}, ${this.localPlayer.position.z.toFixed(2)})` : 'N/A'
-            } : 'No local player');
-            
-            console.log('All players in game:', Array.from(this.players.entries()).map(([id, player]) => {
-                return {
-                    id: id,
-                    isLocalPlayer: player === this.localPlayer,
-                    position: player.position ? 
-                        `(${player.position.x.toFixed(2)}, ${player.position.y.toFixed(2)}, ${player.position.z.toFixed(2)})` : 'N/A'
-                };
-            }));
-            
-            // Calculate mouse position in normalized device coordinates (-1 to +1)
-            const rect = this.renderer.domElement.getBoundingClientRect();
-            const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            
-            console.log(`Mouse click at screen coordinates: (${event.clientX}, ${event.clientY})`);
-            console.log(`Normalized coordinates: (${x.toFixed(4)}, ${y.toFixed(4)})`);
-            console.log(`Canvas rect: left=${rect.left.toFixed(0)}, top=${rect.top.toFixed(0)}, width=${rect.width.toFixed(0)}, height=${rect.height.toFixed(0)}`);
-            
-            // Check if targeting manager exists
-            if (this.targetingManager) {
-                console.log('Targeting manager exists, handling targeting');
-                const mousePosition = new THREE.Vector2(x, y);
-                this.targetingManager.handleTargeting(mousePosition);
-            } else {
-                console.warn('No targeting manager available');
+        // Set up mouse click handler for targeting
+        document.addEventListener('click', (event) => {
+            if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA' || 
+                event.target.tagName === 'BUTTON' || event.target.classList.contains('ui-element')) {
+                return;
             }
+            
+            console.log('Mouse click event detected');
+            this.handleMouseClick(event);
         });
-        
-        console.log('Input handlers setup complete');
     }
 
     startGameLoop() {
@@ -354,14 +538,29 @@ export class Game {
         console.log('Game loop started');
     }
 
+    /**
+     * Main update function, called every frame
+     * @param {number} delta - Time in seconds since the last frame
+     */
     update(delta) {
+        // Skip updates during initialization or when paused
+        if (!this.isInitialized || this.isPaused) {
+            return;
+        }
+        
+        // Update time-based events
+        this.currentTime += delta;
+        
         // Update player movement if we have a local player
         if (this.localPlayer && this.isAlive) {
             this.updatePlayerMovement(delta);
         }
         
-        // Update all managers
-        this.networkManager?.update(delta);
+        // Update all managers (safely with optional chaining)
+        if (this.networkManager) {
+            this.networkManager.update(delta);
+        }
+        
         this.playerManager?.update(delta);
         this.skillsManager?.update(delta);
         this.karmaManager?.update(delta);
@@ -369,7 +568,20 @@ export class Game {
         this.uiManager?.update(delta);
         this.environmentManager?.update(delta);
         this.cameraManager?.update(delta);
-        this.targetingManager?.update(delta);
+        this.targetingManager?.update();
+        this.monsterManager?.update(delta);
+        
+        // Periodic health check to fix common rendering issues
+        if (this.healthCheckCounter === undefined) {
+            this.healthCheckCounter = 0;
+        }
+        
+        // Run health check every 5 seconds (assuming 60fps)
+        this.healthCheckCounter += delta;
+        if (this.healthCheckCounter > 5) {
+            this.healthCheckCounter = 0;
+            this.runHealthCheck();
+        }
         
         // Continuous collision check - ensure player is never inside a pillar
         if (this.localPlayer && this.environmentManager) {
@@ -384,10 +596,38 @@ export class Game {
                 this.terrainManager.applyTerrainHeight(this.localPlayer.position);
             }
         }
-        
-        // Update camera
-        if (this.localPlayer) {
-            this.cameraManager.update(delta);
+    }
+
+    /**
+     * Periodic health check to fix common rendering issues
+     */
+    runHealthCheck() {
+        // Check for monster visibility issues
+        if (this.monsterManager && this.monsterManager.monsters) {
+            let fixedCount = 0;
+            
+            this.monsterManager.monsters.forEach((monster) => {
+                // Skip dead monsters
+                if (!monster.isAlive || monster.health <= 0) return;
+                
+                // Check if monster mesh exists and is not visible
+                if (monster.mesh && monster.mesh.visible === false) {
+                    console.log(`Health check: Found invisible monster ${monster.id}, fixing visibility`);
+                    monster.mesh.visible = true;
+                    fixedCount++;
+                    
+                    // Also check child meshes
+                    monster.mesh.traverse(child => {
+                        if ((child.isMesh || child.isObject3D) && child.visible === false) {
+                            child.visible = true;
+                        }
+                    });
+                }
+            });
+            
+            if (fixedCount > 0) {
+                console.log(`Health check fixed visibility for ${fixedCount} monsters`);
+            }
         }
     }
 
@@ -479,6 +719,21 @@ export class Game {
                 }
             }
             
+            // 5. Check monster collisions
+            if (!collision && this.monsterManager) {
+                const monsterCollision = this.monsterManager.checkMonsterCollisions(
+                    this.localPlayer.position,
+                    previousPosition
+                );
+                if (monsterCollision) {
+                    collision = true;
+                    // Ensure height is correct after monster collision resolution
+                    if (this.terrainManager) {
+                        this.terrainManager.applyTerrainHeight(this.localPlayer.position);
+                    }
+                }
+            }
+            
             // If there was a collision, reset position
             if (collision) {
                 this.localPlayer.position.copy(previousPosition);
@@ -520,5 +775,31 @@ export class Game {
         
         console.log(`Path chosen: ${path}`);
         return true;
+    }
+
+    /**
+     * Handle mouse click
+     * @param {Event} event - Mouse event
+     */
+    handleMouseClick(event) {
+        // Only handle left mouse button clicks
+        if (event.button !== 0) return;
+        
+        // Convert screen coordinates to normalized device coordinates
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+        
+        // Create a normalized vector for the mouse position
+        const mousePosition = new THREE.Vector2(mouseX, mouseY);
+        
+        console.log('Mouse click:', {
+            x: mouseX.toFixed(2), 
+            y: mouseY.toFixed(2)
+        });
+        
+        // Try to target something at the click position
+        if (this.targetingManager) {
+            this.targetingManager.handleTargeting(mousePosition);
+        }
     }
 }

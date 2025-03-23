@@ -29,17 +29,33 @@ export class PlayerManager {
             path: GameConstants.PLAYER.DEFAULT_PATH,
             effects: [],
             modelScale: GameConstants.PLAYER.MODEL_SCALE,
-            displayName: `Player-${socketId.substring(0, 5)}`
+            displayName: `Player-${socketId.substring(0, 5)}`,
+            experience: 0,
+            level: 1,
+            killCount: 0,
+            deathCount: 0
         };
     }
 
     /**
      * Add a player to the manager
      * @param {string} socketId - The socket ID of the player
+     * @param {string} [playerName] - Optional custom player name
      * @returns {Object} The created player
      */
-    addPlayer(socketId) {
+    addPlayer(socketId, playerName) {
         const player = this.createPlayer(socketId);
+        
+        // Set a custom display name if provided, otherwise use default
+        if (playerName && typeof playerName === 'string') {
+            // Sanitize name and limit length
+            const sanitizedName = playerName.trim().slice(0, 20);
+            if (sanitizedName.length > 0) {
+                player.displayName = sanitizedName;
+                console.log(`Player ${socketId} set custom name: ${sanitizedName}`);
+            }
+        }
+        
         this.players.set(socketId, player);
         return player;
     }
@@ -78,13 +94,14 @@ export class PlayerManager {
         // Create a new default player
         const defaultPlayer = this.createPlayer(socketId);
         
-        // Preserve only the ID and display name
+        // Preserve ID, display name, and path
         defaultPlayer.displayName = player.displayName;
+        defaultPlayer.path = player.path; // Preserve the player's chosen path
         
         // Replace the existing player with the reset player
         this.players.set(socketId, defaultPlayer);
         
-        console.log(`Player ${socketId} has been reset to default state`);
+        console.log(`Player ${socketId} has been reset to default state (preserving path: ${defaultPlayer.path})`);
         return defaultPlayer;
     }
 
@@ -133,8 +150,8 @@ export class PlayerManager {
 
     /**
      * Handle player death
-     * @param {string} socketId - The socket ID of the player who died
-     * @param {string} killerId - The socket ID of the player who killed them (optional)
+     * @param {string} socketId - ID of the player who died
+     * @param {string} killerId - ID of the entity that killed the player (can be null)
      */
     handlePlayerDeath(socketId, killerId = null) {
         const player = this.getPlayer(socketId);
@@ -144,7 +161,28 @@ export class PlayerManager {
         player.isDead = true;
         player.life = 0;
         
-        console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''}`);
+        // Also mark as invulnerable while dead to prevent further damage
+        player.isInvulnerable = true;
+        
+        // Track death count
+        if (!player.deathCount) {
+            player.deathCount = 0;
+        }
+        player.deathCount++;
+        
+        // Track kill for the killer if it's a player
+        if (killerId) {
+            const killer = this.getPlayer(killerId);
+            if (killer) {
+                if (!killer.killCount) {
+                    killer.killCount = 0;
+                }
+                killer.killCount++;
+                console.log(`Player ${killerId} got a kill. Total kills: ${killer.killCount}`);
+            }
+        }
+        
+        console.log(`Player ${socketId} died${killerId ? ` killed by ${killerId}` : ''} (Death #${player.deathCount})`);
         
         // Schedule respawn
         setTimeout(() => {
@@ -160,14 +198,60 @@ export class PlayerManager {
         const player = this.getPlayer(socketId);
         if (!player) return;
         
+        // Store current mana before resetting
+        const currentMana = player.mana;
+        const currentMaxMana = player.maxMana;
+        
         // Reset player stats
         player.isDead = false;
         player.life = player.maxLife || GameConstants.PLAYER.DEFAULT_MAX_LIFE;
         
-        // Reset player position to spawn point
-        player.position = { ...GameConstants.PLAYER.SPAWN_POSITION };
+        // Explicitly preserve mana values
+        player.mana = currentMana;
+        player.maxMana = currentMaxMana;
         
-        console.log(`Player ${socketId} respawned`);
+        // Apply invulnerability for a few seconds after respawn to prevent spawn camping
+        player.isInvulnerable = true;
+        
+        // Reset player position to temple spawn point with exact coordinates
+        player.position = { 
+            x: GameConstants.PLAYER.SPAWN_POSITION.x,
+            y: GameConstants.PLAYER.SPAWN_POSITION.y,
+            z: GameConstants.PLAYER.SPAWN_POSITION.z
+        };
+        
+        console.log(`Player ${socketId} respawned in temple at position:`, player.position);
+        console.log(`Preserving player path during respawn: ${player.path}`);
+        console.log(`Preserving player mana during respawn: ${player.mana}/${player.maxMana}`);
+        
+        // Remove temporary invulnerability after 3 seconds
+        setTimeout(() => {
+            const updatedPlayer = this.getPlayer(socketId);
+            if (updatedPlayer) {
+                updatedPlayer.isInvulnerable = false;
+                console.log(`Player ${socketId} is no longer invulnerable after respawn`);
+            }
+        }, 3000);
+    }
+
+    /**
+     * Get player kill/death statistics
+     * @param {string} socketId - The socket ID of the player
+     * @returns {Object} Object containing kills and deaths
+     */
+    getPlayerKDRatio(socketId) {
+        const player = this.getPlayer(socketId);
+        if (!player) return { kills: 0, deaths: 0 };
+        
+        const kills = player.killCount || 0;
+        const deaths = player.deathCount || 0;
+        
+        // Return kills and deaths as separate values
+        return {
+            kills,
+            deaths,
+            ratio: deaths > 0 ? kills / deaths : kills // Calculate ratio only if needed
+        };
     }
 }
 

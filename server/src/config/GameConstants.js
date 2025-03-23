@@ -65,6 +65,68 @@ const GameConstants = {
     MOVEMENT: {
         RATE_LIMIT_MS: 100, // Minimum time between movement updates
         MAX_SPEED: 10 // Maximum units per second a player can move
+    },
+    
+    // Network synchronization settings
+    NETWORK: {
+        SYNC_INTERVAL: 10000, // 10 seconds between full game state synchronizations
+        STATS_UPDATE_INTERVAL: 500, // 500ms between player stats updates
+        RATE_LIMIT_MS: 100 // Rate limiting for player actions
+    },
+    
+    // Monster configurations
+    MONSTER: {
+        BASIC: {
+            SPAWN_POSITION: { x: 30, y: 0, z: 30 }, // Position further away from the temple area
+            SCALE: 0.8,
+            COLLISION_RADIUS: 1.0,
+            MAX_HEALTH: 100,
+            RESPAWN_TIME: 10000, // 10 seconds in milliseconds
+            MOVEMENT_SPEED: 1.5, // Units per second
+            AGGRO_RADIUS: 10,    // Detection radius in units
+            MAX_FOLLOW_DISTANCE: 30, // Maximum distance monster can be from spawn point
+            // Attack properties
+            ATTACK_DAMAGE: 10,         // Base damage per attack
+            ATTACK_RANGE: 2.0,         // Range at which monster can attack
+            ATTACK_SPEED: 2000,        // Milliseconds between attacks
+            ATTACK_ANIMATION_TIME: 500, // Milliseconds for attack animation
+            EXPERIENCE_REWARD: 50      // Experience points rewarded when killed
+        },
+        TYPHON: {
+            SPAWN_POSITION: { x: 0, y: 3, z: -80 }, // Raised y position to be above the grass
+            SCALE: 3.0, // Increased scale by 3x
+            COLLISION_RADIUS: 6.0, // Significantly increased collision radius to match the larger size
+            MAX_HEALTH: 2000, // 20x more life than Cerberus
+            RESPAWN_TIME: 30000, // 30 seconds respawn time
+            MOVEMENT_SPEED: 1.5, // Same movement speed
+            AGGRO_RADIUS: 15, // Increased aggro radius
+            MAX_FOLLOW_DISTANCE: 40, // Can follow a bit further
+            // Attack properties
+            ATTACK_DAMAGE: 100, // 10x more damage than Cerberus
+            ATTACK_RANGE: 6.0, // Significantly increased attack range to match the larger size
+            ATTACK_SPEED: 2000, // Same attack speed
+            ATTACK_ANIMATION_TIME: 500, // Same animation time
+            EXPERIENCE_REWARD: 1500, // Increased from 500 to 1500 XP
+            HEALTH_REGEN: true, // Will regenerate health when out of combat
+            HEALTH_REGEN_AMOUNT: 10, // Amount of health regained per second when out of combat
+            HEALTH_REGEN_DELAY: 5000, // 5 seconds delay before health regeneration starts
+            LEVEL: 10 // Set Typhon to level 10
+        }
+    },
+    
+    // Experience and leveling system
+    EXPERIENCE: {
+        BASE_EXPERIENCE: 100,  // Base experience needed for level 2
+        SCALING_FACTOR: 1.5,   // How much more experience each level requires
+        MAX_LEVEL: 50          // Maximum player level
+    },
+    
+    // Level-up rewards scaling
+    LEVEL_REWARDS: {
+        LIFE_PER_LEVEL: 10,       // Health points gained per level
+        MANA_PER_LEVEL: 5,        // Mana points gained per level
+        DAMAGE_BONUS_PER_LEVEL: 0.05, // 5% increased damage per level (increased from 2%)
+        DAMAGE_REDUCTION_PER_LEVEL: 0.03 // 3% reduced damage taken per level (max 30%) (increased from 2%)
     }
 };
 
