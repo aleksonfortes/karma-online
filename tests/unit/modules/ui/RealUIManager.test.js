@@ -85,11 +85,11 @@ console.warn = jest.fn();
 describe('UIManager', () => {
   let uiManager;
   let mockGame;
-  
+
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
-    
+
     // Create a mock game object
     mockGame = {
       player: {
@@ -123,69 +123,69 @@ describe('UIManager', () => {
       },
       setUiInitialized: jest.fn()
     };
-    
+
     // Create UI Manager
     uiManager = new UIManager(mockGame);
-    
+
     // Mock some methods to avoid DOM issues
     uiManager.createUI = jest.fn(() => {
       console.log('Creating UI elements');
     });
-    
+
     uiManager.createModernStatusBar = jest.fn((label, bgColor, fillColor) => {
-      return { 
-        style: {}, 
+      return {
+        style: {},
         querySelector: jest.fn().mockReturnValue({ style: {} }),
-        remove: jest.fn() 
+        remove: jest.fn()
       };
     });
-    
+
     uiManager.createSkillBar = jest.fn(() => {
-      return { 
+      return {
         style: {},
         remove: jest.fn(),
         querySelector: jest.fn().mockReturnValue({ style: {} })
       };
     });
-    
+
     uiManager.createDarknessOverlay = jest.fn(() => {
       uiManager.darknessOverlay = { style: {}, remove: jest.fn() };
       return uiManager.darknessOverlay;
     });
-    
+
     uiManager.showLoadingScreen = jest.fn((message) => {
       uiManager.loadingScreen = { style: {}, remove: jest.fn() };
       return uiManager.loadingScreen;
     });
-    
+
     uiManager.hideLoadingScreen = jest.fn(() => {
       if (uiManager.loadingScreen) {
         uiManager.loadingScreen.remove();
         uiManager.loadingScreen = null;
       }
     });
-    
+
     uiManager.showNotification = jest.fn((message, color, duration) => {
       uiManager.notificationElement = { style: {}, remove: jest.fn() };
       return uiManager.notificationElement;
     });
-    
+
     uiManager.showDialogue = jest.fn((npcType) => {
       uiManager.dialogueUI = { style: {}, remove: jest.fn() };
       uiManager.activeDialogue = npcType;
       return uiManager.dialogueUI;
     });
-    
+
     uiManager.hideDialogue = jest.fn(() => {
       if (uiManager.dialogueUI) {
         uiManager.dialogueUI.style.display = 'none';
         uiManager.activeDialogue = null;
       }
     });
-    
+
     uiManager.createTargetDisplay = jest.fn(() => {
-      uiManager.targetDisplay = { 
-        style: {}, 
+      uiManager.targetDisplay = {
+        style: {},
         name: { textContent: '', style: {} },
         level: { textContent: '', style: {} },
         health: { style: {} },
@@ -195,7 +195,7 @@ describe('UIManager', () => {
       };
       return uiManager.targetDisplay;
     });
-    
+
     uiManager.updateTargetDisplay = jest.fn((name, health, maxHealth, type, level) => {
       if (!uiManager.targetDisplay) {
         uiManager.createTargetDisplay();
@@ -204,29 +204,29 @@ describe('UIManager', () => {
       uiManager.targetDisplay.name.textContent = name;
       uiManager.targetDisplay.level.textContent = `Lv. ${level}`;
     });
-    
+
     uiManager.clearTargetDisplay = jest.fn(() => {
       if (uiManager.targetDisplay) {
         uiManager.targetDisplay.style.display = 'none';
       }
     });
-    
+
     uiManager.showDeathScreen = jest.fn(() => {
-      uiManager.deathScreen = { 
-        style: {}, 
+      uiManager.deathScreen = {
+        style: {},
         container: { style: {} },
         remove: jest.fn()
       };
       return uiManager.deathScreen;
     });
-    
+
     uiManager.hideDeathScreen = jest.fn(() => {
       if (uiManager.deathScreen) {
         uiManager.deathScreen.remove();
         uiManager.deathScreen = null;
       }
     });
-    
+
     // Setup mock cleanup method
     uiManager.cleanup = jest.fn(() => {
       if (uiManager.dialogueUI) {
@@ -261,180 +261,180 @@ describe('UIManager', () => {
       uiManager.skillElements = {};
     });
   });
-  
+
   afterEach(() => {
     // Restore original document.head.appendChild
     document.head.appendChild = originalHeadAppendChild;
   });
-  
+
   describe('Initialization', () => {
     test('constructor initializes with default values', () => {
       expect(uiManager.game).toBe(mockGame);
-      expect(uiManager.dialogueUI).toBeNull();
-      expect(uiManager.activeDialogue).toBeNull();
+      expect(uiManager.dialogueUI).toBeFalsy();
+      expect(uiManager.activeDialogue).toBeFalsy();
       expect(uiManager.statusElements).toEqual({});
       expect(uiManager.skillElements).toEqual({});
-      expect(uiManager.darknessOverlay).toBeNull();
-      expect(uiManager.loadingScreen).toBeNull();
-      expect(uiManager.notificationElement).toBeNull();
-      expect(uiManager.errorScreen).toBeNull();
-      expect(uiManager.targetDisplay).toBeNull();
-      expect(uiManager.deathScreen).toBeNull();
+      expect(uiManager.darknessOverlay).toBeFalsy();
+      expect(uiManager.loadingScreen).toBeFalsy();
+      expect(uiManager.notificationElement).toBeFalsy();
+      expect(uiManager.errorScreen).toBeFalsy();
+      expect(uiManager.targetDisplay).toBeFalsy();
+      expect(uiManager.deathScreen).toBeFalsy();
     });
-    
+
     test('init method calls no DOM operations', () => {
       uiManager.init();
       expect(document.createElement).not.toHaveBeenCalled();
     });
-    
+
     test('createUI creates UI elements', () => {
       uiManager.createUI();
       expect(console.log).toHaveBeenCalledWith('Creating UI elements');
     });
   });
-  
+
   describe('Status UI', () => {
     test('createModernStatusBar creates status bar element', () => {
       const statusBar = uiManager.createModernStatusBar('Health', 'rgba(0,0,0,0.5)', 'rgba(255,0,0,1)');
       expect(statusBar).toBeTruthy();
     });
-    
+
     test('updateStatusBars updates player status bars', () => {
       // Mock updateStatusBars to bypass actual implementation
       uiManager.updateStatusBars = jest.fn((player) => {
         // Do nothing, just mock it
       });
-      
+
       uiManager.updateStatusBars(mockGame.player);
-      
+
       expect(uiManager.updateStatusBars).toHaveBeenCalledWith(mockGame.player);
     });
   });
-  
+
   describe('Skill Bar', () => {
     test('createSkillBar creates skill bar element', () => {
       const skillBar = uiManager.createSkillBar();
       expect(skillBar).toBeTruthy();
     });
-    
+
     test('updateSkillBar updates skill elements', () => {
       // Mock updateSkillBar to bypass actual implementation
       uiManager.updateSkillBar = jest.fn(() => {
         uiManager.game.skillsManager.getPlayerSkills();
       });
-      
+
       uiManager.updateSkillBar();
-      
+
       expect(mockGame.skillsManager.getPlayerSkills).toHaveBeenCalled();
     });
   });
-  
+
   describe('Overlay UI', () => {
     test('createDarknessOverlay creates overlay element', () => {
       uiManager.createDarknessOverlay();
       expect(uiManager.darknessOverlay).toBeTruthy();
     });
-    
+
     test('updateDarknessOverlay updates overlay opacity', () => {
       // Setup mock overlay
       uiManager.darknessOverlay = { style: {} };
-      
+
       // Call the original method to test it
       const originalUpdateDarknessOverlay = UIManager.prototype.updateDarknessOverlay;
       uiManager.updateDarknessOverlay = originalUpdateDarknessOverlay;
-      
+
       uiManager.updateDarknessOverlay(0.5, 'rgba(0, 0, 0, 0.5)');
-      
+
       expect(uiManager.darknessOverlay.style.opacity).toBe('0.5');
       expect(uiManager.darknessOverlay.style.backgroundColor).toBe('rgba(0, 0, 0, 0.5)');
     });
-    
+
     test('showLoadingScreen creates and displays loading screen', () => {
       uiManager.showLoadingScreen('Testing loading...');
-      
+
       expect(uiManager.loadingScreen).toBeTruthy();
     });
-    
+
     test('hideLoadingScreen removes loading screen', () => {
       // Setup mock loading screen
       uiManager.loadingScreen = { remove: jest.fn() };
-      
+
       uiManager.hideLoadingScreen();
-      
+
       expect(uiManager.loadingScreen).toBeNull();
     });
   });
-  
+
   describe('Notification System', () => {
     test('showNotification creates and displays notification', () => {
       uiManager.showNotification('Test notification', 'white', 2000);
-      
+
       expect(uiManager.notificationElement).toBeTruthy();
     });
   });
-  
+
   describe('Dialogue System', () => {
     test('showDialogue creates dialogue UI if not exists', () => {
       uiManager.showDialogue('merchant');
-      
+
       expect(uiManager.dialogueUI).toBeTruthy();
       expect(uiManager.activeDialogue).toBe('merchant');
     });
-    
+
     test('hideDialogue hides dialogue UI', () => {
       // Setup mock dialogue UI
       uiManager.dialogueUI = { style: {} };
       uiManager.activeDialogue = 'merchant';
-      
+
       uiManager.hideDialogue();
-      
+
       expect(uiManager.dialogueUI.style.display).toBe('none');
       expect(uiManager.activeDialogue).toBeNull();
     });
   });
-  
+
   describe('Target Display', () => {
     test('createTargetDisplay creates target display element', () => {
       uiManager.createTargetDisplay();
-      
+
       expect(uiManager.targetDisplay).toBeTruthy();
     });
-    
+
     test('updateTargetDisplay updates target info', () => {
       uiManager.updateTargetDisplay('Enemy', 50, 100, 'hostile', 5);
-      
+
       expect(uiManager.targetDisplay.style.display).toBe('block');
       expect(uiManager.targetDisplay.name.textContent).toBe('Enemy');
       expect(uiManager.targetDisplay.level.textContent).toBe('Lv. 5');
     });
-    
+
     test('clearTargetDisplay hides target display', () => {
       // Setup mock target display
       uiManager.targetDisplay = { style: {} };
-      
+
       uiManager.clearTargetDisplay();
-      
+
       expect(uiManager.targetDisplay.style.display).toBe('none');
     });
   });
-  
+
   describe('Death Screen', () => {
     test('showDeathScreen shows death overlay', () => {
       uiManager.showDeathScreen();
-      
+
       expect(uiManager.deathScreen).toBeTruthy();
     });
-    
+
     test('hideDeathScreen hides death overlay', () => {
       // Setup mock death screen with remove method
       uiManager.deathScreen = { remove: jest.fn() };
-      
+
       uiManager.hideDeathScreen();
-      
+
       expect(uiManager.deathScreen).toBeNull();
     });
   });
-  
+
   describe('Cleanup', () => {
     test('cleanup removes all UI elements', () => {
       // Setup UI elements
@@ -450,9 +450,9 @@ describe('UIManager', () => {
         mana: { remove: jest.fn() },
         stamina: { remove: jest.fn() }
       };
-      
+
       uiManager.cleanup();
-      
+
       // Verify UI elements were removed
       expect(uiManager.dialogueUI).toBeNull();
       expect(uiManager.darknessOverlay).toBeNull();

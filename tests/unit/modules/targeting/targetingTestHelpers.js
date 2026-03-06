@@ -15,7 +15,7 @@ export function createMockGame() {
     remove: jest.fn(),
     children: []
   };
-  
+
   // Create mock player manager
   const mockPlayerManager = {
     players: [],
@@ -31,13 +31,18 @@ export function createMockGame() {
       mockPlayerManager.players.push(player);
     })
   };
-  
+
   // Create mock camera
   const mockCamera = {
     position: { x: 0, y: 5, z: 10 },
     lookAt: jest.fn()
   };
-  
+
+  const mockCameraManager = {
+    camera: mockCamera,
+    getCamera: jest.fn().mockReturnValue(mockCamera)
+  };
+
   // Create mock network manager with server authority methods
   const mockNetworkManager = {
     validateActionWithServer: jest.fn().mockImplementation(action => {
@@ -51,16 +56,17 @@ export function createMockGame() {
     handleServerForcedTarget: jest.fn(),
     handleServerTargetSync: jest.fn()
   };
-  
+
   // Create mock game
   const mockGame = {
     scene: mockScene,
     playerManager: mockPlayerManager,
     camera: mockCamera,
+    cameraManager: mockCameraManager,
     networkManager: mockNetworkManager,
     localPlayerId: 'local-player-id'
   };
-  
+
   return mockGame;
 }
 
@@ -71,10 +77,10 @@ export function createMockGame() {
 export const createTargetingTestSetup = () => {
   // Create mock game
   const mockGame = createMockGame();
-  
+
   // Create TargetingManager instance
   const targetingManager = new MockTargetingManager(mockGame);
-  
+
   return { mockGame, targetingManager };
 };
 

@@ -13,9 +13,11 @@ const server = createServer(app);
 // Set CORS headers to allow cross-origin requests
 app.use((req, res, next) => {
     // Allow requests from any origin during development
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    if (process.env.NODE_ENV !== 'production') {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
     next();
 });
 
@@ -32,7 +34,7 @@ app.get('/api/config', (req, res) => {
     const protocol = req.protocol;
     const host = req.get('host');
     const baseUrl = `${protocol}://${host}`;
-    
+
     res.status(200).json({
         serverUrl: baseUrl,
         environment: process.env.NODE_ENV || 'development',

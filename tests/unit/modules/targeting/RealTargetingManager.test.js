@@ -16,11 +16,11 @@ jest.mock('three', () => {
       setFromCamera: jest.fn(),
       intersectObjects: jest.fn().mockReturnValue([])
     })),
-    Vector2: jest.fn().mockImplementation((x = 0, y = 0) => ({ 
+    Vector2: jest.fn().mockImplementation((x = 0, y = 0) => ({
       x, y,
       set: jest.fn()
     })),
-    Vector3: jest.fn().mockImplementation((x = 0, y = 0, z = 0) => ({ 
+    Vector3: jest.fn().mockImplementation((x = 0, y = 0, z = 0) => ({
       x, y, z,
       copy: jest.fn().mockReturnThis(),
       set: jest.fn().mockReturnThis(),
@@ -29,7 +29,7 @@ jest.mock('three', () => {
       project: jest.fn().mockReturnThis(),
       distanceTo: jest.fn().mockReturnValue(5),
       clone: jest.fn().mockReturnThis(),
-      getWorldPosition: jest.fn().mockImplementation(function(target) {
+      getWorldPosition: jest.fn().mockImplementation(function (target) {
         if (target) {
           target.x = this.x;
           target.y = this.y;
@@ -113,18 +113,18 @@ describe('TargetingManager (Real Implementation)', () => {
   let mockGame;
   let mockPlayer;
   let mockEnemy;
-  
+
   beforeEach(() => {
     // Reset mocks
     jest.clearAllMocks();
-    
+
     // Create mock player
     mockPlayer = {
       id: 'player1',
-      mesh: { 
+      mesh: {
         position: { x: 0, y: 1, z: 0, distanceTo: jest.fn().mockReturnValue(5) },
-        userData: { 
-          type: 'player', 
+        userData: {
+          type: 'player',
           id: 'player1',
           stats: {
             life: 100,
@@ -136,14 +136,14 @@ describe('TargetingManager (Real Implementation)', () => {
         getWorldPosition: jest.fn()
       }
     };
-    
+
     // Create mock enemy
     mockEnemy = {
       id: 'enemy1',
       mesh: {
         position: { x: 5, y: 1, z: 5, distanceTo: jest.fn().mockReturnValue(5) },
-        userData: { 
-          type: 'enemy', 
+        userData: {
+          type: 'enemy',
           id: 'enemy1',
           stats: {
             life: 100,
@@ -155,7 +155,7 @@ describe('TargetingManager (Real Implementation)', () => {
         getWorldPosition: jest.fn()
       }
     };
-    
+
     // Create a mock game object
     mockGame = {
       scene: {
@@ -198,9 +198,9 @@ describe('TargetingManager (Real Implementation)', () => {
 
     // Create TargetingManager instance with the mock game
     targetingManager = new TargetingManager(mockGame);
-    
+
     // Extend the TargetingManager with additional API methods for the tests
-    targetingManager.getCurrentTarget = function() {
+    targetingManager.getCurrentTarget = function () {
       if (this.currentTarget && this.currentTarget.type === 'player') {
         return mockPlayer;
       } else if (this.currentTarget && this.currentTarget.type === 'enemy') {
@@ -208,20 +208,20 @@ describe('TargetingManager (Real Implementation)', () => {
       }
       return null;
     };
-    
-    targetingManager.hasTarget = function() {
+
+    targetingManager.hasTarget = function () {
       return this.currentTarget !== null;
     };
-    
-    targetingManager.getTargetId = function() {
+
+    targetingManager.getTargetId = function () {
       return this.currentTarget ? this.currentTarget.id : null;
     };
-    
+
     // Spy on methods that start timers to prevent memory leaks in tests
-    jest.spyOn(targetingManager, 'startTargetValidation').mockImplementation(() => {});
-    jest.spyOn(targetingManager, 'setupEscapeKeyHandler').mockImplementation(() => {});
+    jest.spyOn(targetingManager, 'startTargetValidation').mockImplementation(() => { });
+    jest.spyOn(targetingManager, 'setupEscapeKeyHandler').mockImplementation(() => { });
   });
-  
+
   afterEach(() => {
     // Clean up any open handles
     if (targetingManager.targetValidationInterval) {
@@ -244,39 +244,39 @@ describe('TargetingManager (Real Implementation)', () => {
     test('should set a player target', () => {
       // Set a player as target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Verify target was set
       expect(targetingManager.currentTarget).not.toBeNull();
       expect(targetingManager.currentTarget.id).toBe('player1');
       expect(targetingManager.currentTarget.type).toBe('player');
-      
+
       // Verify UI update was called
       expect(mockGame.uiManager.updateTargetDisplay).toHaveBeenCalled();
     });
-    
+
     test('should set an enemy target', () => {
       // Set an enemy as target
       targetingManager.setTarget(mockEnemy.mesh, 'enemy', 'enemy1');
-      
+
       // Verify target was set
       expect(targetingManager.currentTarget).not.toBeNull();
       expect(targetingManager.currentTarget.id).toBe('enemy1');
       expect(targetingManager.currentTarget.type).toBe('enemy');
-      
+
       // Verify UI update was called
       expect(mockGame.uiManager.updateTargetDisplay).toHaveBeenCalled();
     });
-    
+
     test('should clear current target', () => {
       // First set a target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Then clear it
       targetingManager.clearTarget();
-      
+
       // Verify target was cleared
       expect(targetingManager.currentTarget).toBeNull();
-      
+
       // Verify UI was cleared
       expect(mockGame.uiManager.clearTargetDisplay).toHaveBeenCalled();
     });
@@ -287,10 +287,10 @@ describe('TargetingManager (Real Implementation)', () => {
       // Set a player as target with parent to simulate being in scene
       mockPlayer.mesh.parent = mockGame.scene;
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Mock getPlayerById to return the player
       mockGame.playerManager.getPlayerById.mockReturnValue(mockPlayer);
-      
+
       // Mock the position projection for frustum check
       const projectedPosition = { x: 0, y: 0, z: 0 };
       mockPlayer.mesh.getWorldPosition.mockImplementation((target) => {
@@ -302,23 +302,23 @@ describe('TargetingManager (Real Implementation)', () => {
         }
         return target;
       });
-      
+
       // Validate the target
       targetingManager.validateCurrentTarget();
-      
+
       // Target should still be valid
       expect(targetingManager.currentTarget).not.toBeNull();
       expect(targetingManager.currentTarget.id).toBe('player1');
     });
-    
+
     test('should validate existing enemy target', () => {
       // Set an enemy as target with parent to simulate being in scene
       mockEnemy.mesh.parent = mockGame.scene;
       targetingManager.setTarget(mockEnemy.mesh, 'enemy', 'enemy1');
-      
+
       // Mock getMonsterById to return the enemy
       mockGame.npcManager.getMonsterById.mockReturnValue(mockEnemy);
-      
+
       // Mock the position projection for frustum check
       mockEnemy.mesh.getWorldPosition.mockImplementation((target) => {
         if (target) {
@@ -329,26 +329,28 @@ describe('TargetingManager (Real Implementation)', () => {
         }
         return target;
       });
-      
+
       // Validate the target
       targetingManager.validateCurrentTarget();
-      
+
       // Target should still be valid
       expect(targetingManager.currentTarget).not.toBeNull();
       expect(targetingManager.currentTarget.id).toBe('enemy1');
     });
-    
+
     test('should clear invalid player target', () => {
-      // Set a player as target with no parent to simulate not being in scene
-      mockPlayer.mesh.parent = null;
+      // Set a player as target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
+      // Make the player no longer exist in the game
+      mockGame.playerManager.getPlayerById.mockReturnValue(null);
+
       // Spy on clearTarget
       const clearTargetSpy = jest.spyOn(targetingManager, 'clearTarget');
-      
+
       // Validate the target
       targetingManager.validateCurrentTarget();
-      
+
       // Verify clearTarget was called
       expect(clearTargetSpy).toHaveBeenCalled();
     });
@@ -360,7 +362,7 @@ describe('TargetingManager (Real Implementation)', () => {
       // we'll skip this test or just verify the method exists
       expect(typeof targetingManager.updateTargetIndicator).toBe('function');
     });
-    
+
     test('should update target indicator position', () => {
       // Since updateTargetIndicator just returns and doesn't do anything in the current implementation,
       // we'll just verify it can be called without errors
@@ -368,37 +370,37 @@ describe('TargetingManager (Real Implementation)', () => {
       // No assertions needed - if no error is thrown, the test passes
     });
   });
-  
+
   describe('Targeting System', () => {
     test('should get current target', () => {
       // Set a target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Get current target
       const target = targetingManager.getCurrentTarget();
-      
+
       // Verify correct target is returned
       expect(target).toBe(mockPlayer);
     });
-    
+
     test('should check if has target', () => {
       // Initially should have no target
       expect(targetingManager.hasTarget()).toBe(false);
-      
+
       // Set a target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Now should have a target
       expect(targetingManager.hasTarget()).toBe(true);
     });
-    
+
     test('should get target ID', () => {
       // Set a target
       targetingManager.setTarget(mockPlayer.mesh, 'player', 'player1');
-      
+
       // Get target ID
       const targetId = targetingManager.getTargetId();
-      
+
       // Verify correct ID is returned
       expect(targetId).toBe('player1');
     });
